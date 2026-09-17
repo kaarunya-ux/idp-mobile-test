@@ -7,3 +7,34 @@ home/
 # OS/editor cruft
 .DS_Store
 *.swp
+
+# Gradle/Android build output + Kotlin build scripts
+.gradle/
+build/
+.cxx/
+.externalNativeBuild/
+captures/
+local.properties
+*.iml
+*.kts
+
+# llama.cpp build artifacts (source stays tracked)
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+*.o
+*.so
+*.a
+
+# Model weights
+*.gguf
+*.bin
+*.onnx
+*.tflite
+*.pt
+*.pth
+*.safetensors
+*.ggml
+
+# Test data
+test_images/
