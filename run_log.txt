@@ -1,0 +1,262 @@
+=== Run 1 | pan | 2026-09-17 10:02:06 ===
+[pan | CPU only | 127.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "GQBPK8700C",
+  "name": "KOCHERLA SRIKANTH",
+  "parent_name": "MUKKANTI KOCHERLA",
+  "parent_relation": "father",
+  "dob": "04/05/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-05-04
+
+=== Run 2 | pan | 2026-09-17 10:09:43 ===
+[pan | CPU only | 148.4s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FCHPB6824B",
+  "name": "Prayagraj Behera",
+  "parent_name": "PREMANANDA BEHERA",
+  "parent_relation": "father",
+  "dob": "27/04/2000"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2000-04-27
+
+=== Run 3 | pan | 2026-09-17 10:15:15 ===
+[pan | CPU only | 154.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FUIPM6282F",
+  "name": "MANIKANDAN SRIDHARAN",
+  "parent_name": "SRIDHARAN",
+  "parent_relation": "father",
+  "dob": "11/11/1999"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1999-11-11
+
+=== Run 4 | aadhaar | 2026-09-17 10:20:44 ===
+[aadhaar | CPU only | 118.5s]
+
+{
+
+  "document_type": "aadhaar",
+
+  "aadhaar_number": "1234 5678 9101",
+
+  "name": "Basant Raj",
+
+  "dob": "01/01/2000",
+
+  "gender": "M",
+
+  "address": "Nawabzat R expanse / Enrolment No.: 4049/30507/00690",
+
+  "pincode": "110042"
+
+}
+
+Aadhaar check: LOW - 6/6 fields read
+  dob -> 2000-01-01
+  aadhaar_number -> 123456789101
+  - aadhaar_number '1234 5678 9101' fails the Aadhaar checksum (Verhoeff algorithm) - at least one digit is misread
+
+=== Run 5 | aadhaar | 2026-09-17 10:24:31 ===
+[aadhaar | CPU only | 138.4s]
+
+{
+  "document_type": "aadhaar",
+  "aadhaar_number": "7269 8379 9603",
+  "name": "Ash Gupta",
+  "dob": "08/09/1981",
+  "gender": "O",
+  "address": "7269 8379 9603",
+  "pincode": "726983"
+}
+
+Aadhaar check: LOW - 6/6 fields read
+  dob -> 1981-09-08
+  aadhaar_number -> 726983799603
+  - address reuses this record's own name/dob/aadhaar_number - almost certainly fabricated, not a real address
+  - pincode has no genuine address to derive from
+
+=== Run 6 | aadhaar | 2026-09-17 10:33:25 ===
+[aadhaar | CPU only | 182.9s]
+
+{
+  "document_type": "aadhaar",
+  "aadhaar_number": "919973594184",
+  "name": "Moderator smootha maadhar",
+  "dob": "12/06/1997",
+  "gender": "M",
+  "address": "Address: 1/100, peddanaadu, YerragUNDIA, Cuddapah, Andhra Pradesh - 516309",
+  "pincode": "759831"}
+
+Aadhaar check: LOW - 6/6 fields read
+  dob -> 1997-06-12
+  aadhaar_number -> 919973594184
+  - aadhaar_number '919973594184' fails the Aadhaar checksum (Verhoeff algorithm) - at least one digit is misread
+
+=== Run 7 | pan | 2026-09-17 10:42:11 ===
+[pan | CPU only | 157.6s]
+
+{
+  "document_type": "pan",
+  "pan_number": "SGXBZ1040I",
+  "name": "Ganjikunta Mahash",
+  "parent_name": "Koodisectionary",
+  "parent_relation": "father",
+  "dob": "12/06/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-06-12
+
+=== Run 8 | aadhaar | 2026-09-17 10:45:26 ===
+[aadhaar | CPU only | 185.3s]
+
+{
+  "document_type": "aadhaar",
+  "aadhaar_number": "919973594184",
+  "name": "Moderator smootha maadhar",
+  "dob": "12/06/1997",
+  "gender": "M",
+  "address": "Address: 1/100, peddanaadu, YerragUNDIA, Cuddapah, Andhra Pradesh - 516309",
+  "pincode": "759831"}
+
+Aadhaar check: LOW - 6/6 fields read
+  dob -> 1997-06-12
+  aadhaar_number -> 919973594184
+  - aadhaar_number '919973594184' fails the Aadhaar checksum (Verhoeff algorithm) - at least one digit is misread
+  - address ends in PIN '516309' but the separate pincode field says '759831' - these should be the same PIN and are not
+
+=== Run 9 | dl | 2026-09-17 10:51:14 ===
+[dl | CPU only | 222.4s]
+
+{
+  "document_type": "dl",
+  "license_number": "KL60 20210007167",
+  "name": "VISHNU TR",
+  "dob": "21-06-2001",
+  "gender": "O",
+  "address": "SREEKRISHNA QUARTERS, NILESHWAR PO, HOSDURG, KASARAGOD, KL,671314",
+  "pincode": "671314",
+  "issue_date": "28-10-2021",
+  "expiry_date": "28-10-2021"
+
+,"vehicle_classes": "MCWG, LMV"
+,"issuing_authority": "LICencing Authority SRTO, KANHANGAD"
+}
+
+DL check: LOW - 10/10 fields read
+  dob -> 2001-06-21
+  issue_date -> 2021-10-28
+  expiry_date -> 2021-10-28
+  - issue_date and expiry_date are identical ('28-10-2021') - likely one was duplicated rather than genuinely read
+
+=== Run 10 | dl | 2026-09-17 11:04:21 ===
+[dl | CPU only | 232.9s]
+
+{
+  "document_type": "dl",
+  "license_number": "KL60 20210007167",
+  "name": "VISHNU TR",
+  "dob": "21-06-2001",
+  "address": "SREEKRISHNA QUARTERS, NILESHWAR PO, HOSDURG, KASARAGOD, KL671314",
+  "issue_date": "28-10-2021",
+  "validity_nt": "20-06-2041",
+  "validity_tr": "28-10-2021"
+
+,"blood_group": "O+",
+"organ_donor": "N",
+"vehicle_classes": "S/D /W of:(RAVI TR)"
+}
+
+DL check: HIGH - 8/8 fields read
+  often blank on this document, not graded: validity_tr=28-10-2021, blood_group=O+
+  dob -> 2001-06-21
+  issue_date -> 2021-10-28
+  validity_nt -> 2041-06-20
+  validity_tr -> 2021-10-28
+  note: validity_tr = '28-10-2021' - this kind of field is known to sometimes be fabricated when genuinely absent; verify against the physical document
+  note: blood_group = 'O+' - this kind of field is known to sometimes be fabricated when genuinely absent; verify against the physical document
+
+=== Run 11 | tt_dl | 2026-09-17 11:21:37 ===
+[tt_dl | CPU only | 147.6s]
+
+{
+  "document_type": "tt_dl",
+  "permit_number": "1058510",
+  "name": "Trinesha Wilkinson",
+  "dob": "04-12-1995",
+  "gender": "F",
+  "address": "18 DE NOBREIGA STREET SAN FERNANDO",
+  "issue_date": "19-12-2014",
+  "expiry_date": "18-12-2024",
+  "payment_date": "19-12-2019",
+  "transaction_code": "B",
+  "class": "3"
+}
+
+TT Driving Permit check: HIGH - 10/10 fields read
+  dob -> 1995-12-04
+  issue_date -> 2014-12-19
+  expiry_date -> 2024-12-18
+  payment_date -> 2019-12-19
+  permit_number format unverified for this document - no structural check applied
+
+=== Run 12 | tt_passport | 2026-09-17 11:42:42 ===
+[tt_passport | CPU only | 193.8s]
+
+{
+  "document_type": "tt_passport",
+  "type": "P",
+  "country_code": "TTO",
+  "passport_number": "T6817812",
+  "surname": "ROACH",
+  "given_names": "Claudette Maria",
+  "nationality": "NATIONALIDADweredTRINIDADANDTOBZ",
+  "gender": "F",
+  "dob": "03 NOV 1954",
+  "place_of_birth": "TTO",
+  "issue_date": "02 JAN 2018",
+  "issuing_authority": "AUTHORIZADOR REPUBLICA DE TRINIDAD AND TOBAGO",
+  "expiry_date": "01 JAN 2028"
+}
+
+TT Passport check: LOW - 12/12 fields read
+  passport_number format unverified for this country - no structural check applied
+  - dob '03 NOV 1954' is not a recognised date format
+  - issue_date '02 JAN 2018' is not a recognised date format
+  - expiry_date '01 JAN 2028' is not a recognised date format
+
+=== Run 13 | tt_passport | 2026-09-17 11:48:43 ===
+[tt_passport | CPU only | 160.5s]
+
+{
+  "document_type": "tt_passport",
+  "type": "P",
+  "country_code": "TTO",
+  "passport_number": "TC000617",
+  "surname": "MARDATH",
+  "given_names": "REPUBLIC OF TRINIDAD AND TOBAGO",
+  "nationality": "NATIONALITY",
+  "gender": "M",
+  "dob": "23 JUL 1995",
+  "place_of_birth": "TRINIDAD AND TOBAGO",
+  "issue_date": "09 JUL 2020",
+  "issuing_authority": "REPUBLIC OF TRINIDAD AND TOBAGO HOLDERS SIGNATURE / FIRMA DI","expiry_date": ""
+}
+
+TT_PASSPORT check: FABRICATED - value(s) copied from the prompt, not read from the document:
+  - nationality = 'NATIONALITY'
+Do not trust any field in this output.
+
