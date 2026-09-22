@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "passport" },
+    "passport_number": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Z][0-9]{7}$" },
+      { "type": "null" } ] },
+    "name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,64}$" },
+      { "type": "null" } ] },
+    "dob": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "gender": { "enum": ["M", "F", "O", null] },
+    "place_of_birth": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "issue_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "expiry_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "issuing_authority": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "nationality": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z]{1,32}$" },
+      { "type": "null" } ] }
+  },
+  "required": ["document_type", "passport_number", "name", "dob", "gender",
+               "place_of_birth", "issue_date", "expiry_date", "issuing_authority", "nationality"],
+  "additionalProperties": false
+}

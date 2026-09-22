@@ -1,0 +1,38 @@
+This is the back side of a Trinidad and Tobago National Identification Card. Extract
+these fields as a single JSON object:
+
+{
+  "document_type": "tt_id_back",
+  "name": "",
+  "dob": "",
+  "issue_date": "",
+  "expiry_date": "",
+  "registration_number": "",
+  "citizenship_status": "",
+  "place_of_birth": "",
+  "gender": "",
+  "eye_colour": "",
+  "height_cm": "",
+  "social_assistance_number": "",
+  "skin_colour": "",
+  "blood_group": "",
+  "national_insurance_number": ""
+}
+
+Field guide:
+- name: printed on the card, no label.
+- dob, issue_date, expiry_date, registration_number, citizenship_status,
+  place_of_birth, gender, eye_colour, height_cm, skin_colour: each has its own
+  printed label on the card, with its value printed directly below that label -
+  never combine another field's label text or value into a different field's answer.
+- social_assistance_number, blood_group, national_insurance_number: each has its own
+  printed label on the card. For each one, first find that field's own
+  label. If there is a value printed directly below that specific label, copy it. If
+  nothing is printed in that specific spot, output null. Never fill one of these
+  three in using a value or label text you found while looking for a different
+  field.
+
+Copy every value exactly as printed. If unreadable, uncertain, or genuinely not
+printed on the card, use null instead of guessing.
+
+Output JSON only. No explanation. No markdown. No code fences.

@@ -1,0 +1,36 @@
+This is a Trinidad and Tobago driving permit. Extract these fields as a single JSON
+object:
+
+{
+  "document_type": "tt_dl",
+  "permit_number": "",
+  "name": "",
+  "dob": "",
+  "gender": "",
+  "address": "",
+  "issue_date": "",
+  "expiry_date": "",
+  "payment_date": "",
+  "transaction_code": "",
+  "class": ""
+}
+
+Field guide:
+- permit_number: labelled on the card.
+- name: printed on the card, no label.
+- dob: labelled as date of birth.
+- gender: labelled "SEX".
+- address: printed on the card, no label.
+- issue_date: labelled as issue date.
+- expiry_date: labelled as expiry date.
+- payment_date: labelled as date of payment.
+- transaction_code: labelled "TR" - one letter: A = first issue, B = renewal,
+  C = duplicate, D = endorsement.
+- class: labelled "CLASS" - one digit: 1 = Motor Cycles, 2 = Wheel Tractors,
+  3 = Light Motor Vehicles, 4 = Heavy Motor Vehicles, 5 = Extra Heavy Motor Vehicles,
+  6 = Omnibuses, 7 = Other.
+
+Copy every value exactly as printed. If unreadable or uncertain, use null instead of
+guessing.
+
+Output JSON only. No explanation. No markdown. No code fences.

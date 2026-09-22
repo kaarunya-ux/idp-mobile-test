@@ -260,3 +260,83 @@ TT_PASSPORT check: FABRICATED - value(s) copied from the prompt, not read from t
   - nationality = 'NATIONALITY'
 Do not trust any field in this output.
 
+=== Run 14 | pan | 2026-09-17 16:42:00 ===
+[pan | CPU only | 127.0s]
+
+{"document_type": "pan", "pan_number": "GQBPK8700C", "name": "K. Srikanth", "parent_name": "Kochherla Srikanth", "parent_relation": "father", "dob": "04/05/1997"}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-05-04
+
+=== Run 15 | pan | 2026-09-17 16:57:14 ===
+[pan | CPU only | 160.5s]
+
+{"document_type": "pan", "pan_number": "SXOCS0000C", "name": "Ganjikunta Mahash", "parent_name": "MOSCOW", "parent_relation": "father", "dob": "12/06/1997"}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-06-12
+
+=== Run 16 | aadhaar | 2026-09-17 17:00:18 ===
+[aadhaar | CPU only | 168.1s]
+
+{"document_type": "aadhaar", "aadhaar_number": "121340268800", "name": "Majdika Mahash", "dob": "12/06/1997", "gender": "M", "address": "S/O 0000, 3/000, 516309", "pincode": "759831"}
+
+Aadhaar check: LOW - 6/6 fields read
+  dob -> 1997-06-12
+  aadhaar_number -> 121340268800
+  - aadhaar_number '121340268800' fails the Aadhaar checksum (Verhoeff algorithm) - at least one digit is misread
+  - address ends in PIN '516309' but the separate pincode field says '759831' - these should be the same PIN and are not
+
+=== Run 17 | pan | 2026-09-17 17:25:01 ===
+[pan | CPU only | 122.0s]
+
+{"document_type": "pan", "pan_number": "GQBPK8700C", "name": "K. Srikanth", "parent_name": "Kochherla Srikanth", "parent_relation": "father", "dob": "04/05/1997"}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-05-04
+
+=== Run 18 | pan | 2026-09-18 09:34:04 ===
+[pan | CPU only | 125.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "GQBPK8700C",
+  "name": "KOCHERLA SRIKANTH",
+  "parent_name": "MUKKANTI KOCHERLA",
+  "parent_relation": "father",
+  "dob": "04/05/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-05-04
+
+=== Run 19 | pan | 2026-09-18 09:37:30 ===
+[pan | CPU only | 82.4s]
+
+{
+  "document_type": "pan",
+  "pan_number": "GQBPK8700C",
+  "name": "KOCHERLA SRIKANTH",
+  "parent_name": "MUKKANTI KOCHERLA",
+  "parent_relation": "father",
+  "dob": "04/05/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-05-04
+
+=== Run 20 | pan | 2026-09-18 10:11:11 ===
+[pan | CPU only | 91.3s]
+
+{
+  "document_type": "pan",
+  "pan_number": "GQBPK8700C",
+  "name": "KOCHERLA SRIKANTH",
+  "parent_name": "MUKKANTI KOCHERLA",
+  "parent_relation": "father",
+  "dob": "04/05/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-05-04
+

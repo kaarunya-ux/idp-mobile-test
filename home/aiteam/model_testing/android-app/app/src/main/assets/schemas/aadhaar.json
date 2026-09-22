@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "aadhaar" },
+    "aadhaar_number": { "anyOf": [
+      { "type": "string", "pattern": "^[0-9]{4} [0-9]{4} [0-9]{4}$" },
+      { "type": "string", "pattern": "^[0-9]{12}$" },
+      { "type": "null" } ] },
+    "name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "dob": { "anyOf": [
+      { "type": "string", "pattern": "^[0-3][0-9]/[01][0-9]/[12][0-9]{3}$" },
+      { "type": "null" } ] },
+    "gender": { "enum": ["M", "F", "O", null] },
+    "address": { "anyOf": [
+      { "type": "string", "maxLength": 200 },
+      { "type": "null" } ] },
+    "pincode": { "anyOf": [
+      { "type": "string", "pattern": "^[0-9]{6}$" },
+      { "type": "null" } ] }
+  },
+  "required": ["document_type", "aadhaar_number", "name", "dob", "gender",
+               "address", "pincode"],
+  "additionalProperties": false
+}

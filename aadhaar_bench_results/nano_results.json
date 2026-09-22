@@ -1,0 +1,242 @@
+[
+  {
+    "name": "meghna",
+    "field": "aadhaar_number",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "6606 2751 1012",
+    "output": "Meghna Kumar shades, Mehna kumari, 23/10/1997, male/Female",
+    "latency_s": 64.0,
+    "correct": false
+  },
+  {
+    "name": "meghna",
+    "field": "aadhaar_number",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "6606 2751 1012",
+    "output": "6606 2751 1012",
+    "latency_s": 63.3,
+    "correct": true
+  },
+  {
+    "name": "meghna",
+    "field": "aadhaar_number",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "6606 2751 1012",
+    "output": "6606 2751 1012",
+    "latency_s": 62.8,
+    "correct": true
+  },
+  {
+    "name": "meghna",
+    "field": "aadhaar_number",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "6606 2751 1012",
+    "output": "6606 2751 1012",
+    "latency_s": 62.7,
+    "correct": true
+  },
+  {
+    "name": "rameez",
+    "field": "date_of_birth",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "12/07/2002",
+    "output": "Rameez Zaheer Kadiwala",
+    "latency_s": 53.3,
+    "correct": false
+  },
+  {
+    "name": "rameez",
+    "field": "date_of_birth",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "12/07/2002",
+    "output": "612487298241",
+    "latency_s": 54.9,
+    "correct": false
+  },
+  {
+    "name": "rameez",
+    "field": "date_of_birth",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "12/07/2002",
+    "output": "HANE LEANY OF TARA / DOB: 12/07/2002",
+    "latency_s": 32.1,
+    "correct": true
+  },
+  {
+    "name": "rameez",
+    "field": "date_of_birth",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "12/07/2002",
+    "output": "\u091c\u0928\u092e \u0924\u093e\u0930\u093f\u0937\u094d\u091f / DOB: 12/07/2002",
+    "latency_s": 56.3,
+    "correct": true
+  },
+  {
+    "name": "prakash",
+    "field": "gender",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "Male",
+    "output": "Prakash Gopichand Rathod",
+    "latency_s": 80.7,
+    "correct": false
+  },
+  {
+    "name": "prakash",
+    "field": "gender",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "Male",
+    "output": "The answer is: 8538 7535 4900",
+    "latency_s": 82.2,
+    "correct": false
+  },
+  {
+    "name": "prakash",
+    "field": "gender",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "Male",
+    "output": "\u092a\u0941\u0930sey / Male",
+    "latency_s": 60.5,
+    "correct": true
+  },
+  {
+    "name": "prakash",
+    "field": "gender",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "Male",
+    "output": "hells / Male",
+    "latency_s": 87.0,
+    "correct": true
+  },
+  {
+    "name": "jasjot",
+    "field": "name",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "Jasjot Singh",
+    "output": "Jasjot Singh",
+    "latency_s": 75.8,
+    "correct": true
+  },
+  {
+    "name": "jasjot",
+    "field": "name",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "Jasjot Singh",
+    "output": "Jasjot Singh",
+    "latency_s": 91.3,
+    "correct": true
+  },
+  {
+    "name": "jasjot",
+    "field": "name",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "Jasjot Singh",
+    "output": "Jasjot Singh",
+    "latency_s": 62.6,
+    "correct": true
+  },
+  {
+    "name": "jasjot",
+    "field": "name",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "Jasjot Singh",
+    "output": "Jasjot Singh",
+    "latency_s": 62.6,
+    "correct": true
+  },
+  {
+    "name": "aditiya",
+    "field": "aadhaar_number",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "3597 8269 8331",
+    "output": "3597 8269 8331",
+    "latency_s": 79.2,
+    "correct": true
+  },
+  {
+    "name": "aditiya",
+    "field": "aadhaar_number",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "3597 8269 8331",
+    "output": "The image displays a document from the Government of India, specifically an ID card for a male individual named Aditya Sahu. The card includes personal details such as the date of birth (05/11/2001), a photograph of the individual, and a QR code. Additionally, there is a phone number provided for contact purposes.",
+    "latency_s": 83.6,
+    "correct": false
+  },
+  {
+    "name": "aditiya",
+    "field": "aadhaar_number",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "3597 8269 8331",
+    "output": "359782698331",
+    "latency_s": 57.2,
+    "correct": true
+  },
+  {
+    "name": "aditiya",
+    "field": "aadhaar_number",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "3597 8269 8331",
+    "output": "3597 8269 8331",
+    "latency_s": 61.5,
+    "correct": true
+  },
+  {
+    "name": "sapna",
+    "field": "address",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "W/O: Ajit Kumar Bajaj, Ward No 01, Seujpur, Gabhrupathar, OPP Tirupati Balaji Mandir, Dibrugarh West, Dibrugarh, Assam - 786001",
+    "output": "Sapna Bajaj, Date of Birth/DO: 24/06/1975 Female/ FEMALE",
+    "latency_s": 51.8,
+    "correct": false
+  },
+  {
+    "name": "sapna",
+    "field": "address",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "W/O: Ajit Kumar Bajaj, Ward No 01, Seujpur, Gabhrupathar, OPP Tirupati Balaji Mandir, Dibrugarh West, Dibrugarh, Assam - 786001",
+    "output": "Sapa BAi\nDate of BANDAB: 24/06/1975 Female\nFemale",
+    "latency_s": 60.0,
+    "correct": false
+  },
+  {
+    "name": "sapna",
+    "field": "address",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "W/O: Ajit Kumar Bajaj, Ward No 01, Seujpur, Gabhrupathar, OPP Tirupati Balaji Mandir, Dibrugarh West, Dibrugarh, Assam - 786001",
+    "output": "Address:\nW/O: Ajit Kumar Bajaj, Ward No 01, Seujpur, Gabhrupathar, OPP Tinupati Balaji Mandir, Dibrugarh West, Dibrugarh, Assam - 786001",
+    "latency_s": 61.4,
+    "correct": true
+  },
+  {
+    "name": "sapna",
+    "field": "address",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "W/O: Ajit Kumar Bajaj, Ward No 01, Seujpur, Gabhrupathar, OPP Tirupati Balaji Mandir, Dibrugarh West, Dibrugarh, Assam - 786001",
+    "output": "Address:\nWI: Ajit Kumar Bajaji, Ward No 01, Seujur, Gathrupathar, OPP Tinupati Balaji Mandir, Dibrugarh West, Dibrugah, ASSAM - 786001",
+    "latency_s": 61.3,
+    "correct": true
+  }
+]

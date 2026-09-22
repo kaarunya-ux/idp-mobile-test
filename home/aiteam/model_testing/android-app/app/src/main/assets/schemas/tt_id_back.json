@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "tt_id_back" },
+    "name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "dob": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "issue_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "expiry_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "registration_number": { "anyOf": [
+      { "type": "string", "maxLength": 30 }, { "type": "null" } ] },
+    "citizenship_status": { "anyOf": [
+      { "type": "string", "maxLength": 30 }, { "type": "null" } ] },
+    "place_of_birth": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "gender": { "enum": ["M", "F", "O", null] },
+    "eye_colour": { "anyOf": [ { "type": "string", "maxLength": 20 }, { "type": "null" } ] },
+    "height_cm": { "anyOf": [ { "type": "string", "maxLength": 6 }, { "type": "null" } ] },
+    "social_assistance_number": { "anyOf": [
+      { "type": "string", "maxLength": 20 }, { "type": "null" } ] },
+    "skin_colour": { "anyOf": [ { "type": "string", "maxLength": 20 }, { "type": "null" } ] },
+    "blood_group": { "enum": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", null] },
+    "national_insurance_number": { "anyOf": [
+      { "type": "string", "maxLength": 20 }, { "type": "null" } ] }
+  },
+  "required": ["document_type", "name", "dob", "issue_date", "expiry_date",
+               "registration_number", "citizenship_status", "place_of_birth", "gender",
+               "eye_colour", "height_cm", "social_assistance_number", "skin_colour",
+               "blood_group", "national_insurance_number"],
+  "additionalProperties": false
+}

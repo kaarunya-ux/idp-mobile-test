@@ -1,0 +1,40 @@
+This is an Aadhaar card. Read the values printed on the image and extract these fields as a single JSON object:
+
+{
+  "document_type": "aadhaar",
+  "aadhaar_number": "",
+  "name": "",
+  "dob": "",
+  "gender": "",
+  "address": "",
+  "pincode": ""
+}
+
+Where to look on the card:
+- The card usually prints the name twice: once in a regional Indian script, then again in English
+  directly below it. Use only the English line for "name". Never output the regional-script line.
+- dob is the line below the name, usually labelled "DOB" (it may be preceded by a regional-language
+  translation of that label before a "/").
+- gender is the line below dob. Read the English word printed there exactly - it may be
+  preceded by a regional-language word before a "/" - and map whichever word is actually
+  printed to the matching letter. Do not assume which one it is before reading it.
+- aadhaar_number is the large number below gender, printed in three groups of 4 digits
+  separated by a space.
+- address, if printed at all, appears as a separate multi-line block, often on the back of the
+  card. If you cannot see an address block in this image, use null - do not guess one.
+- pincode is the 6-digit PIN code inside the address block, if an address is visible.
+
+Rules:
+- Every value must be copied from the image, character for character. Preserve original casing
+  for "name".
+- aadhaar_number: copy all 12 digits exactly as printed, including the normal grouping
+  spaces (e.g. four digits, a space, four digits, a space, four digits). Do not remove
+  the spaces yourself.
+- gender: read the actual printed word, then output exactly one of "M", "F", or "O".
+- Copy dob exactly as printed, in DD/MM/YYYY form. Do not convert it yourself.
+- Some older cards print only a Year of Birth with no day or month. If you cannot see a
+  full DD/MM/YYYY date, use null for dob rather than inventing a day or month.
+- address: if visible, write it in English, lines separated by \n.
+- If any part of a value is unreadable or uncertain, use null for that whole field rather
+  than guessing at the unreadable part.
+- Output JSON only. No explanation. No markdown. No code fences.

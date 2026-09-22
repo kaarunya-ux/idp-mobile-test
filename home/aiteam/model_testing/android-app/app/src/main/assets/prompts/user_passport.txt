@@ -1,0 +1,40 @@
+This is the personal particulars page of an Indian passport. Read the values printed on the
+image and extract these fields as a single JSON object:
+
+{
+  "document_type": "passport",
+  "passport_number": "",
+  "name": "",
+  "dob": "",
+  "gender": "",
+  "place_of_birth": "",
+  "issue_date": "",
+  "expiry_date": "",
+  "issuing_authority": "",
+  "nationality": ""
+}
+
+Where to look on the page:
+- passport_number is printed near the top of the page, often repeated in the top-right corner.
+- name is usually printed across two adjacent lines, a family name above a given name.
+  Combine them into a single "name" value, family name first.
+- dob is the date on the line for the holder's birth date.
+- gender is the single-letter code on the line for the holder's sex.
+- place_of_birth is the city or town printed on the line for the holder's birthplace.
+- issue_date is the date on the line stating when this passport was issued.
+- expiry_date is the date on the line stating when this passport expires.
+- issuing_authority is the city name printed on the line stating where this passport was issued.
+- nationality is printed on its own line, usually a single country name.
+- There is a two-line block of text and symbols (< characters) at the very bottom of the page.
+  This is the Machine Readable Zone (MRZ). Never read values from it or copy any of its text.
+
+Rules:
+- Every value must be copied from the image, character for character. Preserve original casing.
+- passport_number is exactly 8 characters: 1 uppercase letter followed by 7 digits.
+- gender: read the actual printed code, then output exactly one of "M", "F", or "O".
+- Copy dob, issue_date and expiry_date exactly as printed on the page. Do not convert the
+  format yourself.
+- nationality: use null only if you genuinely cannot read it.
+- If any part of a value is unreadable or uncertain, use null for that whole field rather
+  than guessing at the unreadable part.
+- Output JSON only. No explanation. No markdown. No code fences.

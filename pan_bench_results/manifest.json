@@ -1,0 +1,94 @@
+[
+  {
+    "name": "samad",
+    "field": "pan_number",
+    "ground_truth": "QFVPS0764H",
+    "original_box": [
+      248,
+      224,
+      474,
+      275
+    ],
+    "distorted_box": [
+      303.8,
+      280.3,
+      535.6,
+      350.8
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/samad_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/samad_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/samad_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/samad_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "arjun",
+    "field": "date_of_birth",
+    "ground_truth": "06/07/1998",
+    "original_box": [
+      28,
+      452,
+      164,
+      495
+    ],
+    "distorted_box": [
+      119.5,
+      534.5,
+      260.9,
+      589.2
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/arjun_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/arjun_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/arjun_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/arjun_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "aniz",
+    "field": "name",
+    "ground_truth": "ANIZ ISLAM",
+    "original_box": [
+      0,
+      176,
+      115,
+      206
+    ],
+    "distorted_box": [
+      65.9,
+      252.1,
+      184.4,
+      292.0
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/aniz_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/aniz_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/aniz_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/aniz_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "roshan",
+    "field": "father_name",
+    "ground_truth": "RAMESH SAHANI",
+    "original_box": [
+      20,
+      382,
+      212,
+      416
+    ],
+    "distorted_box": [
+      101.8,
+      460.6,
+      297.2,
+      511.2
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/roshan_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/roshan_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/roshan_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/pan_bench/final/roshan_crop_distorted.jpg"
+    }
+  }
+]

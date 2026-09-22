@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "pan" },
+    "pan_number": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z]$" },
+      { "type": "null" } ] },
+    "name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "parent_name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "parent_relation": { "enum": ["father", "mother", null] },
+    "dob": { "anyOf": [
+      { "type": "string", "pattern": "^[0-3][0-9]/[01][0-9]/[12][0-9]{3}$" },
+      { "type": "null" } ] }
+  },
+  "required": ["document_type", "pan_number", "name", "parent_name", "parent_relation", "dob"],
+  "additionalProperties": false
+}

@@ -1,0 +1,50 @@
+This is the biodata page of a passport of the Republic of Trinidad and Tobago. Read the
+values printed on the page and extract these fields as a single JSON object:
+
+{
+  "document_type": "tt_passport",
+  "type": "",
+  "country_code": "",
+  "passport_number": "",
+  "surname": "",
+  "given_names": "",
+  "nationality": "",
+  "gender": "",
+  "dob": "",
+  "place_of_birth": "",
+  "issue_date": "",
+  "issuing_authority": "",
+  "expiry_date": ""
+}
+
+Where to look on the page:
+- type is the document type code printed in the personal-details block - a single
+  letter or short code identifying this as a passport.
+- country_code is the short letter code printed for the issuing country, near the type
+  field.
+- passport_number is printed near the top of the page, and is often repeated a second
+  time in a corner of the page.
+- surname is the holder's family name, printed on its own line.
+- given_names is the holder's given name(s), printed on a separate line from the
+  surname - copy all given names together if there is more than one.
+- nationality is the word printed on the page for the holder's nationality - read it
+  exactly as printed, do not guess or translate it.
+- gender is printed as a single letter, usually labelled "Sex".
+- dob is the holder's date of birth.
+- place_of_birth is the town or country printed for that field.
+- issue_date and expiry_date are the two dates printed together on the page, usually
+  one below the other.
+- issuing_authority is the specific government office or authority named on the page,
+  not the country name printed at the top of the page.
+
+Rules:
+- Every value must be copied from the image, character for character. Preserve original
+  casing.
+- gender: exactly one of "M", "F", or "O". null if not printed.
+- Copy dob, issue_date and expiry_date exactly as printed on the page. Do not convert
+  the format yourself.
+- Never read or describe the photograph, any watermark, or the machine-readable lines
+  at the bottom of the page.
+- If any part of a value is unreadable or uncertain, use null for that whole field
+  rather than guessing at the unreadable part.
+- Output JSON only. No explanation. No markdown. No code fences.

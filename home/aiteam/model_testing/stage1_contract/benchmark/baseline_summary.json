@@ -1,0 +1,13 @@
+{
+  "label": "stage1-contract",
+  "model": "VisionPsy-Nano-460M",
+  "lm_gguf": "/Users/impactoinfra/fine_tune/runs/stage1_contract/gguf/stage1-q5_k_m.gguf",
+  "mmproj_gguf": "/Users/impactoinfra/fine_tune/runs/stage1_contract/gguf/mmproj-visionpsy-nano-460m-q8_0.gguf",
+  "quantization": "Q5_K_M",
+  "runtime": "VisionPsy patched llama.cpp",
+  "backend": "cpu",
+  "total_documents": 38,
+  "successful_inferences": 38,
+  "failed_inferences": 0,
+  "status": "COMPLETE"
+}

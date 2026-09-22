@@ -1,0 +1,47 @@
+This is an Indian Driving License. Read the values printed on the image and extract these fields
+as a single JSON object:
+
+{
+  "document_type": "dl",
+  "license_number": "",
+  "name": "",
+  "dob": "",
+  "address": "",
+  "issue_date": "",
+  "validity_nt": "",
+  "validity_tr": "",
+  "blood_group": "",
+  "organ_donor": "",
+  "vehicle_classes": ""
+}
+
+Where to look on the card:
+- license_number is usually printed near the top, often labelled "DL No" or "Licence No".
+- name is below the license number, sometimes prefixed "Name" or "Name & Address".
+- dob is on the same block as name, labelled "DOB" or "Date of Birth".
+- address is the multi-line block below name, including its own PIN code as part of the text.
+- issue_date is labelled "Date of Issue" or "Issue Date".
+- validity_nt is labelled "Validity (NT)" - the validity date for Non-Transport vehicles.
+- validity_tr is labelled "Validity (TR)" - the validity date for Transport vehicles. This is
+  often blank on cards without a transport endorsement - use null if you cannot see it.
+- blood_group is labelled "Blood Group". Not every card prints this - use null if you cannot
+  see it.
+- organ_donor is labelled "Organ Donor" - a single Y or N.
+- vehicle_classes is a short list of vehicle category codes (like MCWG, LMV, HMV) found in
+  the data rows of a small table, below a header row that just labels what each column
+  contains. Read the codes themselves, never the header text above them.
+
+Rules:
+- Every value must be copied from the image, character for character. Preserve original casing.
+- license_number: copy exactly as printed, including any dashes or spaces in its format.
+- Copy dob, issue_date, validity_nt and validity_tr exactly as printed on the card. Do not
+  convert the format yourself.
+- address: write it in English, lines separated by \n.
+- blood_group: exactly one of "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-". null if not
+  printed.
+- organ_donor: exactly one of "Y" or "N". null if not printed.
+- vehicle_classes: a comma-separated list of the codes themselves, exactly as printed in the
+  table's data rows. Never output the column header text.
+- If any part of a value is unreadable or uncertain, use null for that whole field rather
+  than guessing at the unreadable part.
+- Output JSON only. No explanation. No markdown. No code fences.

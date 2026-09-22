@@ -1,0 +1,1 @@
+{"aadhaar_number": "3169 0594 5292", "vid": "9174 0502 0094 5412", "name": "Dinesh Sharma", "date_of_birth": "26/09/1991", "gender": "Male"}

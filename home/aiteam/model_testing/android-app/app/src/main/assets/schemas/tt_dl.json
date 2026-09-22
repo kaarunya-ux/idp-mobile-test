@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "tt_dl" },
+    "permit_number": { "anyOf": [
+      { "type": "string", "maxLength": 20 },
+      { "type": "null" } ] },
+    "name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "dob": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "gender": { "enum": ["M", "F", "O", null] },
+    "address": { "anyOf": [
+      { "type": "string", "maxLength": 200 },
+      { "type": "null" } ] },
+    "issue_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "expiry_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "payment_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "transaction_code": { "enum": ["A", "B", "C", "D", null] },
+    "class": { "enum": ["1", "2", "3", "4", "5", "6", "7", null] }
+  },
+  "required": ["document_type", "permit_number", "name", "dob", "gender", "address",
+               "issue_date", "expiry_date", "payment_date", "transaction_code", "class"],
+  "additionalProperties": false
+}

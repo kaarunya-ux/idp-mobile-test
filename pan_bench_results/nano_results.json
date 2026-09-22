@@ -1,0 +1,162 @@
+[
+  {
+    "name": "samad",
+    "field": "pan_number",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "QFVPS0764H",
+    "output": "QFVPS0764H",
+    "latency_s": 63.5,
+    "correct": true
+  },
+  {
+    "name": "samad",
+    "field": "pan_number",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "QFVPS0764H",
+    "output": "QFVPS0764H",
+    "latency_s": 68.1,
+    "correct": true
+  },
+  {
+    "name": "samad",
+    "field": "pan_number",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "QFVPS0764H",
+    "output": "QFVPS0764H",
+    "latency_s": 51.8,
+    "correct": true
+  },
+  {
+    "name": "samad",
+    "field": "pan_number",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "QFVPS0764H",
+    "output": "QFVPS0764H",
+    "latency_s": 52.5,
+    "correct": true
+  },
+  {
+    "name": "arjun",
+    "field": "date_of_birth",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "06/07/1998",
+    "output": "Arjun Mandloi",
+    "latency_s": 76.0,
+    "correct": false
+  },
+  {
+    "name": "arjun",
+    "field": "date_of_birth",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "06/07/1998",
+    "output": "ARJUN MANDLoi",
+    "latency_s": 76.8,
+    "correct": false
+  },
+  {
+    "name": "arjun",
+    "field": "date_of_birth",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "06/07/1998",
+    "output": "Date of Birth 06/07/1998",
+    "latency_s": 53.0,
+    "correct": true
+  },
+  {
+    "name": "arjun",
+    "field": "date_of_birth",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "06/07/1998",
+    "output": "Date of Birth 06/07/1998",
+    "latency_s": 76.9,
+    "correct": true
+  },
+  {
+    "name": "aniz",
+    "field": "name",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "ANIZ ISLAM",
+    "output": "ANIZ ISLAM",
+    "latency_s": 78.8,
+    "correct": true
+  },
+  {
+    "name": "aniz",
+    "field": "name",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "ANIZ ISLAM",
+    "output": "aniz island",
+    "latency_s": 80.5,
+    "correct": false
+  },
+  {
+    "name": "aniz",
+    "field": "name",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "ANIZ ISLAM",
+    "output": "ANIZ ISLAM",
+    "latency_s": 55.0,
+    "correct": true
+  },
+  {
+    "name": "aniz",
+    "field": "name",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "ANIZ ISLAM",
+    "output": "ANIZ ISLAM",
+    "latency_s": 79.8,
+    "correct": true
+  },
+  {
+    "name": "roshan",
+    "field": "father_name",
+    "variant": "box_clean",
+    "case": "box",
+    "ground_truth": "RAMESH SAHANI",
+    "output": "RAMESH SAHANI",
+    "latency_s": 80.8,
+    "correct": true
+  },
+  {
+    "name": "roshan",
+    "field": "father_name",
+    "variant": "box_distorted",
+    "case": "box",
+    "ground_truth": "RAMESH SAHANI",
+    "output": "ROshan Sahani",
+    "latency_s": 80.8,
+    "correct": false
+  },
+  {
+    "name": "roshan",
+    "field": "father_name",
+    "variant": "crop_clean",
+    "case": "crop",
+    "ground_truth": "RAMESH SAHANI",
+    "output": "RAMESH SAHANI",
+    "latency_s": 55.5,
+    "correct": true
+  },
+  {
+    "name": "roshan",
+    "field": "father_name",
+    "variant": "crop_distorted",
+    "case": "crop",
+    "ground_truth": "RAMESH SAHANI",
+    "output": " finsa kana nata / Father's RAMESH SAHANI",
+    "latency_s": 56.2,
+    "correct": true
+  }
+]

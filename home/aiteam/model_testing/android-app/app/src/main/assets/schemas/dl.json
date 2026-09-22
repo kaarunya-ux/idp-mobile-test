@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "dl" },
+    "license_number": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Z0-9 -]{8,18}$" },
+      { "type": "null" } ] },
+    "name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "dob": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "address": { "anyOf": [
+      { "type": "string", "maxLength": 200 },
+      { "type": "null" } ] },
+    "issue_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "validity_nt": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "validity_tr": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "blood_group": { "enum": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", null] },
+    "organ_donor": { "enum": ["Y", "N", null] },
+    "vehicle_classes": { "anyOf": [ { "type": "string", "maxLength": 60 }, { "type": "null" } ] }
+  },
+  "required": ["document_type", "license_number", "name", "dob", "address", "issue_date",
+               "validity_nt", "validity_tr", "blood_group", "organ_donor", "vehicle_classes"],
+  "additionalProperties": false
+}

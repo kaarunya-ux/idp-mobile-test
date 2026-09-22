@@ -1,0 +1,3 @@
+What is the PAN number shown in this image?
+Answer with only that value, exactly as printed on the document.
+Do not include the field label. Do not explain.

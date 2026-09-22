@@ -1,0 +1,33 @@
+This is a PAN card. Read the values printed on the image and extract these fields as a single JSON object:
+
+{
+  "document_type": "pan",
+  "pan_number": "",
+  "name": "",
+  "parent_name": "",
+  "parent_relation": "",
+  "dob": ""
+}
+
+Where to look on the card:
+- name is the first line of large text printed below the fixed department header near
+  the top of the card.
+- Below name there is a small label line naming a parent, followed immediately by that
+  parent's own full name printed in larger text. parent_name is that larger parent name -
+  never copy the small label line itself into parent_name.
+- parent_relation is "father" if the small label refers to a father, "mother" if it refers
+  to a mother, or null if no such label is present anywhere on the card.
+- dob is the date printed below parent_name.
+- pan_number is the 10-character code printed below the label that starts with "Permanent
+  Account Number" - copy only the code itself, never that label text.
+
+Rules:
+- Every value must be copied from the image, character for character. Preserve original casing.
+- pan_number is exactly 10 characters: 5 uppercase letters, then 4 digits, then 1 uppercase letter.
+  The 4th letter is the holder category and must be one of: P C H F A T B G L J.
+- Copy dob exactly as printed, in DD/MM/YYYY form. Do not convert it yourself.
+- A PAN card does not print gender, address, issue date, or expiry date. Never output these,
+  even if you think you can see something resembling one.
+- If any part of a value is unreadable or uncertain, use null for that whole field rather
+  than guessing at the unreadable part.
+- Output JSON only. No explanation. No markdown. No code fences.

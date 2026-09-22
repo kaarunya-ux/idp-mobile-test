@@ -1,0 +1,18 @@
+This is a PAN card issued by the Government of India. Extract the following fields and return a single JSON object:
+
+{
+  "document_type": "pan",
+  "pan_number": "",
+  "name": "",
+  "parent_name": "",
+  "parent_relation": "",
+  "dob": ""
+}
+
+- pan_number is the 10-character alphanumeric code (5 letters, 4 digits, 1 letter) printed beneath the "Permanent Account Number" label.
+- name is the cardholder's name in large text below the department header.
+- parent_name is the name printed below the "Father's/Mother's" label — copy only the name itself, not the label.
+- parent_relation is "father" or "mother" based on the label.
+- dob is the date of birth in DD/MM/YYYY format.
+
+Copy every value exactly as printed. If a field is unreadable or absent, use null. Output JSON only.
