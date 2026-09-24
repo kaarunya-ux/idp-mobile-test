@@ -1,3 +1,9 @@
-What is the PAN number shown in this image?
+This is a close crop of ONE field from an Indian PAN card. It shows exactly one
+of: the PAN number, the cardholder's name, the date of birth, or a parent's
+name (a label such as "Father's Name" or "Mother's Name" may also be visible
+in the crop, printed next to or above the value).
+
+Read only the value of that field - ignore any field label also visible in the
+image, even if it is larger or clearer than the value itself.
 Answer with only that value, exactly as printed on the document.
 Do not include the field label. Do not explain.

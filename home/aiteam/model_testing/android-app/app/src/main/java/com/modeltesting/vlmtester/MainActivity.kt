@@ -81,6 +81,17 @@ class MainActivity : AppCompatActivity() {
     // adding a third parallel path.
     private val singleFieldCropDocTypes = setOf("pan_crop")
 
+    // pan_full keeps grammar (its schema already structurally forces JSON-only output,
+    // blocks extra fields via additionalProperties:false, and blocks non-Latin script via
+    // the name/parent_name regex patterns) but drops the shared system.txt, whose other
+    // rules duplicate what the schema already guarantees for this doc type specifically.
+    // The one rule grammar can't enforce - don't guess, use null when unreadable - is
+    // folded directly into user_pan_full.txt instead. Verified on-device 2026-09-24: no
+    // system prompt, lean user prompt, still 5/5 fields exact match on pan_sample.png.
+    // Doesn't touch system.txt itself, so every other doc type keeps its current,
+    // separately-hardened behavior unchanged.
+    private val skipSystemPromptOnlyDocTypes = setOf("pan_full")
+
     private val systemPrompt: String by lazy { loadAsset("prompts/system.txt") }
 
     private fun loadAsset(path: String): String =
@@ -435,17 +446,106 @@ class MainActivity : AppCompatActivity() {
      * test: 4/6 correct vs 6/6 at 256, and 6.72s vs 1.53s) because upsampling a tiny crop
      * to fill the token budget adds only interpolated pixels, not real detail.
      *
-     * Full images: 1024 is an informed starting point, NOT yet validated on-device.
+     * pan_full: 128 tokens, verified on-device 2026-09-24 against pan_sample.png
+     * (2127x1282, 10.8MP) with the lean prompt (see user_pan_full.txt) plus CPU core
+     * pinning and forced flash-attention (see runOnePass()/ensureServerRunning()) - cold,
+     * uncached, single request: 33.55s, all 5 fields exact match including dob, the field
+     * most likely to break first. A full 128-2046 sweep on the same image showed latency
+     * climbing monotonically (256->48.3s, 512->87.1s, 1024->169.9s) with every level
+     * through 1024 staying 5/5 correct - so 128 was not a cliff-edge pick, just the
+     * fastest point on a curve where accuracy hadn't degraded yet on this image. This
+     * contradicts the original theory below (that 1024 was Qwen's grounding floor) on
+     * this specific document; caveat is this is still ONE card - not yet confirmed across
+     * multiple different cards, which is why it hasn't been cross-checked against the
+     * other full-card doc types (aadhaar/passport/dl/tt_*) below, all of which stay at
+     * the older, more conservative 1024 until they get the same on-device validation.
+     *
+     * Other full images: 1024 is an informed starting point, NOT yet validated on-device.
      * Qwen-VL's own load-time warning says it "requires at minimum 1024 image tokens to
      * function correctly on grounding tasks" — that floor is for localizing fields on a
-     * full card, not OCR-ing a tight crop. The 256 cap that works for crops would
-     * downscale a 10.8MP PAN photo to ~510x510px, making small text (DOB, parent_name)
-     * illegible. 1024 (~1000x1000px) is the minimum that preserves field legibility
-     * while staying far below the stock ~4096-token ceiling (~166s on PaddleOCR's
-     * 10.8MP test). This value needs on-device accuracy + latency testing before it's
-     * confirmed optimal; it may be higher or lower than the true sweet spot. */
-    private fun imageTokenCapFor(docType: String): Int =
-        if (singleFieldCropDocTypes.contains(docType)) 256 else 1024
+     * full card, not OCR-ing a tight crop. This value needs on-device accuracy + latency
+     * testing before it's confirmed optimal; it may be higher or lower than the true
+     * sweet spot, same caveat pan_full carried before today's test. */
+    /** Blur-detection threshold for pan_full's dynamic cap switch below. Variance of the
+     *  Laplacian (a standard cheap sharpness metric - high-frequency edge energy) on a
+     *  300px-wide grayscale downscale. Calibrated 2026-09-24 against the 5 real
+     *  ground-truthed PAN cards and their matching Gaussian-blurred (radius 2.2) copies:
+     *  all 5 clean cards scored 765.9-2437.5, all 5 blurred copies scored 132.9-350.5 -
+     *  a clean gap with no overlap. 500 sits in the middle with margin both ways. */
+    // TEMPORARY A/B test (2026-09-24): forced to always route pan_full through 256,
+    // even for sharp images, to check whether 256 also fixes the misreads found on
+    // CLEAN cards at 128 (e.g. SOHRAAB DANISH -> "SOHRAB"/"AZFAL") - i.e. whether 128
+    // is marginal for dense print regardless of blur, not just a blur-specific problem.
+    // Revert to 500.0 (the calibrated clean/blur threshold) once this test is done.
+    private val BLUR_VARIANCE_THRESHOLD = 1.0e9
+
+    /** Downscales to targetWidth (matching the calibration above) via inSampleSize for
+     *  cheap decoding, converts to grayscale, and returns the population variance of a
+     *  4-neighbor Laplacian response. Runs in well under 100ms on a 300px image - trivial
+     *  next to the tens of seconds an extraction takes. Returns null if the file can't be
+     *  decoded, so callers can fall back to the non-adaptive default. */
+    private fun laplacianVariance(imageFile: File, targetWidth: Int = 300): Double? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        if (bounds.outWidth <= 0) return null
+        var inSampleSize = 1
+        while (bounds.outWidth / (inSampleSize * 2) >= targetWidth) inSampleSize *= 2
+        val decoded = BitmapFactory.decodeFile(
+            imageFile.absolutePath,
+            BitmapFactory.Options().apply { this.inSampleSize = inSampleSize }
+        ) ?: return null
+        val targetHeight = (decoded.height.toFloat() / decoded.width * targetWidth)
+            .toInt().coerceAtLeast(1)
+        val bmp = Bitmap.createScaledBitmap(decoded, targetWidth, targetHeight, true)
+        if (bmp !== decoded) decoded.recycle()
+
+        val w = bmp.width
+        val h = bmp.height
+        val pixels = IntArray(w * h)
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        bmp.recycle()
+
+        val gray = DoubleArray(w * h)
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            gray[i] = 0.299 * ((p shr 16) and 0xFF) + 0.587 * ((p shr 8) and 0xFF) +
+                0.114 * (p and 0xFF)
+        }
+
+        var sum = 0.0
+        var sumSq = 0.0
+        var count = 0
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val idx = y * w + x
+                val lap = gray[idx - 1] + gray[idx + 1] + gray[idx - w] + gray[idx + w] -
+                    4 * gray[idx]
+                sum += lap
+                sumSq += lap * lap
+                count++
+            }
+        }
+        if (count == 0) return 0.0
+        val mean = sum / count
+        return sumSq / count - mean * mean
+    }
+
+    /** pan_full only: a blur-degraded photo needs more image tokens to recover the detail
+     *  a sharpness loss destroys, so the cap adapts per-image instead of staying fixed at
+     *  128 - see BLUR_VARIANCE_THRESHOLD for the calibration. Every other doc type keeps
+     *  its fixed cap unchanged. Trade-off worth knowing: ensureServerRunning() only reuses
+     *  the warm server when imageTokenCap matches the previous request (see its doc
+     *  comment), so alternating sharp/blurry pan_full images back-to-back now forces a
+     *  reload each time too, same mechanism as switching doc types - a batch of
+     *  same-sharpness images in a row still stays warm across them. */
+    private fun imageTokenCapFor(docType: String, imageFile: File? = null): Int = when {
+        singleFieldCropDocTypes.contains(docType) -> 256
+        docType == "pan_full" -> {
+            val variance = imageFile?.let { laplacianVariance(it) }
+            if (variance != null && variance < BLUR_VARIANCE_THRESHOLD) 256 else 128
+        }
+        else -> 1024
+    }
 
     /** Runs one model pass (one image, one prompt+schema) and returns (rawOutput,
      *  elapsedSec), or null if the user hit Stop mid-pass. Shared by the single-image
@@ -502,7 +602,18 @@ class MainActivity : AppCompatActivity() {
             // repetition loops, a distinct failure mode from sampling randomness.
             "--repeat-penalty", "1.1",
             "-t", threads.toString(),
-            "-tb", threads.toString()
+            "-tb", threads.toString(),
+            // Exynos 1380-specific: cores 4-7 are the 4 fast A78 cores (0-3 are the
+            // slow A55s) - confirmed via /proc/cpuinfo CPU part IDs (0xd41 vs 0xd05) on
+            // two separate M35 5G units. Without this, -t/-tb only sets a thread COUNT;
+            // the scheduler can still migrate those threads onto the slow cores, which
+            // is the most likely explanation for the 8-16 tok/s prefill-rate swings seen
+            // across otherwise-identical requests all session. Revisit if ever deployed
+            // to a different chipset - this range is not auto-detected.
+            "-Cr", "4-7", "-Crb", "4-7", "--cpu-strict", "1", "--cpu-strict-batch", "1",
+            // 'auto' (the default) was leaving this off in practice; forcing it on
+            // measurably helped prefill throughput in on-device testing 2026-09-24.
+            "-fa", "on"
         )
         if (useGpu) {
             // Offload the LM to GPU; vision encoder (mmproj) stays on CPU regardless.
@@ -514,7 +625,15 @@ class MainActivity : AppCompatActivity() {
         }
         val pb = ProcessBuilder(args)
         pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
-        applyDynSizeEnv(pb)
+        // PaddleOCR-VL only: applyDynSizeEnv's MTMD_FULLIMAGE_MAX_PIXELS overwrites (not
+        // min()s) mtmd_image_preprocessor_dyn_size's pixel ceiling for any "full image"
+        // input (mtmd-image.cpp ~line 923), which silently discards whatever
+        // applyImageTokenCapEnv just set for Qwen - confirmed on-device 2026-09-24:
+        // pan_full produced byte-identical prompt token counts (1398) at cap 1024, 512,
+        // and 256 until this was gated. Qwen's own token cap is the only lever that
+        // should apply to it; VisionPsy's idefics3 preprocessor never reads either var,
+        // so this gate changes nothing for it.
+        if (isPaddleOcr) applyDynSizeEnv(pb)
         applyImageTokenCapEnv(pb, tokenCap)
         pb.redirectErrorStream(true)
 
@@ -593,7 +712,11 @@ class MainActivity : AppCompatActivity() {
                 execPath.absolutePath,
                 "-m", modelPath, "--mmproj", mmprojPath,
                 "--port", port.toString(), "--host", "127.0.0.1",
-                "-t", threads.toString(), "-tb", threads.toString()
+                "-t", threads.toString(), "-tb", threads.toString(),
+                // See the matching comment in runOnePass() - same Exynos 1380-specific
+                // core pinning and forced flash-attention, validated the same way.
+                "-Cr", "4-7", "-Crb", "4-7", "--cpu-strict", "1", "--cpu-strict-batch", "1",
+                "-fa", "on"
             )
             args += if (useGpu) listOf("-ngl", "99", "--no-mmproj-offload")
                     else listOf("-ngl", "0", "--no-mmproj-offload", "--no-op-offload")
@@ -602,7 +725,9 @@ class MainActivity : AppCompatActivity() {
 
             val pb = ProcessBuilder(args)
             pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
-            applyDynSizeEnv(pb)
+            // PaddleOCR-VL only - see the matching guard in runOnePass() for why this
+            // can't also run for Qwen.
+            if (isPaddleOcr) applyDynSizeEnv(pb)
             applyImageTokenCapEnv(pb, imageTokenCap)
             if (!isPaddleOcr) {
                 // The actual fix under test - caps the vision-preprocessing upscale
@@ -821,13 +946,19 @@ class MainActivity : AppCompatActivity() {
                     val isStage1 = stage1EvalDocTypes.contains(docType)
                     val isCrop = singleFieldCropDocTypes.contains(docType)
                     val skipJsonContract = isStage1 || isCrop
+                    val skipSystemPromptOnly = skipSystemPromptOnlyDocTypes.contains(docType)
+                    // Captured once so the dynamic pan_full cap (see imageTokenCapFor's
+                    // blur-detection branch) can also be shown in the run's own output
+                    // below, instead of only being knowable by re-deriving it.
+                    val cap = imageTokenCapFor(docType, imageFile)
                     val outcome = runPass(
                         imageFile,
                         promptFor(docType), if (skipJsonContract) "" else schemaFor(docType),
                         "extract_schema.json",
-                        useGrammar = !skipJsonContract, useSystemPrompt = !skipJsonContract,
+                        useGrammar = !skipJsonContract,
+                        useSystemPrompt = !skipJsonContract && !skipSystemPromptOnly,
                         maxTokens = if (isStage1) 1024 else if (isCrop) 64 else 512,
-                        tokenCap = imageTokenCapFor(docType)
+                        tokenCap = cap
                     )
                     if (outcome.rawOutput == null) {
                         ui.post {
@@ -843,7 +974,7 @@ class MainActivity : AppCompatActivity() {
                     val report = if (isCrop) validateCropField(docType, cleaned) else validateExtraction(docType, cleaned)
                     val runNumber = nextRunNumber()
                     val fullOutput =
-                        "[$mode | %.1fs]\n\n$cleaned\n\n$report".format(outcome.elapsedSec)
+                        "[$mode | cap=$cap | %.1fs]\n\n$cleaned\n\n$report".format(outcome.elapsedSec)
                     saveRun(runNumber, docType, fullOutput)
                     ui.post {
                         binding.progressBar.visibility = View.GONE
@@ -1086,13 +1217,27 @@ class MainActivity : AppCompatActivity() {
 
     /** Crop prompts return a bare value, not JSON - no parseSide/leak-check applies (there's
      *  no prompt-shaped JSON structure to echo back). Just a direct format check per field. */
+    // pan_crop's prompt doesn't tell the model (or us) in advance which of the four PAN
+    // fields a given crop shows, so the field type is inferred here from the shape of
+    // whatever came back rather than fixed per doc type. PAN number and date shapes are
+    // unambiguous; a name-shaped value can't be told apart from a parent's name-shaped
+    // value by shape alone, so that case is reported as such rather than guessed.
     private fun validateCropField(docType: String, text: String): String {
         val value = text.trim()
         return when (docType) {
              "pan_crop" -> {
                  val panPattern = Regex("^[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z]$")
-                 if (panPattern.matches(value)) "PAN crop check: OK"
-                 else "PAN crop check: FAILED - \"$value\" does not match PAN format"
+                 val dobPattern = Regex("^\\d{2}/\\d{2}/\\d{4}$")
+                 val namePattern = Regex("^[A-Z][A-Z. ]*[A-Z.]$")
+                 when {
+                     panPattern.matches(value) -> "PAN crop check: OK (PAN number)"
+                     dobPattern.matches(value) -> "PAN crop check: OK (date of birth)"
+                     namePattern.matches(value) ->
+                         "PAN crop check: OK (name-shaped value - could be the cardholder's " +
+                         "name or a parent's name; the crop alone can't tell which)"
+                     else -> "PAN crop check: FAILED - \"$value\" does not match PAN number, " +
+                         "date, or name format"
+                 }
              }
             else -> "Unknown crop document type: $docType"
         }
