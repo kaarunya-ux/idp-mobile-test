@@ -1856,3 +1856,93 @@ PAN check: HIGH - 5/5 fields read
 PAN check: HIGH - 5/5 fields read
   dob -> 2000-01-20
 
+=== Run 153 | pan_full | 2026-09-24 18:28:03 ===
+[pan_full | CPU only | server mode | cap=256 | 57.9s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FFQPD2288B",
+  "name": "SOHRAAB DANISH",
+  "parent_name": "AFZAL ANISH",
+  "parent_relation": "father",
+  "dob": "14/04/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-04-14
+
+=== Run 154 | pan_full | 2026-09-24 18:28:55 ===
+[pan_full | CPU only | server mode | cap=256 | 36.7s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LYUPS3752G",
+  "name": "UDAYRAJ SINGH",
+  "parent_name": "YUVRAJ SINGH",
+  "parent_relation": "father",
+  "dob": "31/01/2001"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2001-01-31
+
+=== Run 155 | pan_full | 2026-09-24 18:30:06 ===
+[pan_full | CPU only | server mode | cap=256 | 39.5s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": "MOHD SAJID",
+  "parent_relation": "father",
+  "dob": "03/02/2004"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+
+=== Run 156 | pan_full | 2026-09-24 18:31:22 ===
+[pan_full | CPU only | server mode | cap=256 | 38.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FUIPM6282F",
+  "name": "MANIKANDAN SRIDHARAN",
+  "parent_name": "Sridharan",
+  "parent_relation": "father",
+  "dob": "11/11/1999"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1999-11-11
+
+=== Run 157 | pan_full | 2026-09-25 09:35:02 ===
+[pan_full | CPU only | server mode | cap=256 | 50.0s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FFQPD2288B",
+  "name": "SOHRAAB DANISH",
+  "parent_name": "AFZAL ANISH",
+  "parent_relation": "father",
+  "dob": "14/04/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-04-14
+
+=== Run 158 | pan_full | 2026-09-25 09:36:55 ===
+[pan_full | CPU only | server mode | cap=256 | 37.7s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LUQPS8083N",
+  "name": "SAROJINI M",
+  "parent_name": "MURUGESAN",
+  "parent_relation": "father",
+  "dob": "20/01/2000"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2000-01-20
+

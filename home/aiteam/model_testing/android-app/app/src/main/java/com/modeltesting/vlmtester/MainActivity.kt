@@ -467,12 +467,13 @@ class MainActivity : AppCompatActivity() {
      * testing before it's confirmed optimal; it may be higher or lower than the true
      * sweet spot, same caveat pan_full carried before today's test. */
     /** pan_full only: manual switch (switchPanFullHighCap in the UI, default ON) instead
-     *  of the earlier per-image blur-detection this replaced. On-device testing 2026-09-24
-     *  found 256 fixes every real misread seen at 128 on CLEAN cards too, not just blurred
-     *  ones (SOHRAAB DANISH: "SOHRAB"/"AZFAL" -> correct; SAROJINI M: a wrong PAN digit ->
-     *  correct) - so 128 was marginal for dense print regardless of blur, and a manual
-     *  toggle is simpler than auto-detecting something that turned out not to be
-     *  blur-specific. Off drops back to 128 for when speed matters more than the ~10-15s
+     *  of an earlier per-image blur-detection approach (Laplacian-variance sharpness
+     *  scoring) tried and abandoned the same day. On-device testing 2026-09-24 found 256
+     *  fixes every real misread seen at 128 on CLEAN cards too, not just blurred ones
+     *  (SOHRAAB DANISH: "SOHRAB"/"AZFAL" -> correct; SAROJINI M: a wrong PAN digit ->
+     *  correct) - so 128 was marginal for dense print regardless of blur, which is why
+     *  blur-detection was replaced with this simpler manual toggle instead of kept as an
+     *  "auto" option. Off drops back to 128 for when speed matters more than the ~10-15s
      *  accuracy premium. Every other doc type keeps its fixed cap unchanged. */
     private fun imageTokenCapFor(docType: String): Int = when {
         singleFieldCropDocTypes.contains(docType) -> 256
@@ -880,9 +881,9 @@ class MainActivity : AppCompatActivity() {
                     val isCrop = singleFieldCropDocTypes.contains(docType)
                     val skipJsonContract = isStage1 || isCrop
                     val skipSystemPromptOnly = skipSystemPromptOnlyDocTypes.contains(docType)
-                    // Captured once so the dynamic pan_full cap (see imageTokenCapFor's
-                    // blur-detection branch) can also be shown in the run's own output
-                    // below, instead of only being knowable by re-deriving it.
+                    // Captured once so pan_full's cap (see imageTokenCapFor's manual
+                    // switch branch) can also be shown in the run's own output below,
+                    // instead of only being knowable by re-deriving it.
                     val cap = imageTokenCapFor(docType)
                     val outcome = runPass(
                         imageFile,
