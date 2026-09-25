@@ -173,6 +173,22 @@
                 android:text="Off = current behaviour: reloads the full model every run. On = keeps the model resident across runs and applies the vision-tile latency fix (~14-16s/field vs ~50-90s), but the first run after changing model/threads/GPU pays one restart cost."
                 android:textSize="11sp"
                 android:textColor="#8A887D" />
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switchPanFullHighCap"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:checked="true"
+                android:text="pan_full: 256 image tokens (off = 128)" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="On (default): ~10-15s slower per run, but fixes real misreads found at 128 on clean cards (dropped/transposed letters, a wrong digit). Off = faster, only use once 128 has been re-validated."
+                android:textSize="11sp"
+                android:textColor="#8A887D" />
         </LinearLayout>
 
         <Button
