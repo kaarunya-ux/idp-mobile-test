@@ -1946,3 +1946,587 @@ PAN check: HIGH - 5/5 fields read
 PAN check: HIGH - 5/5 fields read
   dob -> 2000-01-20
 
+=== Run 159 | pan_full | 2026-09-25 10:19:08 ===
+[pan_full | CPU only | server mode | cap=128 | 43.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "DYIPS3491E",
+  "name": "ANISH SANJIVA SHETTY",
+  "parent_name": "SANJIVYA CHANDNYA SHETTY",
+  "parent_relation": "father",
+  "dob": "06/07/1991"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1991-07-06
+
+=== Run 160 | pan_full | 2026-09-25 10:25:40 ===
+[pan_full | CPU only | server mode | cap=128 | 23.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LUQPS8003N",
+  "name": "SAROJINI M",
+  "parent_name": "MURUGESAN",
+  "parent_relation": "father",
+  "dob": "20/01/2000"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2000-01-20
+
+=== Run 161 | pan_full | 2026-09-25 10:27:03 ===
+[pan_full | CPU only | server mode | cap=128 | 19.3s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FUIPM6282F",
+  "name": "MANKANDAN SRI DHARAN",
+  "parent_name": "SRIHARAN",
+  "parent_relation": "father",
+  "dob": "11/11/1999"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1999-11-11
+
+=== Run 162 | pan_full | 2026-09-25 10:28:35 ===
+[pan_full | CPU only | server mode | cap=128 | 19.2s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LYUPS3752G",
+  "name": "UDAYRAJ SINGH",
+  "parent_name": "YUVRAJ SINGH",
+  "parent_relation": "father",
+  "dob": "31/01/2001"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2001-01-31
+
+=== Run 163 | pan_full | 2026-09-25 10:29:47 ===
+[pan_full | CPU only | server mode | cap=128 | 19.3s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": "MOHD SAJID",
+  "parent_relation": "father",
+  "dob": "03/02/2004"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+
+=== Run 164 | pan_full | 2026-09-25 10:33:48 ===
+[pan_full | CPU only | server mode | cap=256 | 54.0s]
+
+{
+  "document_type": "pan",
+  "pan_number": "DYIPS3491E",
+  "name": "ANISH SANJIVA SHETTY",
+  "parent_name": "SANJIVA CHAINDYA SHETTY",
+  "parent_relation": "father",
+  "dob": "26/06/1991"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1991-06-26
+
+=== Run 165 | pan_full | 2026-09-25 11:00:29 ===
+[pan_full | CPU only | server mode | cap=256 | 59.9s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FCHPB6824B",
+  "name": "PRAYAGRAJ BEHERA",
+  "parent_name": "PREMANANDA BEHERA",
+  "parent_relation": "father",
+  "dob": "27/04/2000"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2000-04-27
+
+=== Run 166 | pan_full | 2026-09-25 11:01:24 ===
+[pan_full | CPU only | server mode | cap=256 | 44.1s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FUIPM6282F",
+  "name": "MANIKANDAN SRIDHARAN",
+  "parent_name": "SRIDHARAN",
+  "parent_relation": "father",
+  "dob": "11/19/1999"
+}
+
+PAN check: LOW - 5/5 fields read
+  - dob month out of range
+
+=== Run 167 | pan_full | 2026-09-25 11:02:30 ===
+[pan_full | CPU only | server mode | cap=256 | 41.0s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FFQPD2288B",
+  "name": "SOHRAAB DANISH",
+  "parent_name": "AFZAL ANISH",
+  "parent_relation": "father",
+  "dob": "14/04/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-04-14
+
+=== Run 168 | pan_full | 2026-09-25 11:03:41 ===
+[pan_full | CPU only | server mode | cap=256 | 39.1s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FUIPM6282F",
+  "name": "MANIKANDAN SRIDHARAN",
+  "parent_name": "Sridharan",
+  "parent_relation": "father",
+  "dob": "11/11/1999"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1999-11-11
+
+=== Run 169 | pan_full | 2026-09-25 11:27:10 ===
+[pan_full | CPU only | server mode | cap=128 | 32.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LYUPS3752G",
+  "name": "UDAYRAJ SINGH",
+  "parent_name": "YUVRAJ SINGH",
+  "parent_relation": "father",
+  "dob": "31/01/2001"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2001-01-31
+
+=== Run 170 | pan_full | 2026-09-25 11:27:50 ===
+[pan_full | CPU only | server mode | cap=128 | 22.3s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": "MOHD SAJID",
+  "parent_relation": "father",
+  "dob": "03/02/2004"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+
+=== Run 171 | pan_full | 2026-09-25 11:28:23 ===
+[pan_full | CPU only | server mode | cap=128 | 21.2s]
+
+{
+  "document_type": "pan",
+  "pan_number": "DYIPS3491E",
+  "name": "ANISH SANJIVA SHETTY",
+  "parent_name": "SANJIVYA CHANDNYA SHETTY",
+  "parent_relation": "father",
+  "dob": "06/07/1991"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1991-07-06
+
+=== Run 172 | pan_full | 2026-09-25 11:29:11 ===
+[pan_full | CPU only | server mode | cap=128 | 22.6s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FFQPD2288B",
+  "name": "SOHRAB DANISH",
+  "parent_name": "AZFAL ANISH",
+  "parent_relation": "father",
+  "dob": "14/04/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-04-14
+
+=== Run 173 | pan_full | 2026-09-25 11:31:06 ===
+[pan_full | CPU only | server mode | cap=128 | 20.7s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LUQPS8003N",
+  "name": "SAROJINI M",
+  "parent_name": "MURUGESAN",
+  "parent_relation": "father",
+  "dob": "20/01/2000"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2000-01-20
+
+=== Run 174 | pan_full | 2026-09-25 11:32:36 ===
+[pan_full | CPU only | server mode | cap=128 | 8.3s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FFQPD2288B",
+  "name": "SOHRAB DANISH",
+  "parent_name": "AZFAL ANISH",
+  "parent_relation": "father",
+  "dob": "14/04/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-04-14
+
+=== Run 175 | pan_full | 2026-09-25 11:33:17 ===
+[pan_full | CPU only | server mode | cap=128 | 23.4s]
+
+{
+  "document_type": "pan",
+  "pan_number": "OMRPS9699G",
+  "name": "ROSHAN SAHANI",
+  "parent_name": "RAAMESH SAHANI",
+  "parent_relation": "father",
+  "dob": "27/02/2002"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2002-02-27
+
+=== Run 176 | pan_full | 2026-09-25 11:34:47 ===
+[pan_full | CPU only | server mode | cap=128 | 11.0s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": "MOHD SAJID",
+  "parent_relation": "father",
+  "dob": "03/02/2004"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+
+=== Run 177 | pan_full | 2026-09-25 11:36:02 ===
+[pan_full | CPU only | server mode | cap=128 | 21.2s]
+
+{
+  "document_type": "pan",
+  "pan_number": "GQBPK8700C",
+  "name": "KOCHERLA SRIKANTH",
+  "parent_name": "MUKKANTI KOCHERLA",
+  "parent_relation": "father",
+  "dob": "04/05/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-05-04
+
+=== Run 178 | pan_full | 2026-09-25 11:39:54 ===
+[pan_full | CPU only | server mode | cap=128 | 23.6s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FCHPB6824B",
+  "name": "PRAYAGRAJ BEHERA",
+  "parent_name": "PREMANANDA BEHERA",
+  "parent_relation": "father",
+  "dob": "27/04/2000"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2000-04-27
+
+=== Run 179 | pan_full | 2026-09-25 11:44:26 ===
+[pan_full | CPU only | server mode | cap=256 | 48.6s]
+
+{
+  "document_type": "pan",
+  "pan_number": "DYIPS3491E",
+  "name": "ANISH SANJIVA SHETTY",
+  "parent_name": "SANJIVA CHAINDYA SHETTY",
+  "parent_relation": "father",
+  "dob": "26/06/1991"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1991-06-26
+
+=== Run 180 | pan_full | 2026-09-25 11:47:27 ===
+[pan_full | CPU only | server mode | cap=256 | 40.2s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FFQPD2288B",
+  "name": "SOHRAAB DANISH",
+  "parent_name": "AFZAL ANISH",
+  "parent_relation": "father",
+  "dob": "14/04/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-04-14
+
+=== Run 181 | pan_full | 2026-09-25 11:48:36 ===
+[pan_full | CPU only | server mode | cap=256 | 34.2s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LYUPS3752G",
+  "name": "UDAYRAJ SINGH",
+  "parent_name": "YUVRAJ SINGH",
+  "parent_relation": "father",
+  "dob": "31/01/2001"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2001-01-31
+
+=== Run 182 | pan_full | 2026-09-25 11:49:37 ===
+[pan_full | CPU only | server mode | cap=256 | 41.2s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": "MOHD SAJID",
+  "parent_relation": "father",
+  "dob": "03/02/2004"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+
+=== Run 183 | pan_full | 2026-09-25 11:50:44 ===
+[pan_full | CPU only | server mode | cap=256 | 41.7s]
+
+{
+  "document_type": "pan",
+  "pan_number": "FUIPM6282F",
+  "name": "MANIKANDAN SRIDHARAN",
+  "parent_name": "Sridharan",
+  "parent_relation": "father",
+  "dob": "11/11/1999"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1999-11-11
+
+=== Run 184 | pan_full | 2026-09-25 11:52:16 ===
+[pan_full | CPU only | server mode | cap=256 | 41.7s]
+
+{
+  "document_type": "pan",
+  "pan_number": "OMRPS9699G",
+  "name": "ROSHAN SAHANI",
+  "parent_name": "RAMESH SAHANI",
+  "parent_relation": "father",
+  "dob": "27/02/2002"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2002-02-27
+
+=== Run 185 | pan_full | 2026-09-25 12:06:01 ===
+[pan_full | CPU only | server mode | cap=256 | 8.6s]
+
+{
+  "document_type": "pan",
+  "pan_number": "OMRPS9699G",
+  "name": "ROSHAN SAHANI",
+  "parent_name": "RAMESH SAHANI",
+  "parent_relation": "father",
+  "dob": "27/02/2002"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2002-02-27
+
+=== Run 186 | pan_full | 2026-09-28 16:42:45 ===
+[pan_full | CPU only | server mode | cap=256 | 93.1s]
+
+
+
+PAN_FULL check: FAILED - no JSON object found
+
+=== Run 187 | pan_full | 2026-09-29 10:44:35 ===
+[pan_full | CPU only | cap=256 | 54.8s]
+
+{"document_type": "pan", "pan_number": "QFVPS0764H", "name": "SAMAD", "parent_name": "MOHD SAJID", "parent_relation": "father", "dob": "03/02/2004"}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+
+=== Run 188 | pan_full | 2026-09-29 10:50:52 ===
+[pan_full | CPU only | server mode | cap=256 | 86.6s]
+
+
+
+PAN_FULL check: FAILED - no JSON object found
+
+=== Run 189 | pan_full | 2026-09-29 10:55:39 ===
+[pan_full | CPU only | cap=256 | 107.8s]
+
+{"document_type": "pan", "pan_number": "FFQPD2288B", "name": "SOHRAAB DANISH", "parent_name": "AFZAL ANISH", "parent_relation": null, "dob": "14/04/1997"}
+
+PAN check: MEDIUM - 4/5 fields read, null: parent_relation
+  dob -> 1997-04-14
+
+=== Run 190 | pan_full | 2026-09-29 10:58:28 ===
+[pan_full | CPU only | server mode | cap=256 | 97.4s]
+
+
+
+PAN_FULL check: FAILED - no JSON object found
+
+=== Run 191 | pan_full | 2026-09-29 11:00:14 ===
+[pan_full | CPU only | server mode | cap=256 | 81.9s]
+
+
+
+PAN_FULL check: FAILED - no JSON object found
+
+=== Run 192 | pan | 2026-09-29 11:07:08 ===
+[pan | CPU only | server mode | cap=1024 | 74.1s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": null,
+  "parent_relation": null,
+  "dob": "03/02/2004"
+}
+
+PAN check: LOW - 3/5 fields read, null: parent_name, parent_relation
+  dob -> 2004-02-03
+
+=== Run 193 | pan | 2026-09-29 11:09:55 ===
+[pan | CPU only | server mode | cap=1024 | 47.8s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LYUPS3752G",
+  "name": "UDAYRAJ SINGH",
+  "parent_name": null,
+  "parent_relation": null,
+  "dob": "31/01/2001"
+}
+
+PAN check: LOW - 3/5 fields read, null: parent_name, parent_relation
+  dob -> 2001-01-31
+
+=== Run 194 | pan | 2026-09-29 11:22:23 ===
+[pan | CPU only | server mode | cap=1024 | 68.3s]
+
+{
+  "document_type": "pan",
+  "pan_number": "LYUPS3752G",
+  "name": "UDAYRAJ SINGH",
+  "parent_name": null,
+  "parent_relation": null,
+  "dob": "31/01/2001"
+}
+
+PAN check: LOW - 3/5 fields read, null: parent_name, parent_relation
+  dob -> 2001-01-31
+
+=== Run 195 | pan | 2026-09-29 11:24:08 ===
+[pan | CPU only | server mode | cap=1024 | 45.0s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": null,
+  "parent_relation": null,
+  "dob": "03/02/2004"
+}
+
+PAN check: LOW - 3/5 fields read, null: parent_name, parent_relation
+  dob -> 2004-02-03
+
+=== Run 196 | pan_full | 2026-09-29 11:26:20 ===
+[pan_full | CPU only | server mode | cap=256 | 87.0s]
+
+{
+    "document_type": "pan",
+    "pan_number": "FIUPM6282F",
+    "name": "MANIKANDAN SRIDHARAN",
+    "parent_name": "S. Manikandan",
+    "parent_relation": "father",
+    "dob": "11/11/1999"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1999-11-11
+
+=== Run 197 | pan_full | 2026-09-29 11:28:26 ===
+[pan_full | CPU only | server mode | cap=256 | 102.8s]
+
+{
+    "document_type": "pan",
+    "pan_number": "FFQPD2288B",
+    "name": "SOHRAAB DANISH",
+    "parent_name": "AFZAL ANISH",
+    "parent_relation": "father",
+    "dob": "14/04/1997"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 1997-04-14
+
+=== Run 198 | pan_full | 2026-09-29 11:45:58 ===
+[pan_full | CPU only | cap=256 | 60.6s]
+
+{"document_type": "pan", "pan_number": "QFVPS0764H", "name": "SAMAD", "parent_name": "MOHD SAJID", "parent_relation": "father", "dob": "03/02/2004"}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+
+=== Run 199 | pan_full | 2026-09-29 11:47:37 ===
+[pan_full | CPU only | cap=256 | 60.7s]
+
+{"document_type": "pan", "pan_number": "LYUPS3752G", "name": "UDAYRAJ SINGH", "parent_name": "YUVRAJ SINGH", "parent_relation": "father", "dob": "31/01/2001"}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2001-01-31
+
+=== Run 200 | pan_full | 2026-09-29 11:54:58 ===
+[pan_full | CPU only | server mode | cap=256 | 49.4s]
+
+{
+    "document_type": "pan",
+    "pan_number": "LYUPS3752G",
+    "name": "UDAYRAJ SINGH",
+    "parent_name": null,
+    "parent_relation": null,
+    "dob": null
+}
+
+PAN check: LOW - 2/5 fields read, null: parent_name, parent_relation, dob
+
+=== Run 201 | pan_full | 2026-09-29 11:56:35 ===
+[pan_full | CPU only | server mode | cap=256 | 45.5s]
+
+{
+  "document_type": "pan",
+  "pan_number": "QFVPS0764H",
+  "name": "SAMAD",
+  "parent_name": "MOHD SAJID",
+  "parent_relation": "father",
+  "dob": "03/02/2004"
+}
+
+PAN check: HIGH - 5/5 fields read
+  dob -> 2004-02-03
+

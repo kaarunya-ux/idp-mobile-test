@@ -403,6 +403,15 @@ class MainActivity : AppCompatActivity() {
     private fun isPaddleOcrModel(modelPath: String): Boolean =
         File(modelPath).name.contains("paddleocr", ignoreCase = true)
 
+    // MiniCPM-V 4.6 also ships a real custom Jinja chat template (confirmed via its GGUF's
+    // tokenizer.chat_template metadata, not plain ChatML), so it needs --jinja the same way
+    // PaddleOCR-VL does. Its mtmd projector type is "minicpmv4_6" - a distinct preprocessing
+    // path from both PaddleOCR-VL's area-based one and VisionPsy's idefics3, so it's kept as
+    // its own flag rather than folded into isPaddleOcr, even where the two currently need
+    // identical handling (--jinja, system-prompt folding).
+    private fun isMiniCpmModel(modelPath: String): Boolean =
+        File(modelPath).name.contains("minicpm", ignoreCase = true)
+
     // PaddleOCR-VL ONLY: its hparams are read straight from GGUF metadata
     // (get_u32(KEY_IMAGE_MIN/MAX_PIXELS)) rather than through set_limit_image_tokens(),
     // so it never sees --image-min-tokens/--image-max-tokens (see applyImageTokenCapEnv
@@ -504,12 +513,13 @@ class MainActivity : AppCompatActivity() {
         tokenCap: Int = 256
     ): PassResult {
         val isPaddleOcr = isPaddleOcrModel(modelPath)
+        val isMiniCpm = isMiniCpmModel(modelPath)
         val args = mutableListOf(
             execPath.absolutePath,
             "-m", modelPath,
             "--mmproj", mmprojPath
         )
-        if (isPaddleOcr) args += "--jinja"
+        if (isPaddleOcr || isMiniCpm) args += "--jinja"
         if (useGrammar) {
             val schemaFile = File(cacheDir, schemaFileName)
             schemaFile.writeText(schemaJson)
@@ -523,10 +533,14 @@ class MainActivity : AppCompatActivity() {
         // the 1 loaded image and fail outright. Folding system+user into one message
         // sidesteps it - confirmed on-device: same crop/prompt now extracts correctly
         // with no error. VisionPsy doesn't use --jinja at all, so it's unaffected and
-        // keeps using -sys as its own message exactly as before.
+        // keeps using -sys as its own message exactly as before. MiniCPM-V is folded the
+        // same way as a starting assumption (also --jinja, also a custom template) - NOT
+        // yet confirmed on-device whether it has the same failure mode; check the first
+        // MiniCPM run's output for a dropped/truncated image marker before trusting this.
+        val isJinjaModel = isPaddleOcr || isMiniCpm
         val effectivePrompt =
-            if (isPaddleOcr && useSystemPrompt) "$systemPrompt\n\n$promptText" else promptText
-        if (useSystemPrompt && !isPaddleOcr) args += listOf("-sys", systemPrompt)
+            if (isJinjaModel && useSystemPrompt) "$systemPrompt\n\n$promptText" else promptText
+        if (useSystemPrompt && !isJinjaModel) args += listOf("-sys", systemPrompt)
         args += listOf(
             "-p", effectivePrompt,
             "-n", maxTokens.toString(),
@@ -655,7 +669,8 @@ class MainActivity : AppCompatActivity() {
             args += if (useGpu) listOf("-ngl", "99", "--no-mmproj-offload")
                     else listOf("-ngl", "0", "--no-mmproj-offload", "--no-op-offload")
             val isPaddleOcr = isPaddleOcrModel(modelPath)
-            if (isPaddleOcr) args += "--jinja"
+            val isMiniCpm = isMiniCpmModel(modelPath)
+            if (isPaddleOcr || isMiniCpm) args += "--jinja"
 
             val pb = ProcessBuilder(args)
             pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
@@ -663,14 +678,15 @@ class MainActivity : AppCompatActivity() {
             // can't also run for Qwen.
             if (isPaddleOcr) applyDynSizeEnv(pb)
             applyImageTokenCapEnv(pb, imageTokenCap)
-            if (!isPaddleOcr) {
+            if (!isPaddleOcr && !isMiniCpm) {
                 // The actual fix under test - caps the vision-preprocessing upscale
                 // target at 768px instead of the model's hard-coded 2048px default. See
                 // LATENCY_OPTIMIZATION.md section 2, Stage 3, for why this is what lets
                 // a small crop get proportionally fewer tiles instead of always being
                 // upscaled to the same canvas size first. Only meaningful to VisionPsy's
-                // idefics3 preprocessor - PaddleOCR-VL uses a different, area-based one
-                // (mtmd_image_preprocessor_dyn_size) that doesn't read this var at all.
+                // idefics3 preprocessor - PaddleOCR-VL and MiniCPM-V both use their own
+                // different preprocessors (area-based / minicpmv4_6 slicing respectively)
+                // that don't read this var at all.
                 pb.environment()["MTMD_MAX_LONGEST_EDGE"] = "768"
             }
             pb.redirectErrorStream(true)
@@ -754,16 +770,25 @@ class MainActivity : AppCompatActivity() {
         val startNanos = System.nanoTime()
         val monitor = if (pid != null) startMonitoring(pid, startNanos) else MonitorHandle()
 
+        // Same --jinja image-marker corruption as runOnePass()'s isJinjaModel fold-in (see
+        // its comment): a separate system message renders fine as JSON here too, but goes
+        // through the same GGUF chat-template rendering path server-side, so it was never
+        // actually exempt - this server path just hadn't been tested against a model that
+        // hits it until MiniCPM-V's first server-mode run came back "no JSON object found"
+        // 2026-09-29. Fold for the same model set as the CLI path.
+        val isJinjaModel = isPaddleOcrModel(modelPath) || isMiniCpmModel(modelPath)
         val messages = org.json.JSONArray()
-        if (useSystemPrompt) {
+        if (useSystemPrompt && !isJinjaModel) {
             messages.put(org.json.JSONObject().apply {
                 put("role", "system")
                 put("content", systemPrompt)
             })
         }
         val b64 = android.util.Base64.encodeToString(imageFile.readBytes(), android.util.Base64.NO_WRAP)
+        val effectivePrompt =
+            if (isJinjaModel && useSystemPrompt) "$systemPrompt\n\n$promptText" else promptText
         val contentArr = org.json.JSONArray()
-            .put(org.json.JSONObject().apply { put("type", "text"); put("text", promptText) })
+            .put(org.json.JSONObject().apply { put("type", "text"); put("text", effectivePrompt) })
             .put(org.json.JSONObject().apply {
                 put("type", "image_url")
                 put("image_url", org.json.JSONObject().put("url", "data:image/jpeg;base64,$b64"))
@@ -781,6 +806,17 @@ class MainActivity : AppCompatActivity() {
             if (useGrammar && schemaJson.isNotBlank()) {
                 put("json_schema", org.json.JSONObject(schemaJson))
             }
+            // MiniCPM-V 4.6's chat template defaults to thinking mode ("thinking = 1" in
+            // the server's own startup log) - confirmed on-device 2026-09-29: every
+            // pan_full request hit the full max_tokens=512 ceiling with the model still
+            // inside its <think> block, so the actual JSON answer either barely made it
+            // out (slow but valid) or got truncated entirely ("no JSON object found"),
+            // depending on how long that image's reasoning ran. server-common.cpp reads
+            // this as a JSON bool (via .dump(), not a string) and overrides the
+            // template's default per-request. Sent unconditionally - harmless for models
+            // whose template doesn't support thinking, and there's no reason any of these
+            // structured-extraction doc types would want reasoning tokens anyway.
+            put("chat_template_kwargs", org.json.JSONObject().put("enable_thinking", false))
         }
 
         var rawOutput: String? = null
