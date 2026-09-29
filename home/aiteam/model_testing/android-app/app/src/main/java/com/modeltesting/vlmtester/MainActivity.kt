@@ -412,6 +412,48 @@ class MainActivity : AppCompatActivity() {
     private fun isMiniCpmModel(modelPath: String): Boolean =
         File(modelPath).name.contains("minicpm", ignoreCase = true)
 
+    /** MiniCPM-V only: its adaptive slicer (mtmd_image_preprocessor_llava_uhd, the
+     *  minicpmv-specific branch) splits the image into roughly ceil(width*height / 448^2)
+     *  tiles (hardcoded max 9, see mtmd-image.cpp), each costing ~12-13s through the
+     *  CPU-only vision encoder - confirmed on-device 2026-09-29: a 7-tile photo spent
+     *  92.7s of a 102.2s total run purely on vision encoding. Capping the longest edge
+     *  before sending cuts tile count directly (unlike the app's image-token-cap toggle,
+     *  which is a confirmed no-op for this model - see imageTokenCapFor). 896px (2x the
+     *  448 tile size) was tried first: consistent ~4 tiles, ~60s total, not aggressive
+     *  enough. 560px (1.25x tile size) targets 1-2 tiles instead - NOT yet validated for
+     *  whether it costs legibility on small print (the PAN number) at typical
+     *  camera-capture resolution; needs on-device accuracy re-verification, same caution
+     *  as every other untested cap value in this file.
+     *  Writes to a separate cache file rather than overwriting imageFile, since other
+     *  models keep using the original, full-resolution photo. */
+    private fun downscaleForMiniCpm(imageFile: File, longestEdge: Int = 560): File {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        val w = bounds.outWidth
+        val h = bounds.outHeight
+        if (w <= 0 || h <= 0 || maxOf(w, h) <= longestEdge) return imageFile
+
+        val scale = longestEdge.toFloat() / maxOf(w, h)
+        val targetW = (w * scale).toInt().coerceAtLeast(1)
+        val targetH = (h * scale).toInt().coerceAtLeast(1)
+
+        var inSampleSize = 1
+        while (w / (inSampleSize * 2) >= targetW && h / (inSampleSize * 2) >= targetH) {
+            inSampleSize *= 2
+        }
+        val decoded = BitmapFactory.decodeFile(
+            imageFile.absolutePath,
+            BitmapFactory.Options().apply { this.inSampleSize = inSampleSize }
+        ) ?: return imageFile
+        val scaled = Bitmap.createScaledBitmap(decoded, targetW, targetH, true)
+        if (scaled !== decoded) decoded.recycle()
+
+        val outFile = File(cacheDir, "minicpm_resized.jpg")
+        FileOutputStream(outFile).use { out -> scaled.compress(Bitmap.CompressFormat.JPEG, 92, out) }
+        scaled.recycle()
+        return outFile
+    }
+
     // PaddleOCR-VL ONLY: its hparams are read straight from GGUF metadata
     // (get_u32(KEY_IMAGE_MIN/MAX_PIXELS)) rather than through set_limit_image_tokens(),
     // so it never sees --image-min-tokens/--image-max-tokens (see applyImageTokenCapEnv
@@ -513,13 +555,12 @@ class MainActivity : AppCompatActivity() {
         tokenCap: Int = 256
     ): PassResult {
         val isPaddleOcr = isPaddleOcrModel(modelPath)
-        val isMiniCpm = isMiniCpmModel(modelPath)
         val args = mutableListOf(
             execPath.absolutePath,
             "-m", modelPath,
             "--mmproj", mmprojPath
         )
-        if (isPaddleOcr || isMiniCpm) args += "--jinja"
+        if (isPaddleOcr) args += "--jinja"
         if (useGrammar) {
             val schemaFile = File(cacheDir, schemaFileName)
             schemaFile.writeText(schemaJson)
@@ -533,14 +574,20 @@ class MainActivity : AppCompatActivity() {
         // the 1 loaded image and fail outright. Folding system+user into one message
         // sidesteps it - confirmed on-device: same crop/prompt now extracts correctly
         // with no error. VisionPsy doesn't use --jinja at all, so it's unaffected and
-        // keeps using -sys as its own message exactly as before. MiniCPM-V is folded the
-        // same way as a starting assumption (also --jinja, also a custom template) - NOT
-        // yet confirmed on-device whether it has the same failure mode; check the first
-        // MiniCPM run's output for a dropped/truncated image marker before trusting this.
-        val isJinjaModel = isPaddleOcr || isMiniCpm
+        // keeps using -sys as its own message exactly as before. MiniCPM-V does NOT need
+        // this fold (or --jinja at all) on the CLI path specifically - confirmed on-device
+        // 2026-09-29 via a direct A/B (adb shell, bypassing the app): --jinja+fold and
+        // plain -sys/-p produced byte-identical, correct output on the same image, and
+        // only the --jinja run's chat-template log showed the <think> wrapper - meaning
+        // the CLI's default templating (used when --jinja is absent) never invokes
+        // MiniCPM's thinking-mode chat template in the first place. --jinja/fold/
+        // enable_thinking:false are still needed in the SERVER-mode path
+        // (runOnePassServer) - llama-server's OpenAI-style endpoint requires --jinja to
+        // render a messages array through the model's real template at all, which is
+        // where the image-marker-corruption and thinking-mode bugs actually showed up.
         val effectivePrompt =
-            if (isJinjaModel && useSystemPrompt) "$systemPrompt\n\n$promptText" else promptText
-        if (useSystemPrompt && !isJinjaModel) args += listOf("-sys", systemPrompt)
+            if (isPaddleOcr && useSystemPrompt) "$systemPrompt\n\n$promptText" else promptText
+        if (useSystemPrompt && !isPaddleOcr) args += listOf("-sys", systemPrompt)
         args += listOf(
             "-p", effectivePrompt,
             "-n", maxTokens.toString(),
@@ -921,13 +968,23 @@ class MainActivity : AppCompatActivity() {
                     // switch branch) can also be shown in the run's own output below,
                     // instead of only being knowable by re-deriving it.
                     val cap = imageTokenCapFor(docType)
+                    val passImageFile =
+                        if (isMiniCpmModel(modelPath)) downscaleForMiniCpm(imageFile) else imageFile
                     val outcome = runPass(
-                        imageFile,
+                        passImageFile,
                         promptFor(docType), if (skipJsonContract) "" else schemaFor(docType),
                         "extract_schema.json",
                         useGrammar = !skipJsonContract,
                         useSystemPrompt = !skipJsonContract && !skipSystemPromptOnly,
-                        maxTokens = if (isStage1) 1024 else if (isCrop) 64 else 512,
+                        // pan_full's own schema (document_type/pan_number/name/parent_name/
+                        // parent_relation/dob) only ever needs ~70-150 tokens for a real
+                        // answer (confirmed on-device 2026-09-29: a successful MiniCPM-V
+                        // extraction used exactly 73) - 512 was generous headroom for other
+                        // models but let MiniCPM-V's runaway thinking-mode decode burn the
+                        // full budget before the enable_thinking:false fix. Kept as a safety
+                        // cap now that thinking is disabled, not the primary fix for that.
+                        maxTokens = if (isStage1) 1024 else if (isCrop) 64
+                                    else if (docType == "pan_full") 200 else 512,
                         tokenCap = cap
                     )
                     if (outcome.rawOutput == null) {

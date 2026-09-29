@@ -13,6 +13,51 @@ big.LITTLE: 4× Cortex-A78 @2.4GHz + 4× Cortex-A55 @2.0GHz), Mali-G68 MP5 GPU
 
 ---
 
+## Current status (as of 2026-09-29) — where we stopped
+
+A quick-reference snapshot, separate from the chronological log below. Read this
+first if picking the Qwen3-VL work back up.
+
+**Locked in, not under active investigation:**
+- Thread count 4, `-Cr 4-7`/`--cpu-strict` core-pinning flags set (see the §1
+  correction — the flags are set but confirmed **not actually working**), `-fa on`,
+  mmap on / mlock off, NEON+dotprod present, AssetManager ruled out as a
+  bottleneck, GPU toggle off by default (Vulkan confirmed a net loss on this
+  hardware), `applyDynSizeEnv` correctly gated to PaddleOCR-VL only.
+- `pan_full` image-token cap: manual toggle, default **256**, confirmed to fix
+  every real accuracy error found at 128 on the 5 ground-truthed clean cards.
+
+**The one real open lead, not yet acted on:**
+- The OpenMP core-pinning gap (§1). This is the single highest-confidence
+  remaining latency lever for Qwen specifically — unlike the MiniCPM-V slice-count
+  problem (a structural, model-architecture cost), this is a **plain bug**: the
+  pinning flags are already there, already intended to work, and silently don't.
+  Two fix paths are written up and ready to try (swap to `build-android-opt`, or
+  add `OMP_PLACES`/`OMP_PROC_BIND` env vars) — neither has been implemented or
+  measured yet. This is the natural next step for Qwen if latency work resumes.
+
+**Testing gaps, not blockers, just incomplete:**
+- Blurred-image accuracy at cap 128: zero real data (one attempt hung and was
+  killed before the manual toggle existed; never retried since).
+- 3 of the 5 ground-truthed clean cards never tested at cap 128 (ANISH SANJIVA
+  SHETTY, MANIKANDAN SRIDHARAN, PRAYAGRAJ BEHERA).
+- Every full-card doc type other than `pan_full`/`pan_crop` (aadhaar, dl,
+  passport, tt_*) is still sitting at the older, pre-2026-09-24 default of 1024
+  image tokens — never put through the same on-device rigor `pan_full` got. This
+  is the biggest *unknown* in the whole tuning history: it might be fine, or it
+  might be carrying the same kind of "128 was marginal" surprise `pan_full` had,
+  and nobody's checked.
+
+**Why work moved away from Qwen mid-session:** the 128-vs-256 investigation and
+the OpenMP-gap discovery both happened while validating Qwen, but attention then
+shifted to bringing up MiniCPM-V 4.6 as a second model (see the separate
+`HANDOVER.md` in this repo for that thread) — not because Qwen's open items were
+resolved, but because a second model's correctness bugs (thinking-mode runaway
+decode, a server-mode chat-template gap) were more urgent to fix first. Qwen's
+own open item (§ above) is still exactly where it was left.
+
+---
+
 ## 1. CPU threading & core placement
 
 - **Thread count:** `-t`/`-tb` set from a UI slider, default **4** — chosen because
