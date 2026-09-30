@@ -4,6 +4,10 @@ import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Bundle
@@ -22,6 +26,7 @@ import com.modeltesting.vlmtester.databinding.ActivityMainBinding
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
+import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
 
@@ -454,6 +459,70 @@ class MainActivity : AppCompatActivity() {
         return outFile
     }
 
+    /** A field region as fractions of the FRONT of the card (0..1), so it holds for any
+     *  card size. Bands are deliberately generous: a first version with tight boxes clipped
+     *  the PAN number on one test card and the DOB / father's name on another, and the
+     *  model then returned null or INVENTED a value instead of failing. */
+    private data class Band(val x0: Float, val y0: Float, val x1: Float, val y1: Float)
+
+    private val panFrontBands = listOf(
+        Band(0.20f, 0.30f, 0.72f, 0.52f),  // "Permanent Account Number Card" + PAN number
+        Band(0.00f, 0.52f, 0.50f, 0.68f),  // name
+        Band(0.00f, 0.66f, 0.50f, 0.82f),  // father's name
+        Band(0.00f, 1.00f - 0.20f, 0.50f, 1.00f)  // date of birth
+    )
+
+    /** pan_full + MiniCPM-V only. MiniCPM-V's slicer always makes >= 3 tiles for any image
+     *  over 448px on a side (~7s each), but a single 448x448 image is exactly one tile.
+     *  So instead of shrinking the whole photo and letting the slicer cut it (two
+     *  resamples, and tiles spent on the QR code / background / back of the card), cut the
+     *  field regions from the ORIGINAL pixels, stack them into one 448x448 canvas (one
+     *  resample, about 1.0-1.35x) and send that.
+     *  Measured in the adb test harness 2026-09-30 on 5 clean front-card crops, 25 runs:
+     *  avg 22.4s vs ~41s, 92% of fields / 60% of documents correct (see
+     *  MINICPM_LATENCY_FINDINGS.md). NOT validated on real camera photos.
+     *  ASSUMES [imageFile] is the front of the card and nothing else - the bands are
+     *  fractions of the whole picture, so a photo with the card small in the frame, or
+     *  both sides in one image, puts them on the wrong text. Returns the file to send. */
+    private fun buildFieldCanvasFile(imageFile: File, size: Int = 448): File {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        var sample = 1
+        // Keep the decode small enough for memory but never below ~1600px on the long edge:
+        // the bands are cut from real pixels, that is the whole point.
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1600) sample *= 2
+        val card = BitmapFactory.decodeFile(
+            imageFile.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample }
+        ) ?: return imageFile
+
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out).apply { drawColor(Color.WHITE) }
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        var y = 0f
+        for (b in panFrontBands) {
+            val x0 = (b.x0 * card.width).roundToInt().coerceIn(0, card.width - 1)
+            val y0 = (b.y0 * card.height).roundToInt().coerceIn(0, card.height - 1)
+            val x1 = (b.x1 * card.width).roundToInt().coerceIn(x0 + 1, card.width)
+            val y1 = (b.y1 * card.height).roundToInt().coerceIn(y0 + 1, card.height)
+            val crop = Bitmap.createBitmap(card, x0, y0, x1 - x0, y1 - y0)
+            val scale = minOf(size.toFloat() / crop.width, 1.35f)
+            val dw = crop.width * scale
+            val dh = crop.height * scale
+            canvas.drawBitmap(crop, null, RectF(0f, y, dw, y + dh), paint)
+            y += dh + 3f
+            crop.recycle()
+        }
+        card.recycle()
+
+        val outFile = File(cacheDir, "field_canvas.jpg")
+        FileOutputStream(outFile).use { o -> out.compress(Bitmap.CompressFormat.JPEG, 95, o) }
+        out.recycle()
+        // Kept next to run_log.txt so a bad crop can be inspected after the fact.
+        try { outFile.copyTo(File(getExternalFilesDir(null), "last_canvas.jpg"), overwrite = true) }
+        catch (_: Exception) {}
+        return outFile
+    }
+
     // PaddleOCR-VL ONLY: its hparams are read straight from GGUF metadata
     // (get_u32(KEY_IMAGE_MIN/MAX_PIXELS)) rather than through set_limit_image_tokens(),
     // so it never sees --image-min-tokens/--image-max-tokens (see applyImageTokenCapEnv
@@ -537,8 +606,15 @@ class MainActivity : AppCompatActivity() {
      *  flow and the two-sided (front+back) flow below - same subprocess/kill-switch
      *  handling either way, just parameterized by which image/prompt/schema to use. */
     /** rawOutput is null when the user hit Stop mid-pass - elapsedSec is always valid
-     *  either way, so a stop message can still report how long it ran for. */
-    private data class PassResult(val rawOutput: String?, val elapsedSec: Double)
+     *  either way, so a stop message can still report how long it ran for.
+     *  diag is a short, human-readable diagnostics string written into run_log.txt
+     *  alongside the result: image dimensions actually sent, whether the server was
+     *  cold or warm, and (server mode) the upstream usage token counts. The token
+     *  counts matter because prompt_tokens is dominated by vision tokens, which is
+     *  the closest available proxy for how many 448px tiles the slicer produced. */
+    private data class PassResult(
+        val rawOutput: String?, val elapsedSec: Double, val diag: String = ""
+    )
 
     private fun runOnePass(
         execPath: File, modelPath: String, mmprojPath: String, imageFile: File,
@@ -608,8 +684,20 @@ class MainActivity : AppCompatActivity() {
             "-Cr", "4-7", "-Crb", "4-7", "--cpu-strict", "1", "--cpu-strict-batch", "1",
             // 'auto' (the default) was leaving this off in practice; forcing it on
             // measurably helped prefill throughput in on-device testing 2026-09-24.
-            "-fa", "on"
+            "-fa", "on",
+            // llama.cpp runs an extra warm-up forward pass on every model load by
+            // default. Measured on-device 2026-09-29 with MiniCPM-V 4.6 / pan_full:
+            // 58.6s with it vs 54.5s without (-4.1s), and byte-identical output under
+            // --temp 0. Only costs anything on the CLI path, which reloads the model
+            // every run - a warm server pays it once at startup and is unaffected.
+            "--no-warmup"
         )
+        // MiniCPM-V only: with no -c, llama.cpp uses the model's full 262144-token context
+        // and reserves a ~3 GB KV cache up front (1.9s just to allocate). Real usage is
+        // ~400 tokens, so cap it. Measured on-device 2026-09-30, MiniCPM-V 4.6 / pan_full,
+        // same card, byte-identical output: 44.3s -> 38.1s (crop), 48.2s -> 42.5s avg
+        // over 4 camera-frame simulations. (-fit off was also tried: no gain, not used.)
+        if (isMiniCpmModel(modelPath)) args += listOf("-c", "4096")
         if (useGpu) {
             // Offload the LM to GPU; vision encoder (mmproj) stays on CPU regardless.
             args += listOf("-ngl", "99", "--no-mmproj-offload")
@@ -655,7 +743,33 @@ class MainActivity : AppCompatActivity() {
         // A kill unblocks readText() with a truncated stream rather than an exception,
         // so this must be checked before trusting rawOutput at all - otherwise a
         // killed run could render partial/garbage JSON as if valid.
-        return PassResult(if (userStopped) null else rawOutput, elapsedSec)
+        return PassResult(
+            if (userStopped) null else rawOutput, elapsedSec,
+            "img=${imageDims(imageFile)} ${cliDiag(rawOutput)}"
+        )
+    }
+
+    /** Pulls llama.cpp's own per-stage timing summary out of the CLI's merged
+     *  stdout+stderr so the run log records where the wall-clock actually went,
+     *  instead of one opaque total. The binary already prints these
+     *  ("llama_perf_context_print: prompt eval time = ... / N tokens (... tok/s)"
+     *  and the matching "eval time" line) on every run; extractAnswer() strips them
+     *  as preamble, so before this they were parsed and thrown away. prompt eval is
+     *  where vision encoding lands, which is the split needed to tell "too many
+     *  vision tiles" apart from "too many generated tokens" - the two call for
+     *  opposite fixes. Returns a short one-line summary, or a marker if the binary
+     *  didn't emit the block. */
+    private fun cliDiag(raw: String?): String {
+        if (raw.isNullOrEmpty()) return "perf: no output"
+        val lines = raw.lineSequence().filter { it.contains("llama_perf_context_print") }.toList()
+        if (lines.isEmpty()) return "perf: not reported by binary"
+        fun grab(label: String): String {
+            val l = lines.firstOrNull { it.contains(label) } ?: return "$label=?"
+            val ms = Regex("= *([0-9.]+) ms").find(l)?.groupValues?.get(1) ?: return "$label=?"
+            val n = Regex("/ *([0-9]+) (tokens|runs)").find(l)?.groupValues?.get(1) ?: return "$label=?"
+            return "$label=${ms}ms/$n"
+        }
+        return "perf: ${grab("prompt eval time")} ${grab("eval time")}"
     }
 
     // --- Persistent server mode (experimental) --------------------------------------
@@ -676,10 +790,47 @@ class MainActivity : AppCompatActivity() {
         val useGpu: Boolean, val imageTokenCap: Int
     )
 
+    /** Whether a change to the image-token cap should force the server to restart.
+     *
+     *  The cap is applied as a STARTUP env var (applyImageTokenCapEnv on the server's
+     *  ProcessBuilder), not a per-request field - so today, flipping pan_full's 128/256
+     *  toggle tears down a running server and pays a full model reload. Measured
+     *  2026-09-29: that reload alone is ~24.6s.
+     *
+     *  But the cap is only actually READ by models that route their image sizing
+     *  through set_limit_image_tokens() - i.e. Qwen's dyn_size preprocessor. MiniCPM-V's
+     *  llava_uhd/minicpmv slicer and PaddleOCR's area-based one never read
+     *  LLAMA_ARG_IMAGE_MAX_TOKENS at all (same reason MTMD_MAX_LONGEST_EDGE is gated
+     *  off for them). Restarting for a setting the model ignores is a pure 24.6s
+     *  waste, so only treat the cap as restart-worthy for models that use it. */
+    private fun capAffectsServer(modelPath: String): Boolean =
+        !isPaddleOcrModel(modelPath) && !isMiniCpmModel(modelPath)
+
     @Volatile private var serverState: ServerState? = null
     private val serverLock = Object()
 
     private fun findFreePort(): Int = java.net.ServerSocket(0).use { it.localPort }
+
+    /** What ensureServerRunning() hands back so a run can be attributed to either a
+     *  reused (warm) server or a freshly-started (cold) one. This distinction was
+     *  invisible in run_log.txt and turned out to explain the whole latency
+     *  bimodality: server-mode runs cluster at either ~45-50s (warm reuse, no model
+     *  load) or ~80-103s (cold start, full 529MB LM + 728MB mmproj load off flash).
+     *  coldStartSec is the time actually spent inside the /health readiness poll
+     *  above, i.e. spawn + model load + backend init. */
+    private class ServerHandle(val port: Int, val coldStart: Boolean, val coldStartSec: Double)
+
+    /** Reports the pixel dimensions of an image file without decoding its full
+     *  contents, for the run log. Cheap (bounds-only decode) and the single most
+     *  useful number for reasoning about MiniCPM-V's vision cost: its slicer picks
+     *  tile count purely from width*height vs 448^2 (mtmd-image.cpp:684-687), so
+     *  seeing the actual dimensions makes the tile count derivable from the log
+     *  instead of guessed at. */
+    private fun imageDims(f: File): String {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.absolutePath, o)
+        return if (o.outWidth > 0) "${o.outWidth}x${o.outHeight}" else "unknown"
+    }
 
     /** Starts llama-server if it isn't already running with this exact model/mmproj/
      *  threads/GPU combination - those became server-startup-time settings under this
@@ -690,14 +841,17 @@ class MainActivity : AppCompatActivity() {
     private fun ensureServerRunning(
         execPath: File, modelPath: String, mmprojPath: String, threads: Int,
         useGpu: Boolean, imageTokenCap: Int
-    ): Int {
+    ): ServerHandle {
+        // See capAffectsServer() - for MiniCPM-V/PaddleOCR the cap is inert, so it must
+        // not be part of the reuse comparison or every toggle press costs a full reload.
+        val capIsStartupSetting = capAffectsServer(modelPath)
         synchronized(serverLock) {
             val existing = serverState
             if (existing != null && existing.process.isAlive &&
                 existing.modelPath == modelPath && existing.mmprojPath == mmprojPath &&
                 existing.threads == threads && existing.useGpu == useGpu &&
-                existing.imageTokenCap == imageTokenCap) {
-                return existing.port
+                (!capIsStartupSetting || existing.imageTokenCap == imageTokenCap)) {
+                return ServerHandle(existing.port, coldStart = false, coldStartSec = 0.0)
             }
             existing?.process?.destroyForcibly()
             serverState = null
@@ -718,6 +872,8 @@ class MainActivity : AppCompatActivity() {
             val isPaddleOcr = isPaddleOcrModel(modelPath)
             val isMiniCpm = isMiniCpmModel(modelPath)
             if (isPaddleOcr || isMiniCpm) args += "--jinja"
+            // Same 262144-token default-context KV waste as runOnePass() - see comment there.
+            if (isMiniCpm) args += listOf("-c", "4096")
 
             val pb = ProcessBuilder(args)
             pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
@@ -760,6 +916,7 @@ class MainActivity : AppCompatActivity() {
             // reported a bare timeout. Worth keeping so any FUTURE readiness failure is
             // diagnosable from the error text alone, without another logcat round-trip.
             var lastError: String? = null
+            val coldStartNanos = System.nanoTime()
             val ready = (1..600).any {
                 Thread.sleep(50)
                 if (!process.isAlive) {
@@ -789,7 +946,8 @@ class MainActivity : AppCompatActivity() {
 
             val state = ServerState(process, pid, port, modelPath, mmprojPath, threads, useGpu, imageTokenCap)
             serverState = state
-            return port
+            val coldStartSec = (System.nanoTime() - coldStartNanos) / 1_000_000_000.0
+            return ServerHandle(port, coldStart = true, coldStartSec = coldStartSec)
         }
     }
 
@@ -812,7 +970,18 @@ class MainActivity : AppCompatActivity() {
         useGrammar: Boolean = true, useSystemPrompt: Boolean = true, maxTokens: Int = 512,
         tokenCap: Int = 256
     ): PassResult {
-        val port = ensureServerRunning(execPath, modelPath, mmprojPath, threads, useGpu, tokenCap)
+        // Taken BEFORE ensureServerRunning() on purpose. The per-request timer below
+        // deliberately starts after it, because that is the number the live stats card
+        // and the old run_log entries were reporting - and it is the right number for
+        // "how long does an extraction take once the model is resident". But it means
+        // a COLD start's model load was never counted anywhere: the pre-existing
+        // "server mode | 102.8s" entries in run_log.txt are request time only, so their
+        // real wall-clock cost was up to a full model load higher and the log gave no
+        // way to tell the two apart. totalStartNanos captures the honest end-to-end
+        // figure so both numbers are now visible side by side.
+        val totalStartNanos = System.nanoTime()
+        val server = ensureServerRunning(execPath, modelPath, mmprojPath, threads, useGpu, tokenCap)
+        val port = server.port
         val pid = serverState?.pid
         val startNanos = System.nanoTime()
         val monitor = if (pid != null) startMonitoring(pid, startNanos) else MonitorHandle()
@@ -867,6 +1036,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         var rawOutput: String? = null
+        var usageSummary = "usage: unavailable"
         try {
             val conn = java.net.URL("http://127.0.0.1:$port/v1/chat/completions")
                 .openConnection() as java.net.HttpURLConnection
@@ -883,6 +1053,21 @@ class MainActivity : AppCompatActivity() {
                 .bufferedReader().use { it.readText() }
             if (code !in 200..299) throw IllegalStateException("Server returned HTTP $code: $body")
 
+            // llama-server returns an OpenAI-style "usage" block on every request.
+            // prompt_tokens is dominated by the vision tokens produced by the image
+            // preprocessor, so it is the only direct, per-run measurement of how much
+            // image the model actually ingested - previously nothing recorded this, so
+            // a latency change from a resolution/tile change could never be confirmed
+            // from the log. Absent on an error body, hence the safe fallback above.
+            runCatching {
+                val u = org.json.JSONObject(body).optJSONObject("usage")
+                if (u != null) {
+                    val pt = u.optInt("prompt_tokens", -1)
+                    val ct = u.optInt("completion_tokens", -1)
+                    usageSummary = "prompt_tokens=$pt completion_tokens=$ct"
+                }
+            }
+
             rawOutput = org.json.JSONObject(body)
                 .getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message").getString("content")
@@ -898,7 +1083,13 @@ class MainActivity : AppCompatActivity() {
 
         monitor.stop = true
         val elapsedSec = (System.nanoTime() - startNanos) / 1_000_000_000.0
-        return PassResult(if (userStopped) null else rawOutput, elapsedSec)
+        val serverDesc = if (server.coldStart)
+            "server=COLD(started in %.1fs)".format(server.coldStartSec)
+        else
+            "server=WARM(reused, no model load)"
+        val totalSec = (System.nanoTime() - totalStartNanos) / 1_000_000_000.0
+        val diag = "img=${imageDims(imageFile)} $serverDesc $usageSummary total_wall=%.1fs".format(totalSec)
+        return PassResult(if (userStopped) null else rawOutput, elapsedSec, diag)
     }
 
     private fun runExtraction() {
@@ -915,6 +1106,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val useGpu = binding.switchGpu.isChecked
+        val useFieldCanvas = binding.switchFieldCanvas.isChecked
         val threads = binding.seekThreads.progress + 1
 
         // twoSidedDocTypes currently only contains "tt_id" - every other type takes
@@ -936,8 +1128,14 @@ class MainActivity : AppCompatActivity() {
                 val mmprojPath = File(modelsDir(), mmprojName).absolutePath
                 val mode = "$docType | " +
                     (if (useGpu) "GPU (LM on Vulkan, mmproj on CPU)" else "CPU only") +
-                    (if (useServerMode) " | server mode" else "")
-
+                    (if (useServerMode) " | server mode" else "") +
+                    // Model identity was previously absent from every logged run, which
+                    // made it impossible to tell a MiniCPM-V result from a Qwen3-VL one
+                    // after the fact - several conclusions in HANDOVER.md and
+                    // LATENCY_OPTIMIZATION.md rest on runs that can't actually be
+                    // attributed to a model. Both filenames plus the thread count now go
+                    // into every run so a log line is self-describing.
+                    " | model=$modelName | mmproj=$mmprojName | threads=$threads"
                 // Unifies the two invocation paths behind one call shape so the rest of
                 // this function (single-image and two-sided alike) doesn't need to
                 // duplicate the branch at every call site. schemaFileName is only
@@ -968,8 +1166,14 @@ class MainActivity : AppCompatActivity() {
                     // switch branch) can also be shown in the run's own output below,
                     // instead of only being knowable by re-deriving it.
                     val cap = imageTokenCapFor(docType)
-                    val passImageFile =
-                        if (isMiniCpmModel(modelPath)) downscaleForMiniCpm(imageFile) else imageFile
+                    val useCanvas = useFieldCanvas && docType == "pan_full" && isMiniCpmModel(modelPath)
+                    val prepStart = System.nanoTime()
+                    val passImageFile = when {
+                        useCanvas -> buildFieldCanvasFile(imageFile)
+                        isMiniCpmModel(modelPath) -> downscaleForMiniCpm(imageFile)
+                        else -> imageFile
+                    }
+                    val prepSec = (System.nanoTime() - prepStart) / 1_000_000_000.0
                     val outcome = runPass(
                         passImageFile,
                         promptFor(docType), if (skipJsonContract) "" else schemaFor(docType),
@@ -1000,8 +1204,19 @@ class MainActivity : AppCompatActivity() {
                     val cleaned = extractAnswer(outcome.rawOutput)
                     val report = if (isCrop) validateCropField(docType, cleaned) else validateExtraction(docType, cleaned)
                     val runNumber = nextRunNumber()
-                    val fullOutput =
-                        "[$mode | cap=$cap | %.1fs]\n\n$cleaned\n\n$report".format(outcome.elapsedSec)
+                    // Header is formatted on its own and the model output is concatenated
+                    // afterwards, rather than interpolated into the same format string.
+                    // $cleaned and $report are model-derived text: any literal '%' in them
+                    // (a name, a validation note) would otherwise be read as a format
+                    // specifier and throw or mangle the saved run. Pre-existing shape,
+                    // but this line was already being rewritten for the diagnostics.
+                    val header = "[$mode | cap=$cap | %.1fs]".format(outcome.elapsedSec)
+                    // Image-prep time (canvas build or downscale) happens BEFORE the timer in
+                    // runOnePass starts, so it is added back here to give the real end-to-end
+                    // time a user waits for.
+                    val prepDiag = "prep=${if (useCanvas) "canvas" else "downscale"} %.2fs total_incl_prep=%.1fs"
+                        .format(prepSec, prepSec + outcome.elapsedSec)
+                    val fullOutput = "$header\n${outcome.diag} $prepDiag\n\n$cleaned\n\n$report"
                     saveRun(runNumber, docType, fullOutput)
                     ui.post {
                         binding.progressBar.visibility = View.GONE
@@ -1016,9 +1231,19 @@ class MainActivity : AppCompatActivity() {
                 // Two-sided: front pass, then back pass, then merge + validate both
                 // together. Stop during either pass aborts the whole run - it never
                 // silently continues to the other side on a truncated read.
+                // MiniCPM-V needs the same downscale here that the single-pass branch
+                // above applies - without it both sides go out at full camera
+                // resolution, which drives the slicer to its hardcoded 9-tile ceiling
+                // (mtmd-image.cpp:684) and costs roughly 10 vision encodes instead of
+                // 2-3, i.e. well over a minute per side. Previously only the
+                // single-pass branch called this at all.
+                val frontImg: File =
+                    if (isMiniCpmModel(modelPath)) downscaleForMiniCpm(imageFile) else imageFile
+                val backImg: File =
+                    if (isMiniCpmModel(modelPath)) downscaleForMiniCpm(backImageFile!!) else backImageFile!!
                 ui.post { binding.tvOutput.text = "Running front side (1/2)..." }
                 val frontOutcome = runPass(
-                    imageFile,
+                    frontImg,
                     promptFor("${docType}_front"), schemaFor("${docType}_front"),
                     "extract_schema_front.json",
                     tokenCap = imageTokenCapFor(docType)
@@ -1037,7 +1262,7 @@ class MainActivity : AppCompatActivity() {
 
                 ui.post { binding.tvOutput.text = "Running back side (2/2)..." }
                 val backOutcome = runPass(
-                    backImageFile!!,
+                    backImg,
                     promptFor("${docType}_back"), schemaFor("${docType}_back"),
                     "extract_schema_back.json",
                     tokenCap = imageTokenCapFor(docType)
@@ -1061,8 +1286,11 @@ class MainActivity : AppCompatActivity() {
                 val totalElapsed = frontOutcome.elapsedSec + backOutcome.elapsedSec
                 val runNumber = nextRunNumber()
                 val fullOutput =
-                    "[$mode | %.1fs total: front %.1fs + back %.1fs]\n\n"
-                        .format(totalElapsed, frontOutcome.elapsedSec, backOutcome.elapsedSec) +
+                    "[$mode | %.1fs total: front %.1fs + back %.1fs]\nFRONT: %s\nBACK: %s\n\n"
+                        .format(
+                            totalElapsed, frontOutcome.elapsedSec, backOutcome.elapsedSec,
+                            frontOutcome.diag, backOutcome.diag
+                        ) +
                     "FRONT:\n$frontCleaned\n\nBACK:\n$backCleaned\n\n$report"
                 saveRun(runNumber, docType, fullOutput)
                 ui.post {

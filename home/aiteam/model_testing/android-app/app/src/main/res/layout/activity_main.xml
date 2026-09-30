@@ -189,6 +189,22 @@
                 android:text="On (default): ~10-15s slower per run, but fixes real misreads found at 128 on clean cards (dropped/transposed letters, a wrong digit). Off = faster, only use once 128 has been re-validated."
                 android:textSize="11sp"
                 android:textColor="#8A887D" />
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switchFieldCanvas"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:checked="false"
+                android:text="pan_full + MiniCPM-V: field canvas (experimental)" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Cuts the PAN number / name / father / DOB regions out of the ORIGINAL photo and sends them as one 448x448 image (1 vision tile instead of 3). Expects a picture of the FRONT of the card only - crop it first. Saves the canvas as last_canvas.jpg next to run_log.txt."
+                android:textSize="11sp"
+                android:textColor="#8A887D" />
         </LinearLayout>
 
         <Button
