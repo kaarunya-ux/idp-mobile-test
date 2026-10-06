@@ -38,3 +38,5 @@ cmake-build-*/
 
 # Test data
 test_images/
+app_build/
+lfm2_test_results/
