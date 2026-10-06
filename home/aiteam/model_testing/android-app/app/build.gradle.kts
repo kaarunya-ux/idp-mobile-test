@@ -50,4 +50,6 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.activity:activity-ktx:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    // On-device OCR (bundled Latin model, no Play Services download). Used by the OCR-first path.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }

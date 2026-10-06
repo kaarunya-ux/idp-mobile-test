@@ -2,6 +2,7 @@ package com.modeltesting.vlmtester
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -22,6 +23,10 @@ import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.modeltesting.vlmtester.databinding.ActivityMainBinding
 import java.io.File
 import java.io.FileOutputStream
@@ -192,6 +197,70 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnRun.setOnClickListener { runExtraction() }
         binding.btnStop.setOnClickListener { stopExtraction() }
+
+        handleOcrIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleOcrIntent(intent)
+    }
+
+    // ---- OCR-first experiment (branch 2b-withOCR) -------------------------------------
+    // Headless trigger so OCR quality/latency can be measured over adb on a folder of test
+    // images without tapping through the UI:
+    //   adb shell am start -n com.modeltesting.vlmtester/.MainActivity --ez ocr_run true
+    // Reads every image in <externalFilesDir>/ocr_in (adb push them there - that folder is
+    // readable without storage permission) and writes <externalFilesDir>/ocr_results.txt:
+    // per image the decoded size, OCR time, and every recognised line with its bounding box.
+    private val ocrRecognizer by lazy {
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
+
+    private fun handleOcrIntent(i: Intent?) {
+        if (i?.getBooleanExtra("ocr_run", false) != true) return
+        i.removeExtra("ocr_run")
+        Thread {
+            try { runOcrOnFolder() }
+            catch (e: Exception) {
+                File(getExternalFilesDir(null), "ocr_results.txt").writeText("OCR run failed: $e\n")
+            }
+        }.start()
+    }
+
+    private fun runOcrOnFolder() {
+        val inDir = File(getExternalFilesDir(null), "ocr_in")
+        val files = inDir.listFiles { f ->
+            f.extension.lowercase() in setOf("jpg", "jpeg", "png", "webp")
+        }?.sortedBy { it.name }.orEmpty()
+
+        // Blocks the worker thread until ML Kit finishes; must never run on the main thread.
+        fun ocr(bmp: Bitmap): Pair<com.google.mlkit.vision.text.Text, Double> {
+            val t0 = System.nanoTime()
+            val res = Tasks.await(ocrRecognizer.process(InputImage.fromBitmap(bmp, 0)))
+            return res to (System.nanoTime() - t0) / 1e6
+        }
+
+        val sb = StringBuilder("OCR run: ${files.size} images from ${inDir.absolutePath}\n")
+        // First call includes ML Kit's model initialisation; time it separately so the
+        // per-image numbers below are the warm cost a second scan would see.
+        files.firstOrNull()?.let { f ->
+            BitmapFactory.decodeFile(f.absolutePath)?.let { bmp ->
+                sb.append("first call (includes init): %.0f ms\n".format(ocr(bmp).second))
+                bmp.recycle()
+            }
+        }
+        for (f in files) {
+            val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: continue
+            val (res, ms) = ocr(bmp)
+            sb.append("=== ${f.name} ${bmp.width}x${bmp.height} ocr_ms=%.0f\n".format(ms))
+            for (block in res.textBlocks) for (line in block.lines) {
+                val r = line.boundingBox
+                sb.append("[${r?.left},${r?.top},${r?.right},${r?.bottom}] ${line.text}\n")
+            }
+            bmp.recycle()
+        }
+        File(getExternalFilesDir(null), "ocr_results.txt").writeText(sb.toString())
     }
 
     // Shows/hides the back-side picker depending on whether the selected type needs
@@ -417,6 +486,42 @@ class MainActivity : AppCompatActivity() {
     private fun isMiniCpmModel(modelPath: String): Boolean =
         File(modelPath).name.contains("minicpm", ignoreCase = true)
 
+    /** LFM2-VL-3B (Liquid AI), Q4_K_M LM + Q8_0 mmproj. Its image path is NOT tiled below
+     *  512x512 and its token count follows --image-max-tokens smoothly (about 0.15s per
+     *  image token on this phone), so it gets its own settings instead of the generic ones:
+     *  128 image tokens, -c 4096 (the GGUF's default context is 128,000), the spaced
+     *  single-line grammar and the bullet prompt (assets/grammars/pan_full_lfm2.gbnf and
+     *  assets/prompts/user_pan_full_lfm2.txt).
+     *  All of it measured on-device 2026-09-30 and written up in
+     *  LFM2_VL_3B_LATENCY_FINDINGS.md: 24/25 fields on the five test cards at 39.7s
+     *  cold, 23/25 on full-card images at 35.7s cold / 33.3s warm server. */
+    private fun isLfm2Model(modelPath: String): Boolean =
+        File(modelPath).name.contains("lfm2", ignoreCase = true)
+
+    /** pan_full + LFM2-VL only - the one doc type whose LFM2 prompt/grammar are validated. */
+    private fun useLfm2PanProfile(docType: String, modelPath: String): Boolean =
+        docType == "pan_full" && isLfm2Model(modelPath)
+
+    /** Image-token cap for the LFM2 pan_full profile. 196 -> 128 -> 64 gave 55 -> 44 -> 31s,
+     *  but 64 lost parent_name/parent_relation (card e), so 128 is the floor that kept
+     *  accuracy. The app's 128/256 pan_full toggle does not apply: 256 was never tested on
+     *  LFM2 and would add ~0.15s per extra token (~+19s). */
+    private val lfm2PanImageTokenCap = 128
+
+    /** The LFM2 grammar has no document_type key (the BUL2 prompt does not ask for it) but
+     *  validatePan() requires document_type == "pan". It is added only for the check; the
+     *  output shown to the user is the model's own, unmodified text. */
+    private fun withPanDocumentType(text: String): String {
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start < 0 || end <= start) return text
+        return try {
+            val obj = org.json.JSONObject(text.substring(start, end + 1))
+            if (!obj.has("document_type")) obj.put("document_type", "pan")
+            obj.toString()
+        } catch (e: Exception) { text }
+    }
+
     /** MiniCPM-V only: its adaptive slicer (mtmd_image_preprocessor_llava_uhd, the
      *  minicpmv-specific branch) splits the image into roughly ceil(width*height / 448^2)
      *  tiles (hardcoded max 9, see mtmd-image.cpp), each costing ~12-13s through the
@@ -431,7 +536,9 @@ class MainActivity : AppCompatActivity() {
      *  as every other untested cap value in this file.
      *  Writes to a separate cache file rather than overwriting imageFile, since other
      *  models keep using the original, full-resolution photo. */
-    private fun downscaleForMiniCpm(imageFile: File, longestEdge: Int = 560): File {
+    private fun downscaleForMiniCpm(
+        imageFile: File, longestEdge: Int = 560, outName: String = "minicpm_resized.jpg"
+    ): File {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
         val w = bounds.outWidth
@@ -453,11 +560,17 @@ class MainActivity : AppCompatActivity() {
         val scaled = Bitmap.createScaledBitmap(decoded, targetW, targetH, true)
         if (scaled !== decoded) decoded.recycle()
 
-        val outFile = File(cacheDir, "minicpm_resized.jpg")
+        val outFile = File(cacheDir, outName)
         FileOutputStream(outFile).use { out -> scaled.compress(Bitmap.CompressFormat.JPEG, 92, out) }
         scaled.recycle()
         return outFile
     }
+
+    /** LFM2-VL: the model resizes to its own ~131,072-pixel budget (128 tokens) anyway, so a
+     *  12MP camera photo only costs extra JPEG decode and upload time. 1280px is well above
+     *  what it keeps (about 460x290 for a card), so this never removes detail it would use. */
+    private fun downscaleForLfm2(imageFile: File): File =
+        downscaleForMiniCpm(imageFile, 1280, "lfm2_resized.jpg")
 
     /** A field region as fractions of the FRONT of the card (0..1), so it holds for any
      *  card size. Bands are deliberately generous: a first version with tight boxes clipped
@@ -628,7 +741,10 @@ class MainActivity : AppCompatActivity() {
         // real parse-failure/dropped-key rate. These three params default to the
         // existing behaviour exactly, so every other call site is untouched.
         useGrammar: Boolean = true, useSystemPrompt: Boolean = true, maxTokens: Int = 512,
-        tokenCap: Int = 256
+        tokenCap: Int = 256,
+        // LFM2 pan_full: a hand-written GBNF (--grammar-file) instead of the JSON schema
+        // (-jf). null for every other model/doc type, which keep -jf exactly as before.
+        grammarText: String? = null
     ): PassResult {
         val isPaddleOcr = isPaddleOcrModel(modelPath)
         val args = mutableListOf(
@@ -637,7 +753,11 @@ class MainActivity : AppCompatActivity() {
             "--mmproj", mmprojPath
         )
         if (isPaddleOcr) args += "--jinja"
-        if (useGrammar) {
+        if (grammarText != null) {
+            val grammarFile = File(cacheDir, "extract_grammar.gbnf")
+            grammarFile.writeText(grammarText)
+            args += listOf("--grammar-file", grammarFile.absolutePath)
+        } else if (useGrammar) {
             val schemaFile = File(cacheDir, schemaFileName)
             schemaFile.writeText(schemaJson)
             args += listOf("-jf", schemaFile.absolutePath)
@@ -698,6 +818,10 @@ class MainActivity : AppCompatActivity() {
         // same card, byte-identical output: 44.3s -> 38.1s (crop), 48.2s -> 42.5s avg
         // over 4 camera-frame simulations. (-fit off was also tried: no gain, not used.)
         if (isMiniCpmModel(modelPath)) args += listOf("-c", "4096")
+        // LFM2-VL: the GGUF's default context is 128,000 tokens, so the same unneeded KV
+        // allocation applies. Real prompts are 190-260 tokens; every LFM2 measurement in
+        // LFM2_VL_3B_LATENCY_FINDINGS.md ran with -c 4096.
+        if (isLfm2Model(modelPath)) args += listOf("-c", "4096")
         if (useGpu) {
             // Offload the LM to GPU; vision encoder (mmproj) stays on CPU regardless.
             args += listOf("-ngl", "99", "--no-mmproj-offload")
@@ -871,9 +995,14 @@ class MainActivity : AppCompatActivity() {
                     else listOf("-ngl", "0", "--no-mmproj-offload", "--no-op-offload")
             val isPaddleOcr = isPaddleOcrModel(modelPath)
             val isMiniCpm = isMiniCpmModel(modelPath)
-            if (isPaddleOcr || isMiniCpm) args += "--jinja"
+            val isLfm2 = isLfm2Model(modelPath)
+            if (isPaddleOcr || isMiniCpm || isLfm2) args += "--jinja"
             // Same 262144-token default-context KV waste as runOnePass() - see comment there.
             if (isMiniCpm) args += listOf("-c", "4096")
+            // LFM2-VL: the exact server configuration measured in
+            // LFM2_VL_3B_LATENCY_FINDINGS.md section 10 (33.3s per scan warm against 35.7s cold
+            // CLI, identical output): -c 4096, one slot, no warm-up decode at startup.
+            if (isLfm2) args += listOf("-c", "4096", "-np", "1", "--no-warmup")
 
             val pb = ProcessBuilder(args)
             pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
@@ -881,7 +1010,7 @@ class MainActivity : AppCompatActivity() {
             // can't also run for Qwen.
             if (isPaddleOcr) applyDynSizeEnv(pb)
             applyImageTokenCapEnv(pb, imageTokenCap)
-            if (!isPaddleOcr && !isMiniCpm) {
+            if (!isPaddleOcr && !isMiniCpm && !isLfm2) {
                 // The actual fix under test - caps the vision-preprocessing upscale
                 // target at 768px instead of the model's hard-coded 2048px default. See
                 // LATENCY_OPTIMIZATION.md section 2, Stage 3, for why this is what lets
@@ -968,7 +1097,10 @@ class MainActivity : AppCompatActivity() {
         execPath: File, modelPath: String, mmprojPath: String, imageFile: File,
         promptText: String, schemaJson: String, useGpu: Boolean, threads: Int,
         useGrammar: Boolean = true, useSystemPrompt: Boolean = true, maxTokens: Int = 512,
-        tokenCap: Int = 256
+        tokenCap: Int = 256,
+        // LFM2 pan_full: sent as the request's raw "grammar" field (same GBNF the CLI path
+        // gets via --grammar-file) instead of json_schema. null for everything else.
+        grammarText: String? = null
     ): PassResult {
         // Taken BEFORE ensureServerRunning() on purpose. The per-request timer below
         // deliberately starts after it, because that is the number the live stats card
@@ -1003,12 +1135,18 @@ class MainActivity : AppCompatActivity() {
         val b64 = android.util.Base64.encodeToString(imageFile.readBytes(), android.util.Base64.NO_WRAP)
         val effectivePrompt =
             if (isJinjaModel && useSystemPrompt) "$systemPrompt\n\n$promptText" else promptText
-        val contentArr = org.json.JSONArray()
-            .put(org.json.JSONObject().apply { put("type", "text"); put("text", effectivePrompt) })
-            .put(org.json.JSONObject().apply {
-                put("type", "image_url")
-                put("image_url", org.json.JSONObject().put("url", "data:image/jpeg;base64,$b64"))
-            })
+        val isLfm2 = isLfm2Model(modelPath)
+        val textPart = org.json.JSONObject().apply { put("type", "text"); put("text", effectivePrompt) }
+        val imagePart = org.json.JSONObject().apply {
+            put("type", "image_url")
+            put("image_url", org.json.JSONObject().put("url", "data:image/jpeg;base64,$b64"))
+        }
+        // LFM2-VL: image FIRST, instructions after - the order every validated LFM2 result
+        // used. Instructions-first lost a field (22/25 vs 23/25, an invented PAN on card a)
+        // and saved no time: this server build cached 1 token of ~190 either way.
+        val contentArr =
+            if (isLfm2) org.json.JSONArray().put(imagePart).put(textPart)
+            else org.json.JSONArray().put(textPart).put(imagePart)
         messages.put(org.json.JSONObject().apply { put("role", "user"); put("content", contentArr) })
 
         val payload = org.json.JSONObject().apply {
@@ -1019,7 +1157,9 @@ class MainActivity : AppCompatActivity() {
             // set here explicitly).
             put("repeat_penalty", 1.1)
             put("max_tokens", maxTokens)
-            if (useGrammar && schemaJson.isNotBlank()) {
+            if (grammarText != null) {
+                put("grammar", grammarText)
+            } else if (useGrammar && schemaJson.isNotBlank()) {
                 put("json_schema", org.json.JSONObject(schemaJson))
             }
             // MiniCPM-V 4.6's chat template defaults to thinking mode ("thinking = 1" in
@@ -1032,7 +1172,9 @@ class MainActivity : AppCompatActivity() {
             // template's default per-request. Sent unconditionally - harmless for models
             // whose template doesn't support thinking, and there's no reason any of these
             // structured-extraction doc types would want reasoning tokens anyway.
-            put("chat_template_kwargs", org.json.JSONObject().put("enable_thinking", false))
+            // Not sent for LFM2: its template has no thinking mode, and the validated
+            // server runs did not send it.
+            if (!isLfm2) put("chat_template_kwargs", org.json.JSONObject().put("enable_thinking", false))
         }
 
         var rawOutput: String? = null
@@ -1135,7 +1277,8 @@ class MainActivity : AppCompatActivity() {
                     // LATENCY_OPTIMIZATION.md rest on runs that can't actually be
                     // attributed to a model. Both filenames plus the thread count now go
                     // into every run so a log line is self-describing.
-                    " | model=$modelName | mmproj=$mmprojName | threads=$threads"
+                    " | model=$modelName | mmproj=$mmprojName | threads=$threads" +
+                    (if (useLfm2PanProfile(docType, modelPath)) " | profile=lfm2-bul2-grammar" else "")
                 // Unifies the two invocation paths behind one call shape so the rest of
                 // this function (single-image and two-sided alike) doesn't need to
                 // duplicate the branch at every call site. schemaFileName is only
@@ -1144,16 +1287,18 @@ class MainActivity : AppCompatActivity() {
                 fun runPass(
                     img: File, promptText: String, schemaJson: String, schemaFileName: String,
                     useGrammar: Boolean = true, useSystemPrompt: Boolean = true, maxTokens: Int = 512,
-                    tokenCap: Int = 256
+                    tokenCap: Int = 256, grammarText: String? = null
                 ): PassResult = if (useServerMode) {
                     runOnePassServer(
                         execPath, modelPath, mmprojPath, img, promptText, schemaJson,
-                        useGpu, threads, useGrammar, useSystemPrompt, maxTokens, tokenCap
+                        useGpu, threads, useGrammar, useSystemPrompt, maxTokens, tokenCap,
+                        grammarText
                     )
                 } else {
                     runOnePass(
                         execPath, modelPath, mmprojPath, img, promptText, schemaJson,
-                        schemaFileName, useGpu, threads, useGrammar, useSystemPrompt, maxTokens, tokenCap
+                        schemaFileName, useGpu, threads, useGrammar, useSystemPrompt, maxTokens, tokenCap,
+                        grammarText
                     )
                 }
 
@@ -1165,18 +1310,25 @@ class MainActivity : AppCompatActivity() {
                     // Captured once so pan_full's cap (see imageTokenCapFor's manual
                     // switch branch) can also be shown in the run's own output below,
                     // instead of only being knowable by re-deriving it.
-                    val cap = imageTokenCapFor(docType)
+                    // LFM2 pan_full has its own validated profile (128 image tokens, bullet
+                    // prompt, GBNF grammar) - see isLfm2Model(). Everything else is unchanged.
+                    val lfm2Pan = useLfm2PanProfile(docType, modelPath)
+                    val cap = if (lfm2Pan) lfm2PanImageTokenCap else imageTokenCapFor(docType)
                     val useCanvas = useFieldCanvas && docType == "pan_full" && isMiniCpmModel(modelPath)
                     val prepStart = System.nanoTime()
                     val passImageFile = when {
                         useCanvas -> buildFieldCanvasFile(imageFile)
                         isMiniCpmModel(modelPath) -> downscaleForMiniCpm(imageFile)
+                        lfm2Pan -> downscaleForLfm2(imageFile)
                         else -> imageFile
                     }
                     val prepSec = (System.nanoTime() - prepStart) / 1_000_000_000.0
                     val outcome = runPass(
                         passImageFile,
-                        promptFor(docType), if (skipJsonContract) "" else schemaFor(docType),
+                        // trim(): the validated BUL2 runs fed the prompt through shell
+                        // $(cat ...), which drops the file's trailing newline.
+                        if (lfm2Pan) loadAsset("prompts/user_pan_full_lfm2.txt").trim() else promptFor(docType),
+                        if (skipJsonContract) "" else schemaFor(docType),
                         "extract_schema.json",
                         useGrammar = !skipJsonContract,
                         useSystemPrompt = !skipJsonContract && !skipSystemPromptOnly,
@@ -1189,7 +1341,8 @@ class MainActivity : AppCompatActivity() {
                         // cap now that thinking is disabled, not the primary fix for that.
                         maxTokens = if (isStage1) 1024 else if (isCrop) 64
                                     else if (docType == "pan_full") 200 else 512,
-                        tokenCap = cap
+                        tokenCap = cap,
+                        grammarText = if (lfm2Pan) loadAsset("grammars/pan_full_lfm2.gbnf") else null
                     )
                     if (outcome.rawOutput == null) {
                         ui.post {
@@ -1202,7 +1355,8 @@ class MainActivity : AppCompatActivity() {
                         return@Thread
                     }
                     val cleaned = extractAnswer(outcome.rawOutput)
-                    val report = if (isCrop) validateCropField(docType, cleaned) else validateExtraction(docType, cleaned)
+                    val report = if (isCrop) validateCropField(docType, cleaned)
+                        else validateExtraction(docType, if (lfm2Pan) withPanDocumentType(cleaned) else cleaned)
                     val runNumber = nextRunNumber()
                     // Header is formatted on its own and the model output is concatenated
                     // afterwards, rather than interpolated into the same format string.
