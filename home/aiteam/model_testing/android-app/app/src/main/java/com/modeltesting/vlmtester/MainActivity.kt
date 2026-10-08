@@ -182,9 +182,41 @@ class MainActivity : AppCompatActivity() {
             object : android.widget.AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(
                     parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long
-                ) = updateForDocType()
+                ) {
+                    updateForDocType()
+                    warmUpQwenServer()
+                }
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
             }
+        // Qwen3-VL runs best on a persistent server (see useQwenPanProfile), so picking a Qwen
+        // model turns server mode on and starts warming it up. The switch stays the person's to
+        // turn off, and nothing here turns it off for other models. The chosen pair is
+        // remembered so reopening the app warms the same model again.
+        val prefs = getSharedPreferences("vlm_tester", Context.MODE_PRIVATE)
+        binding.spinnerModel.onItemSelectedListener =
+            object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long
+                ) {
+                    val name = binding.spinnerModel.selectedItem as? String ?: return
+                    prefs.edit().putString("last_model", name).apply()
+                    if (isQwenModel(name)) binding.switchServerMode.isChecked = true
+                    warmUpQwenServer()
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            }
+        binding.spinnerMmproj.onItemSelectedListener =
+            object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long
+                ) {
+                    val name = binding.spinnerMmproj.selectedItem as? String ?: return
+                    prefs.edit().putString("last_mmproj", name).apply()
+                    warmUpQwenServer()
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            }
+        binding.switchServerMode.setOnCheckedChangeListener { _, _ -> warmUpQwenServer() }
         refreshDeviceInfo()
         setupThreadSlider()
 
@@ -406,6 +438,14 @@ class MainActivity : AppCompatActivity() {
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, lmModels)
         binding.spinnerMmproj.adapter =
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mmprojModels)
+
+        // Reselect what was used last time. Set here, before onCreate attaches the spinner
+        // listeners, so the first selection event already reports the restored choice.
+        val prefs = getSharedPreferences("vlm_tester", Context.MODE_PRIVATE)
+        prefs.getString("last_model", null)?.let { lmModels.indexOf(it) }
+            ?.takeIf { it >= 0 }?.let { binding.spinnerModel.setSelection(it) }
+        prefs.getString("last_mmproj", null)?.let { mmprojModels.indexOf(it) }
+            ?.takeIf { it >= 0 }?.let { binding.spinnerMmproj.setSelection(it) }
     }
 
     // --- File picking (image or PDF -> a JPEG the model can read) ------
@@ -498,6 +538,19 @@ class MainActivity : AppCompatActivity() {
     private fun isLfm2Model(modelPath: String): Boolean =
         File(modelPath).name.contains("lfm2", ignoreCase = true)
 
+    /** Qwen3-VL (2B and 4B). Its GGUF also declares a 262,144-token context, so with no -c
+     *  llama.cpp's auto-fit picks one from free memory: on this 7.6 GB phone the 4B got a
+     *  26,368-token context (about 3.9 GB of KV cache beside 2.5 GB of weights; 39.6 GB
+     *  projected at the full default) and took 111.5s against 83-99s with -c 4096 on the
+     *  same card and settings, adjacent runs. Heat moved the same configuration by about
+     *  8s, so the real saving is somewhere in 12-28s. With -c 4096 the process held about
+     *  3.5 GB resident (2.3 GB of mapped weights, 1.2 GB heap). Measured 2026-10-06 in the
+     *  adb harness on the 4B; the 2B was not re-measured. Real prompts here are well under
+     *  4096 tokens even for the 1024-image-token doc types (about 1024 + 600 text + 512
+     *  output). */
+    private fun isQwenModel(modelPath: String): Boolean =
+        File(modelPath).name.contains("qwen", ignoreCase = true)
+
     /** pan_full + LFM2-VL only - the one doc type whose LFM2 prompt/grammar are validated. */
     private fun useLfm2PanProfile(docType: String, modelPath: String): Boolean =
         docType == "pan_full" && isLfm2Model(modelPath)
@@ -508,16 +561,83 @@ class MainActivity : AppCompatActivity() {
      *  LFM2 and would add ~0.15s per extra token (~+19s). */
     private val lfm2PanImageTokenCap = 128
 
+    /** pan_full + Qwen3-VL only: warm server + a one-line GBNF (assets/grammars/pan_full_qwen.gbnf)
+     *  + a card image sent at 480px. On the 4B (Q4_K_M + Q8_0 mmproj) in the adb harness,
+     *  2026-10-06, on the four cards of pan_test_images: 44.6s average (41.4-50.3), 20/20 fields,
+     *  against 82-85s for the one-shot CLI at full size. The pieces, each measured on its own:
+     *  the warm server reuses the 110-token instruction prefix and skips the model load
+     *  (about 85s -> 73s), the one-line grammar saves output tokens, and 480px sends about
+     *  135 image tokens instead of 240. 448px (about 98-120 tokens) was 41.0s but misread the
+     *  PAN on the smallest card, so do not go lower. 512px was 50.1s, 20/20, with more margin -
+     *  change qwenPanCardEdge if 480 proves too thin on real scans. The image-token cap
+     *  stays at the 256 baseline and ignores the 128/256 toggle (see lfm2PanImageTokenCap). */
+    private fun useQwenPanProfile(docType: String, modelPath: String): Boolean =
+        docType == "pan_full" && isQwenModel(modelPath)
+
+    private val qwenPanImageTokenCap = 256
+    private val qwenPanCardEdge = 480
+
+    /** The 480px rule is only validated on tight card crops (the four test cards are 600-860px
+     *  on the long edge, the card filling the frame). A camera photo with the card at 30-50% of
+     *  the frame would shrink the card to a few hundred pixels of unreadable print, and the
+     *  grammar would then force a PAN-shaped answer anyway. Anything larger than this is treated
+     *  as a camera photo and takes the old, validated path (downscaleForQwen, 256 tokens). A
+     *  stopgap until the card is detected and cropped before resizing. */
+    private val qwenPanCropMaxEdge = 1000
+
+    /** Aadhaar + Qwen3-VL: the whole picture at full size (no shrinking - fewer image tokens
+     *  costs accuracy on the small print), a one-line GBNF (assets/grammars/aadhaar_qwen.gbnf),
+     *  and a prompt that makes the model state explicitly whether an address block is printed
+     *  (assets/prompts/user_aadhaar_qwen.txt). The grammar ties the flag to the answer:
+     *  address_visible=true forces a real address string (15+ chars) and an optional PIN;
+     *  false forces address and pincode to null. Mac benchmark 2026-10-07/08, 6 test cards,
+     *  same 4B model: today's request (schema, no flag) 31/36 fields and the model returned a
+     *  null address on 2 cards that have one; one-line grammar alone 31/36 (same misses); flag
+     *  + new prompt 35/36 with the flag right on all 6 cards. The one miss is a name read
+     *  "Jasjit" for "Jasjot", which reproduces in every configuration (the model's own reading).
+     *  The address-or-null decision is borderline and flipped between the Mac and the phone on
+     *  one card, so this must be confirmed on the phone. Image-token cap stays at the 1024 that
+     *  imageTokenCapFor() gives every non-PAN type: the tallest test card (about 1,600 tokens
+     *  at full size) is capped to roughly 1,000 and still read 6/6 on the Mac. */
+    private fun useQwenAadhaarProfile(docType: String, modelPath: String): Boolean =
+        docType == "aadhaar" && isQwenModel(modelPath)
+
+    /** One server cap for every Qwen doc type, so switching between PAN and Aadhaar never
+     *  restarts the server (the cap is a start-up setting, see capAffectsServer). Sizing is
+     *  done in the app per doc type instead: the PAN profile sends a 480px card, or a photo
+     *  pre-sized to the 256-token budget (downscaleForQwenPan), so this ceiling is not binding
+     *  for it, and Aadhaar needs up to 1024. */
+    private val qwenServerImageTokenCap = 1024
+
+    /** Identifies one instruction prompt (system message if any + user text) so the server
+     *  warm-up and a real scan agree on whether that prefix is already cached. */
+    private fun warmKey(useSystem: Boolean, promptText: String): Int =
+        (if (useSystem) systemPrompt else "").hashCode() * 31 + promptText.hashCode()
+
+    /** Resize for the Qwen pan_full profile - see useQwenPanProfile(). */
+    private fun downscaleForQwenPan(imageFile: File, tokenCap: Int): File {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return imageFile
+        return if (maxOf(bounds.outWidth, bounds.outHeight) > qwenPanCropMaxEdge)
+            // Pre-sized to exactly the token budget (headroom 1.0): the server now runs at one
+            // 1024 cap for all doc types, so the model no longer does this shrink for us.
+            downscaleForQwen(imageFile, tokenCap, headroom = 1.0)
+        else
+            downscaleForMiniCpm(imageFile, qwenPanCardEdge, "qwen_resized.jpg")
+    }
+
     /** The LFM2 grammar has no document_type key (the BUL2 prompt does not ask for it) but
      *  validatePan() requires document_type == "pan". It is added only for the check; the
-     *  output shown to the user is the model's own, unmodified text. */
-    private fun withPanDocumentType(text: String): String {
+     *  output shown to the user is the model's own, unmodified text. The Qwen PAN and
+     *  Aadhaar grammars are the same shape (no document_type), so they use this too. */
+    private fun withDocumentType(text: String, type: String): String {
         val start = text.indexOf('{')
         val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) return text
         return try {
             val obj = org.json.JSONObject(text.substring(start, end + 1))
-            if (!obj.has("document_type")) obj.put("document_type", "pan")
+            if (!obj.has("document_type")) obj.put("document_type", type)
             obj.toString()
         } catch (e: Exception) { text }
     }
@@ -571,6 +691,32 @@ class MainActivity : AppCompatActivity() {
      *  what it keeps (about 460x290 for a card), so this never removes detail it would use. */
     private fun downscaleForLfm2(imageFile: File): File =
         downscaleForMiniCpm(imageFile, 1280, "lfm2_resized.jpg")
+
+    /** Qwen3-VL: the model resizes every image to its own pixel budget (tokenCap x 32x32 px,
+     *  since patch 16 x 2x2 merge) however large it arrives, so a camera photo only adds JPEG
+     *  decode and resize time before the encoder starts. Measured on the 4B 2026-10-06: image
+     *  encoding began at 8.4s for a 4000x2502 photo against 3.5s for an 860x538 card, with
+     *  the same 240 image tokens either way (about 5s). Only images holding more than TWICE
+     *  the budget are shrunk, and only down to twice the budget, so the model still resamples
+     *  from more pixels than it keeps and never sees less than it would have. Do NOT push this
+     *  toward the budget itself: sending the card at 448px (about 120 tokens) was 22s faster
+     *  but misread a PAN number on the smallest test card (2 of its 10 characters, still a
+     *  valid PAN format). The 860x538 test cards are below the threshold and pass through
+     *  untouched. Not validated end-to-end on real camera photos. */
+    private fun downscaleForQwen(
+        imageFile: File, tokenCap: Int, outName: String = "qwen_resized.jpg", headroom: Double = 2.0
+    ): File {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        val w = bounds.outWidth
+        val h = bounds.outHeight
+        if (w <= 0 || h <= 0) return imageFile
+        val keepPixels = headroom * tokenCap * 32 * 32
+        val pixels = w.toDouble() * h
+        if (pixels <= keepPixels) return imageFile
+        val scale = Math.sqrt(keepPixels / pixels)
+        return downscaleForMiniCpm(imageFile, (maxOf(w, h) * scale).toInt(), outName)
+    }
 
     /** A field region as fractions of the FRONT of the card (0..1), so it holds for any
      *  card size. Bands are deliberately generous: a first version with tight boxes clipped
@@ -672,6 +818,20 @@ class MainActivity : AppCompatActivity() {
     // phone's own hardware rather than assumed to transfer as-is.
     private fun applyImageTokenCapEnv(pb: ProcessBuilder, tokenCap: Int) {
         pb.environment()["LLAMA_ARG_IMAGE_MAX_TOKENS"] = tokenCap.toString()
+    }
+
+    /** Qwen3-VL: keep the model's threads on the four performance cores only (Cortex-A78,
+     *  cores 4-7 on the Exynos 1380; cores 0-3 are the slow A55s - see the -Cr comment in
+     *  runOnePass). Running on the efficiency cores too was tried and is slower. The
+     *  -Cr/--cpu-strict flags do nothing in this build (GGML_OPENMP=ON: the mask is computed
+     *  and never applied, QWEN3_VL_TWEAKS_LOG.md section 1), so OpenMP is told directly.
+     *  In the adb harness 2026-10-06 (4B, same two variables) this changed no timing: the
+     *  scheduler was already keeping the 4 threads on the fast cores. So it is a guard against
+     *  a thread drifting onto an efficiency core, not a speed-up. Hard-coded for this chipset,
+     *  like the -Cr flags - revisit before running on a different phone. */
+    private fun applyPerformanceCoreAffinityEnv(pb: ProcessBuilder) {
+        pb.environment()["OMP_PLACES"] = "{4},{5},{6},{7}"
+        pb.environment()["OMP_PROC_BIND"] = "true"
     }
 
     /** Crop doc types: 256 tokens is verified — tested warm (0.87s) and cold (21.2s),
@@ -822,6 +982,8 @@ class MainActivity : AppCompatActivity() {
         // allocation applies. Real prompts are 190-260 tokens; every LFM2 measurement in
         // LFM2_VL_3B_LATENCY_FINDINGS.md ran with -c 4096.
         if (isLfm2Model(modelPath)) args += listOf("-c", "4096")
+        // Qwen3-VL: same unneeded KV allocation, and on the 4B it also swapped - see isQwenModel().
+        if (isQwenModel(modelPath)) args += listOf("-c", "4096")
         if (useGpu) {
             // Offload the LM to GPU; vision encoder (mmproj) stays on CPU regardless.
             args += listOf("-ngl", "99", "--no-mmproj-offload")
@@ -842,6 +1004,7 @@ class MainActivity : AppCompatActivity() {
         // so this gate changes nothing for it.
         if (isPaddleOcr) applyDynSizeEnv(pb)
         applyImageTokenCapEnv(pb, tokenCap)
+        if (isQwenModel(modelPath)) applyPerformanceCoreAffinityEnv(pb)
         pb.redirectErrorStream(true)
 
         val startNanos = System.nanoTime()
@@ -912,7 +1075,17 @@ class MainActivity : AppCompatActivity() {
         val process: Process, val pid: Long?, val port: Int,
         val modelPath: String, val mmprojPath: String, val threads: Int,
         val useGpu: Boolean, val imageTokenCap: Int
-    )
+    ) {
+        /** warmKey()s of the instruction prompts this server has already been sent (by the
+         *  launch warm-up or by a real scan), so a warm-up is never repeated for a prompt whose
+         *  prefix the server already has cached. A set, not a flag: PAN and Aadhaar share one
+         *  server but have different instruction text. */
+        val warmedKeys: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    }
+
+    /** Number of warm-up requests in flight; a Run tapped while this is above zero queues
+     *  behind them on the server's single slot, and says so on screen. */
+    private val warmingUpCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** Whether a change to the image-token cap should force the server to restart.
      *
@@ -1003,6 +1176,15 @@ class MainActivity : AppCompatActivity() {
             // LFM2_VL_3B_LATENCY_FINDINGS.md section 10 (33.3s per scan warm against 35.7s cold
             // CLI, identical output): -c 4096, one slot, no warm-up decode at startup.
             if (isLfm2) args += listOf("-c", "4096", "-np", "1", "--no-warmup")
+            // Qwen3-VL: the LFM2 server configuration above (one slot, -c 4096, no warm-up) for the
+            // same reason - see isQwenModel(). Timed in server mode on the 4B 2026-10-06: see
+            // useQwenPanProfile(). The first request after a start is slow (~85s) because the
+            // weights are paged in lazily under --no-warmup; warmUpQwenServer() absorbs that.
+            // --cache-ram: llama-server keeps each finished prompt's KV state in RAM for
+            // reuse, up to 8192 MiB by default - more than this phone has. Each PAN scan adds
+            // roughly 40 MiB (about 260 tokens at ~150 KB/token), so a long session would
+            // grow into the 3.5 GB the model already holds. 512 MiB keeps the last dozen or so.
+            if (isQwenModel(modelPath)) args += listOf("-c", "4096", "-np", "1", "--no-warmup", "--cache-ram", "512")
 
             val pb = ProcessBuilder(args)
             pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
@@ -1010,6 +1192,7 @@ class MainActivity : AppCompatActivity() {
             // can't also run for Qwen.
             if (isPaddleOcr) applyDynSizeEnv(pb)
             applyImageTokenCapEnv(pb, imageTokenCap)
+            if (isQwenModel(modelPath)) applyPerformanceCoreAffinityEnv(pb)
             if (!isPaddleOcr && !isMiniCpm && !isLfm2) {
                 // The actual fix under test - caps the vision-preprocessing upscale
                 // target at 768px instead of the model's hard-coded 2048px default. See
@@ -1087,6 +1270,130 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Qwen3-VL pan_full only: starts the server as soon as a Qwen model is selected (and
+     *  again whenever the app is reopened with it selected) and sends it one throwaway scan
+     *  of a blank card, so the person's first real scan is already warm. Measured on the 4B
+     *  2026-10-06: the first request after a server start took about 85s against 41-50s warm.
+     *  The server runs --no-warmup, so its weights are paged in from flash lazily on that first
+     *  request, and the instruction prefix is not cached yet; the blank scan pays both here.
+     *  Holds the model's ~3.5 GB of RAM for as long as the app is open. A real Run tapped
+     *  meanwhile is not lost: it queues behind the warm-up on the server's single slot. Every
+     *  failure is shown as text and swallowed - the real scan retries the same start itself. */
+    private fun warmUpQwenServer(retryOnFailure: Boolean = true) {
+        if (!binding.switchServerMode.isChecked) return
+        val modelName = binding.spinnerModel.selectedItem as? String ?: return
+        val mmprojName = binding.spinnerMmproj.selectedItem as? String ?: return
+        val docType = binding.spinnerDocType.selectedItem as? String ?: return
+        // PAN and Aadhaar share one server (qwenServerImageTokenCap) but have different
+        // instruction text, so each is warmed once - see ServerState.warmedKeys.
+        if (docType != "pan_full" && docType != "aadhaar") return
+        val modelPath = File(modelsDir(), modelName).absolutePath
+        if (!isQwenModel(modelPath)) return
+        // The projector must belong to this model (4B with 4B, 2B with 2B); a mismatched pair
+        // cannot load, and the run itself reports that.
+        if (!mmprojName.contains(modelName.substringBefore("-Instruct"), ignoreCase = true)) return
+        val mmprojPath = File(modelsDir(), mmprojName).absolutePath
+        val execPath = File(applicationInfo.nativeLibraryDir, "libllama-server.so")
+        if (!execPath.exists()) return
+        val useGpu = binding.switchGpu.isChecked
+        val threads = binding.seekThreads.progress + 1
+        val statusPrefix = "Qwen3-VL warm-up"
+
+        Thread {
+            var warmedState: ServerState? = null
+            var warmedKeyUsed = 0
+            val counted = java.util.concurrent.atomic.AtomicBoolean(false)
+            try {
+                // Only claim the screen if no run is in progress; a result already on screen
+                // is replaced by this, but it is saved in run_log.txt either way.
+                ui.post {
+                    if (!binding.btnStop.isEnabled)
+                        binding.tvOutput.text = "$statusPrefix: loading the model (about a minute). " +
+                            "Scans are fast once this finishes."
+                }
+                val startNanos = System.nanoTime()
+                ensureServerRunning(execPath, modelPath, mmprojPath, threads, useGpu, qwenServerImageTokenCap)
+                val state = serverState ?: return@Thread
+                // Exactly the request shape the real scan will send: PAN has no system message,
+                // Aadhaar does (systemPrompt), then the instruction text, then the image.
+                val useSystem = docType == "aadhaar"
+                val userText =
+                    if (docType == "aadhaar") loadAsset("prompts/user_aadhaar_qwen.txt") else promptFor("pan_full")
+                val warmGrammar =
+                    loadAsset(if (docType == "aadhaar") "grammars/aadhaar_qwen.gbnf" else "grammars/pan_full_qwen.gbnf")
+                val key = warmKey(useSystem, userText)
+                if (!state.warmedKeys.add(key)) return@Thread
+                warmedState = state; warmedKeyUsed = key
+                warmingUpCount.incrementAndGet(); counted.set(true)
+                val loadedSec = (System.nanoTime() - startNanos) / 1_000_000_000.0
+
+                val blank = File(cacheDir, "warmup_blank.jpg")
+                if (!blank.exists()) {
+                    val bmp = Bitmap.createBitmap(qwenPanCardEdge, qwenPanCardEdge * 5 / 8, Bitmap.Config.ARGB_8888)
+                    Canvas(bmp).drawColor(Color.WHITE)
+                    FileOutputStream(blank).use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                    bmp.recycle()
+                }
+                val b64 = android.util.Base64.encodeToString(blank.readBytes(), android.util.Base64.NO_WRAP)
+                // Same request shape as runOnePassServer() for pan_full on Qwen (instructions
+                // first, then the image) - the point is to leave the identical instruction
+                // prefix in the server's cache. Output is discarded, so it is kept short.
+                val content = org.json.JSONArray()
+                    .put(org.json.JSONObject().put("type", "text").put("text", userText))
+                    .put(org.json.JSONObject().put("type", "image_url").put("image_url",
+                        org.json.JSONObject().put("url", "data:image/jpeg;base64,$b64")))
+                val messages = org.json.JSONArray()
+                if (useSystem) messages.put(org.json.JSONObject().put("role", "system").put("content", systemPrompt))
+                messages.put(org.json.JSONObject().put("role", "user").put("content", content))
+                val payload = org.json.JSONObject().apply {
+                    put("messages", messages)
+                    put("temperature", 0)
+                    put("repeat_penalty", 1.1)
+                    put("max_tokens", 24)
+                    put("grammar", warmGrammar)
+                    put("chat_template_kwargs", org.json.JSONObject().put("enable_thinking", false))
+                }
+                val requestStart = System.nanoTime()
+                val conn = java.net.URL("http://127.0.0.1:${state.port}/v1/chat/completions")
+                    .openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.connectTimeout = 10_000
+                conn.readTimeout = 300_000
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                    .bufferedReader().use { it.readText() }
+                if (code !in 200..299) throw IllegalStateException("HTTP $code: $body")
+                val requestSec = (System.nanoTime() - requestStart) / 1_000_000_000.0
+                val totalSec = (System.nanoTime() - startNanos) / 1_000_000_000.0
+
+                val summary = "server up %.1fs, warm-up scan %.1fs, total %.1fs".format(loadedSec, requestSec, totalSec)
+                runLogFile().appendText("=== $statusPrefix | ${java.util.Date()} ===\n$summary\n\n")
+                ui.post {
+                    // Replace only our own message - never a result or a run in progress.
+                    if (binding.tvOutput.text.startsWith(statusPrefix))
+                        binding.tvOutput.text = "$statusPrefix done ($summary). Qwen3-VL is ready."
+                }
+            } catch (e: Exception) {
+                // Forget the key so a retry (or the next doc-type change) can warm this prompt again.
+                warmedState?.warmedKeys?.remove(warmedKeyUsed)
+                ui.post {
+                    if (binding.tvOutput.text.startsWith(statusPrefix))
+                        binding.tvOutput.text = "$statusPrefix failed: ${e.message}" +
+                            (if (retryOnFailure) " - trying once more in 10 s" else "")
+                }
+                if (retryOnFailure) {
+                    try { Thread.sleep(10_000) } catch (_: InterruptedException) { }
+                    ui.post { warmUpQwenServer(retryOnFailure = false) }
+                }
+            } finally {
+                if (counted.get()) warmingUpCount.decrementAndGet()
+            }
+        }.start()
+    }
+
     /** Same shape/contract as runOnePass() (PassResult, kill-switch semantics) but talks
      *  to the persistent server over HTTP instead of spawning+reading a one-shot
      *  process. schemaJson, when non-blank, is sent as the request's json_schema field -
@@ -1112,9 +1419,16 @@ class MainActivity : AppCompatActivity() {
         // way to tell the two apart. totalStartNanos captures the honest end-to-end
         // figure so both numbers are now visible side by side.
         val totalStartNanos = System.nanoTime()
-        val server = ensureServerRunning(execPath, modelPath, mmprojPath, threads, useGpu, tokenCap)
+        // Qwen: one start-up cap for every doc type so PAN <-> Aadhaar never restarts the server;
+        // images are sized in the app per doc type instead (see qwenServerImageTokenCap).
+        val serverCap = if (isQwenModel(modelPath)) qwenServerImageTokenCap else tokenCap
+        val server = ensureServerRunning(execPath, modelPath, mmprojPath, threads, useGpu, serverCap)
         val port = server.port
         val pid = serverState?.pid
+        // A real scan also leaves this prompt's prefix in the server's cache, so a later warm-up
+        // for the same prompt would be wasted work.
+        serverState?.warmedKeys?.add(
+            warmKey(useSystemPrompt && !(isPaddleOcrModel(modelPath) || isMiniCpmModel(modelPath)), promptText))
         val startNanos = System.nanoTime()
         val monitor = if (pid != null) startMonitoring(pid, startNanos) else MonitorHandle()
 
@@ -1208,6 +1522,15 @@ class MainActivity : AppCompatActivity() {
                     val ct = u.optInt("completion_tokens", -1)
                     usageSummary = "prompt_tokens=$pt completion_tokens=$ct"
                 }
+                // cache_n is how many prompt tokens the server reused instead of
+                // recomputing (the instruction text, ~110 on a warm PAN scan); prompt_ms and
+                // predicted_ms split the request into reading and writing time.
+                val tm = org.json.JSONObject(body).optJSONObject("timings")
+                if (tm != null) {
+                    usageSummary += " cache_n=${tm.optInt("cache_n", -1)}" +
+                        " prompt_ms=${tm.optDouble("prompt_ms", -1.0).toLong()}" +
+                        " predicted_ms=${tm.optDouble("predicted_ms", -1.0).toLong()}"
+                }
             }
 
             rawOutput = org.json.JSONObject(body)
@@ -1263,6 +1586,10 @@ class MainActivity : AppCompatActivity() {
         binding.progressBar.visibility = View.VISIBLE
         binding.statsCard.visibility = View.VISIBLE
         binding.tvOutput.text = "Running..."
+        // A warm-up still in flight holds the server's single slot; this scan queues behind it.
+        if (warmingUpCount.get() > 0)
+            binding.tvOutput.text = "Running... the model is still warming up, so this scan waits " +
+                "for it to finish first (about a minute at most)."
 
         Thread {
             try {
@@ -1278,7 +1605,9 @@ class MainActivity : AppCompatActivity() {
                     // attributed to a model. Both filenames plus the thread count now go
                     // into every run so a log line is self-describing.
                     " | model=$modelName | mmproj=$mmprojName | threads=$threads" +
-                    (if (useLfm2PanProfile(docType, modelPath)) " | profile=lfm2-bul2-grammar" else "")
+                    (if (useLfm2PanProfile(docType, modelPath)) " | profile=lfm2-bul2-grammar" else "") +
+                    (if (useQwenPanProfile(docType, modelPath)) " | profile=qwen-pan-oneline-${qwenPanCardEdge}px" else "") +
+                    (if (useQwenAadhaarProfile(docType, modelPath)) " | profile=qwen-aadhaar-flag-fullsize" else "")
                 // Unifies the two invocation paths behind one call shape so the rest of
                 // this function (single-image and two-sided alike) doesn't need to
                 // duplicate the branch at every call site. schemaFileName is only
@@ -1313,13 +1642,19 @@ class MainActivity : AppCompatActivity() {
                     // LFM2 pan_full has its own validated profile (128 image tokens, bullet
                     // prompt, GBNF grammar) - see isLfm2Model(). Everything else is unchanged.
                     val lfm2Pan = useLfm2PanProfile(docType, modelPath)
-                    val cap = if (lfm2Pan) lfm2PanImageTokenCap else imageTokenCapFor(docType)
+                    val qwenPan = useQwenPanProfile(docType, modelPath)
+                    val qwenAadhaar = useQwenAadhaarProfile(docType, modelPath)
+                    val cap = if (lfm2Pan) lfm2PanImageTokenCap
+                        else if (qwenPan) qwenPanImageTokenCap
+                        else imageTokenCapFor(docType)
                     val useCanvas = useFieldCanvas && docType == "pan_full" && isMiniCpmModel(modelPath)
                     val prepStart = System.nanoTime()
                     val passImageFile = when {
                         useCanvas -> buildFieldCanvasFile(imageFile)
                         isMiniCpmModel(modelPath) -> downscaleForMiniCpm(imageFile)
                         lfm2Pan -> downscaleForLfm2(imageFile)
+                        qwenPan -> downscaleForQwenPan(imageFile, cap)
+                        isQwenModel(modelPath) -> downscaleForQwen(imageFile, cap)
                         else -> imageFile
                     }
                     val prepSec = (System.nanoTime() - prepStart) / 1_000_000_000.0
@@ -1327,7 +1662,9 @@ class MainActivity : AppCompatActivity() {
                         passImageFile,
                         // trim(): the validated BUL2 runs fed the prompt through shell
                         // $(cat ...), which drops the file's trailing newline.
-                        if (lfm2Pan) loadAsset("prompts/user_pan_full_lfm2.txt").trim() else promptFor(docType),
+                        if (lfm2Pan) loadAsset("prompts/user_pan_full_lfm2.txt").trim()
+                        else if (qwenAadhaar) loadAsset("prompts/user_aadhaar_qwen.txt")
+                        else promptFor(docType),
                         if (skipJsonContract) "" else schemaFor(docType),
                         "extract_schema.json",
                         useGrammar = !skipJsonContract,
@@ -1342,7 +1679,10 @@ class MainActivity : AppCompatActivity() {
                         maxTokens = if (isStage1) 1024 else if (isCrop) 64
                                     else if (docType == "pan_full") 200 else 512,
                         tokenCap = cap,
-                        grammarText = if (lfm2Pan) loadAsset("grammars/pan_full_lfm2.gbnf") else null
+                        grammarText = if (lfm2Pan) loadAsset("grammars/pan_full_lfm2.gbnf")
+                            else if (qwenPan) loadAsset("grammars/pan_full_qwen.gbnf")
+                            else if (qwenAadhaar) loadAsset("grammars/aadhaar_qwen.gbnf")
+                            else null
                     )
                     if (outcome.rawOutput == null) {
                         ui.post {
@@ -1356,7 +1696,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     val cleaned = extractAnswer(outcome.rawOutput)
                     val report = if (isCrop) validateCropField(docType, cleaned)
-                        else validateExtraction(docType, if (lfm2Pan) withPanDocumentType(cleaned) else cleaned)
+                        else validateExtraction(docType,
+                            if (lfm2Pan || qwenPan) withDocumentType(cleaned, "pan")
+                            else if (qwenAadhaar) withDocumentType(cleaned, "aadhaar")
+                            else cleaned)
                     val runNumber = nextRunNumber()
                     // Header is formatted on its own and the model output is concatenated
                     // afterwards, rather than interpolated into the same format string.
@@ -1391,10 +1734,17 @@ class MainActivity : AppCompatActivity() {
                 // (mtmd-image.cpp:684) and costs roughly 10 vision encodes instead of
                 // 2-3, i.e. well over a minute per side. Previously only the
                 // single-pass branch called this at all.
-                val frontImg: File =
-                    if (isMiniCpmModel(modelPath)) downscaleForMiniCpm(imageFile) else imageFile
-                val backImg: File =
-                    if (isMiniCpmModel(modelPath)) downscaleForMiniCpm(backImageFile!!) else backImageFile!!
+                val sideCap = imageTokenCapFor(docType)
+                val frontImg: File = when {
+                    isMiniCpmModel(modelPath) -> downscaleForMiniCpm(imageFile)
+                    isQwenModel(modelPath) -> downscaleForQwen(imageFile, sideCap, "qwen_resized_front.jpg")
+                    else -> imageFile
+                }
+                val backImg: File = when {
+                    isMiniCpmModel(modelPath) -> downscaleForMiniCpm(backImageFile!!)
+                    isQwenModel(modelPath) -> downscaleForQwen(backImageFile!!, sideCap, "qwen_resized_back.jpg")
+                    else -> backImageFile!!
+                }
                 ui.post { binding.tvOutput.text = "Running front side (1/2)..." }
                 val frontOutcome = runPass(
                     frontImg,
@@ -1735,7 +2085,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun validateAadhaar(obj: org.json.JSONObject): String {
-        val fields = listOf("name", "dob", "gender", "aadhaar_number", "address", "pincode")
+        // Qwen profile only: address_visible=false means the card genuinely prints no address, so
+        // address/pincode are not misses - leave them out of the graded fields (shown for
+        // information instead) so a front-only card can grade HIGH.
+        val addressDeclaredAbsent = obj.has("address_visible") && !obj.optBoolean("address_visible", false)
+        val fields = if (addressDeclaredAbsent) listOf("name", "dob", "gender", "aadhaar_number")
+                     else listOf("name", "dob", "gender", "aadhaar_number", "address", "pincode")
         val problems = mutableListOf<String>()
         val notes = mutableListOf<String>()
 
@@ -1822,7 +2177,33 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        return coverageReport("Aadhaar", obj, fields, problems, notes)
+        // Qwen profile: the address_visible flag must agree with what was returned. The grammar
+        // already forces these when it can; the app re-checks them so a scan that breaks the
+        // contract is flagged instead of trusted. A genuine block-wide copy is also expected to
+        // contain its own PIN, and an address with a PIN in it but a null pincode field is wrong.
+        if (obj.has("address_visible")) {
+            if (obj.optBoolean("address_visible", false)) {
+                if (addr == null || addr.length < 15) {
+                    problems += "address_visible is true but the address is missing or too short"
+                } else {
+                    val embeddedPin = Regex("\\b[0-9]{6}\\b").findAll(addr).lastOrNull()?.value
+                    if (pin != null && !addr.contains(pin)) {
+                        problems += "address does not contain the pincode '$pin'"
+                    } else if (pin == null && embeddedPin != null) {
+                        problems += "address contains the PIN '$embeddedPin' but the pincode field is null"
+                    } else if (pin == null) {
+                        notes += "address read, but no 6-digit PIN was found in it - check the address is complete"
+                    }
+                }
+            } else if (addr != null || pin != null) {
+                problems += "address_visible is false but an address or pincode was returned"
+            }
+        }
+
+        return coverageReport(
+            "Aadhaar", obj, fields, problems, notes,
+            oftenNullFields = if (addressDeclaredAbsent) listOf("address", "pincode") else emptyList()
+        )
     }
 
     // --- Stage1 fine-tune eval (PAN/Aadhaar only, see MODEL_HANDOVER_stage1.md) -------

@@ -1,0 +1,13 @@
+This is an Aadhaar card image. It may show the front, the back, or both sides together. Read the printed values and answer with one JSON object with exactly these keys, in this order:
+aadhaar_number, name, dob, gender, address_visible, address, pincode
+
+Where to look:
+- name: the English line (never the regional-script line), directly above the date-of-birth line.
+- dob: the line labelled DOB, as DD/MM/YYYY exactly as printed.
+- gender: the English word printed after dob; answer M, F or O.
+- aadhaar_number: the large 12-digit number in three groups of four digits separated by spaces. Do not use the 16-digit VID or the Enrollment number.
+- address_visible: true if an address block is printed anywhere in the image (a block starting with "Address" or its regional-language word, on the front, the back or a letter), even if the print is small. false only if no address block is printed at all.
+- address: when address_visible is true, copy the ENTIRE English address block exactly as printed, every line from the first line to the PIN code, in order, with lines separated by \n. Never shorten, summarise or skip a line. When address_visible is false, null.
+- pincode: the 6-digit PIN code at the end of the address; null when address_visible is false.
+
+Rules: copy every value character for character. If a value is unreadable use null, never guess. Output JSON only.
