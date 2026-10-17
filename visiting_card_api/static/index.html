@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visiting Card Extraction</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1a1d21; --muted: #6b7280; --border: #e3e6ea;
+    --accent: #2563eb; --accent-text: #ffffff; --soft: #eef2ff; --ok: #15803d; --bad: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111317; --panel: #1a1d23; --text: #e8eaed; --muted: #9aa0a6; --border: #2c3038;
+      --accent: #3b82f6; --soft: #1e2533; --ok: #4ade80; --bad: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+           padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  h1 { font-size: 18px; margin: 0; }
+  .pill { font-size: 13px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+          color: var(--muted); white-space: nowrap; }
+  .pill.ok { color: var(--ok); }
+  .pill.bad { color: var(--bad); }
+  main { max-width: 1100px; margin: 24px auto; padding: 0 16px; display: grid;
+         grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 14px; }
+  #drop { border: 2px dashed var(--border); border-radius: 10px; min-height: 240px; display: flex;
+          align-items: center; justify-content: center; text-align: center; cursor: pointer;
+          padding: 12px; color: var(--muted); }
+  #drop.over { border-color: var(--accent); background: var(--soft); }
+  #drop img { max-width: 100%; max-height: 380px; border-radius: 6px; display: block; }
+  .actions { display: flex; gap: 12px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
+           border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { color: var(--muted); font-size: 14px; }
+  .field { display: grid; grid-template-columns: 84px 1fr; gap: 12px; padding: 12px 0;
+           border-bottom: 1px solid var(--border); }
+  .field:last-child { border-bottom: 0; }
+  .label { color: var(--muted); font-size: 13px; padding-top: 1px; }
+  .value { word-break: break-word; font-weight: 500; }
+  .value.empty { color: var(--muted); font-style: italic; font-weight: 400; }
+  .error { color: var(--bad); border: 1px solid var(--bad); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 14px; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+        overflow-x: auto; font-size: 12.5px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Visiting Card Extraction</h1>
+  <span id="health" class="pill">Checking model…</span>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Card image</h2>
+    <div id="drop" tabindex="0">Click, drop or paste a visiting card photo</div>
+    <input id="file" type="file" accept="image/*" hidden>
+    <div class="actions">
+      <button id="run" disabled>Extract</button>
+      <span id="status" class="status"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Extracted details</h2>
+    <div id="error" class="error" hidden></div>
+    <div id="fields"></div>
+    <div id="meta" class="meta"></div>
+    <details id="raw" hidden>
+      <summary>JSON sent to the app</summary>
+      <pre id="json"></pre>
+    </details>
+  </section>
+</main>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const FIELDS = [["name", "Name"], ["email", "Email"], ["country_code", "Country code"],
+                  ["phone", "Phone"], ["address", "Address"]];
+  let file = null;
+  let timer = null;
+
+  function renderFields(data) {
+    const box = $("#fields");
+    box.replaceChildren();
+    for (const [key, label] of FIELDS) {
+      const row = document.createElement("div");
+      row.className = "field";
+      const l = document.createElement("div");
+      l.className = "label";
+      l.textContent = label;
+      const v = document.createElement("div");
+      const value = data ? data[key] : null;
+      v.className = "value" + (value ? "" : " empty");
+      v.textContent = value || (data ? "Not found" : "—");
+      row.append(l, v);
+      box.append(row);
+    }
+  }
+
+  function setFile(f) {
+    if (!f || !f.type.startsWith("image/")) return;
+    file = f;
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
+    img.alt = f.name;
+    $("#drop").replaceChildren(img);
+    $("#run").disabled = false;
+    // Selecting an image only previews it; extraction runs when Extract is clicked.
+    renderFields(null);
+    $("#error").hidden = true;
+    $("#raw").hidden = true;
+    $("#meta").textContent = "";
+    $("#status").textContent = "Ready — click Extract";
+  }
+
+  async function run() {
+    if (!file) return;
+    $("#run").disabled = true;
+    $("#error").hidden = true;
+    $("#raw").hidden = true;
+    $("#meta").textContent = "";
+    renderFields(null);
+    const started = performance.now();
+    timer = setInterval(() => {
+      $("#status").textContent = `Extracting… ${((performance.now() - started) / 1000).toFixed(1)} s`;
+    }, 100);
+
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      // debug=true adds "meta" (timings) for this page; the mobile app gets only the five fields.
+      const res = await fetch("/api/v1/visiting-card/extract?debug=true", { method: "POST", body: form });
+      const body = await res.json();
+      if (!res.ok) {
+        $("#json").textContent = JSON.stringify(body, null, 2);
+        $("#raw").hidden = false;
+        throw new Error(body.error ? body.error.message : `HTTP ${res.status}`);
+      }
+      const { meta: m, ...data } = body;
+      $("#json").textContent = JSON.stringify(data, null, 2);   // exactly what the mobile app receives
+      $("#raw").hidden = false;
+      renderFields(data);
+      const t = m.timings;
+      $("#status").textContent = `Done in ${(m.processing_ms / 1000).toFixed(1)} s`;
+      $("#meta").textContent =
+        `${m.model} · ${m.image.cropped_to_card ? "cropped to card" : "full photo"} ` +
+        `${m.image.width}×${m.image.height} · ` +
+        `read ${t.prompt_tokens} tokens in ${(t.prompt_ms / 1000).toFixed(1)} s · ` +
+        `wrote ${t.output_tokens} tokens in ${(t.output_ms / 1000).toFixed(1)} s`;
+    } catch (e) {
+      $("#status").textContent = "";
+      $("#error").textContent = e.message;
+      $("#error").hidden = false;
+    } finally {
+      clearInterval(timer);
+      $("#run").disabled = false;
+    }
+  }
+
+  async function checkHealth() {
+    const pill = $("#health");
+    try {
+      const h = await (await fetch("/health")).json();
+      const ok = h.status === "ok";
+      pill.textContent = ok ? `Model ready · ${h.model}` : "Model unavailable";
+      pill.className = "pill " + (ok ? "ok" : "bad");
+    } catch {
+      pill.textContent = "API unreachable";
+      pill.className = "pill bad";
+    }
+  }
+
+  const drop = $("#drop");
+  drop.addEventListener("click", () => $("#file").click());
+  drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") $("#file").click(); });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    setFile(e.dataTransfer.files[0]);
+  });
+  $("#file").addEventListener("change", (e) => { setFile(e.target.files[0]); e.target.value = ""; });
+  document.addEventListener("paste", (e) => {
+    const item = [...e.clipboardData.items].find((i) => i.type.startsWith("image/"));
+    if (item) setFile(item.getAsFile());
+  });
+  $("#run").addEventListener("click", run);
+
+  renderFields(null);
+  checkHealth();
+  setInterval(checkHealth, 15000);
+</script>
+</body>
+</html>

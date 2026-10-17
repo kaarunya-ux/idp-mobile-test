@@ -4,6 +4,12 @@ home/
 # Local Claude Code runtime state
 .claude/
 
+# Visiting-card API: local venv, server logs, test output, reference answers (real contact details)
+.venv/
+__pycache__/
+visiting_card_api/logs/
+visiting_card_api/ground_truth.json
+
 # OS/editor cruft
 .DS_Store
 *.swp
@@ -35,6 +41,9 @@ cmake-build-*/
 *.pth
 *.safetensors
 *.ggml
+models/
+script.txt
 
 # Test data
 test_images/
+images/
