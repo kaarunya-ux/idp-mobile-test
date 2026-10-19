@@ -1,6 +1,6 @@
 # IDP Code Consolidation Plan
 
-**Status:** Phase 1, Step 1 done · Step 2 next · **Last updated:** 2026-10-19
+**Status:** Phase 1, Step 2 done · Step 3 next · **Last updated:** 2026-10-19
 
 ## Goal
 
@@ -14,6 +14,8 @@ Get every piece of IDP code the team has written (mobile extraction, OCR, conver
 | 2 | Sumukh | OCR: 4 engines tested (`ocr_test_app/`) | `kaarunya-ux/idp-mobile-test` | `easyocr` |
 | 3 | Sumukh | Conversions: PPT, Excel, CSV | `sumukh-naidu/idox` | `testing` |
 | 4 | Karunya | 10 conversions, table and image helpers, fixes, about 95 tests | `sumukh-naidu/idox` | `testing2` |
+
+Commits authored **"Joel"** are Sumukh's (he used Joel's Mac mini at first). That includes `afc1f9b`, the Qwen3-VL-4B Aadhaar/PAN commit at the tip of `qwen4bmodel`.
 
 Not included as separate sources: our own experiment branches (`3B-LFM2`, `feature/visiting_card_extraction`, `minicpm_canvas`, `qwen_implementation`). Some of their commits come along anyway, because `qwen4bmodel` is built on top of them.
 
@@ -47,6 +49,8 @@ Not included as separate sources: our own experiment branches (`3B-LFM2`, `featu
 | Sumukh's idox `mobile/` | App code included (`idox-mobile/`, `docs/`, `memtest/`). The 374 files in `mobile/results/` are left out |
 | idox sample `input/` and `output/` folders | Left out (still available in the idox repo) |
 | Aadhaar/PAN images and results on `qwen4bmodel` | Kept as they are |
+| PowerPoint slide titles (both interns fixed this differently) | Karunya's version kept: every title is centred and continuation slides work. Sumukh's `_centre_title` (centre only if centred in the source) is superseded |
+| Excel headings | Both kept: Karunya's wrapped prose cells and Sumukh's centred headings |
 
 ## Phase 1: Consolidation
 
@@ -54,7 +58,7 @@ Not included as separate sources: our own experiment branches (`3B-LFM2`, `featu
 |---|---|---|---|---|
 | 0 | Inspect all 4 sources | Read-only fetch and comparison | Findings and decisions above agreed | ☑ |
 | 1 | Create the branch `feat/idp-consolidation` with sources 1 and 2 | Branch from `qwen4bmodel`, fast-forward to `easyocr`. Commit this plan and a `.gitignore` covering local junk and idox samples | Branch exists locally with both sources | ☑ |
-| 2 | Combine idox sources 3 and 4 | On a temporary local branch: start from `testing2`, merge `testing`, resolve the overlaps, move Sumukh's new files into `python_scripts/`. Run the idox tests | Combined idox passes its tests | ☐ |
+| 2 | Combine idox sources 3 and 4 | On a temporary local branch: start from `testing2`, merge `testing`, resolve the overlaps, move Sumukh's new files into `python_scripts/`. Run the idox tests | Combined idox passes its tests | ☑ |
 | 3 | Import the combined idox | Copy it into `idox_conversions/` as one commit credited to Sumukh, Karunya and Prakyath, leaving out the excluded folders | Folder in place, credits in the commit | ☐ |
 | 4 | Verify | Run the idox tests from the new location, `ocr_test_app` tests, and the Android build if possible. Delete the temporary branch | Everything that worked before still works | ☐ |
 
@@ -73,5 +77,6 @@ Build one of the three services from IDP-03 using the consolidated code. Which o
 - **Model calls in conversions:** the idox conversions call the 4B model directly, through `ollama` and `requests`. In IDP, every model call has to go through ai-gateway (standard rule LLM-01), and `requests` is a forbidden library. Both change in Phase 2.
 - **Android app location:** the app lives under `home/aiteam/model_testing/`, and some `.gitignore` files ignore `home/`. Phase 2 moves it to a proper top-level folder.
 - **Real ID data:** images and results named after people are kept for now. Revisit before any production use (DPDP Act).
+- **idox tests need sample files that aren't in git.** 154 tests: 20 failures and 2 errors on Karunya's untouched `testing2` and on the combined result alike. 20 tests expect each script's `input/` and `output/` folders to exist; 2 need sample images (`demo2.png`, `fol.png`) that only exist on Karunya's machine. In Phase 2, tests should create temporary folders and carry small committed sample files.
 - **Tools:** `uv` isn't installed on this laptop yet. It's needed for Phase 2.
 - **VPN:** GitHub can't be reached while the company VPN is on. Turn it off before any fetch or push.
