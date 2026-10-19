@@ -1,6 +1,6 @@
 # IDP Code Consolidation Plan
 
-**Status:** Phase 1 complete · Phase 2a (repo cleanup) moves done, awaiting review · not pushed · **Last updated:** 2026-10-19
+**Status:** Phase 1 and Phase 2a (repo cleanup) complete and pushed · idox branches frozen after the 3c sync · code standardization next · **Last updated:** 2026-10-19
 
 ## Goal
 
@@ -61,6 +61,7 @@ Not included as separate sources: our own experiment branches (`3B-LFM2`, `featu
 | 2 | Combine idox sources 3 and 4 | On a temporary local branch: start from `testing2`, merge `testing`, resolve the overlaps, move Sumukh's new files into `python_scripts/`. Run the idox tests | Combined idox passes its tests | ☑ |
 | 3 | Import the combined idox | Copy it into `idox_conversions/` as one commit credited to Sumukh, Karunya and Prakyath, leaving out the excluded folders | Folder in place, credits in the commit (`6ae45f5`) | ☑ |
 | 3b | Sync idox updates pushed on 2026-10-19 | Merge the new `testing` (`6ecf83f`) and `testing2` (`7674987`) commits into the combined idox, re-test, then update `idox_conversions/` | 12 files updated in one credited commit (`e02a4d3`); 155 tests OK in a fresh checkout | ☑ |
+| 3c | Final sync, the cut-off (evening of 2026-10-19) | The interns' last pushes: Karunya's `testing2` `49733f1` moves the idox app into `web/`; Sumukh's last is still `testing` `6ecf83f`, already in. Merged into the combined idox, then applied under `services/conversions/` | 5 files; `web/idox_app.py` keeps Sumukh's `--host` and new routes; all 40 routes find their scripts; 155 tests OK | ☑ |
 | 4 | Verify | Run the idox tests from the new location, `ocr_test_app` tests, and the Android build if possible. Delete the temporary branch | Everything that worked before still works | ☑ |
 
 **Step 4 results (no models or Android SDK on the test laptop):**
