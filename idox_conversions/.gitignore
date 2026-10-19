@@ -1,0 +1,81 @@
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Model weights - far too large for git, never commit
+models_manual/
+
+# --- Generated output: every *_output/ folder, plus the scratch/test dirs that
+# hold converted files, rendered pages, logs and benchmark numbers. Kept local
+# so a run's results can be inspected without polluting the repo.
+*_output/
+render/
+ppt_review/
+pdf_out/
+pdf_out_img/
+scanned_pdf_output/
+xlsx_output/
+pdf_to_word_output/
+pdf_to_csv_output/
+pdf_to_ppt_output/
+image_to_csv_output/
+image_to_excel_output/
+image_to_pdf_output/
+image_to_ppt_output/
+image_to_word_output/
+image_to_xml_output/
+word_to_csv_output/
+word_to_image_output/
+word_to_ppt_output/
+word_to_xlsx_output/
+word_to_xml_output/
+
+# Loose converted files written next to inputs
+my_output.csv
+*.formatted.csv
+*.docx
+*.pptx
+*.xlsx
+*.log
+bench_results.json
+
+# Extracted / intermediate markdown
+extracted.md
+eod.md
+inv.md
+freetest.md
+mixed.md
+sample.md
+sample_scanned.md
+scansmpl.md
+simple.md
+text2.md
+
+# Real documents - contain actual data, keep local only
+real_form_1040.pdf
+real_business_doc.pdf
+End-of-Day_Report___Day_7.pdf
+
+# Local tooling state
+.claude/scheduled_tasks.lock
+
+# OS
+.DS_Store
+
+# mobile: pulled APKs, decompiled code and Android build output are not ours / too large
+mobile/vlmtester/
+mobile/**/build/
+mobile/**/.gradle/
+mobile/**/local.properties
+mobile/**/jniLibs/
+mobile/llama_dotprod_libs/
+mobile/results/
+input/
+output/
