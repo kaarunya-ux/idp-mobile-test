@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCR Card Tester</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1b1f24; --mute:#6a737d; --line:#d9dde3; --acc:#2563eb;
+          --ok:#15803d; --okbg:#dcfce7; --rej:#b91c1c; --rejbg:#fee2e2; --miss:#92400e; --missbg:#fef3c7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171b; --card:#1d2127; --ink:#e6e9ee; --mute:#9aa4b0; --line:#323943; --acc:#6ea0ff;
+            --ok:#86efac; --okbg:#14391f; --rej:#fca5a5; --rejbg:#451a1a; --miss:#fcd34d; --missbg:#40300f; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); background:var(--card); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  .sub { color:var(--mute); }
+  main { display:grid; grid-template-columns:190px minmax(280px,1fr) minmax(320px,2fr); gap:12px; padding:12px; align-items:start; }
+  @media (max-width:1000px) { main { grid-template-columns:1fr; } }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px; min-width:0; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--mute); margin:4px 0 8px; }
+  .thumbs { display:flex; flex-direction:column; gap:6px; max-height:80vh; overflow:auto; }
+  @media (max-width:1000px) { .thumbs { flex-direction:row; overflow-x:auto; } }
+  .thumb { border:2px solid transparent; border-radius:6px; padding:2px; background:none; cursor:pointer; }
+  .thumb img { width:100%; display:block; border-radius:4px; max-height:110px; object-fit:contain; background:var(--bg); }
+  @media (max-width:1000px) { .thumb { width:140px; flex:none; } }
+  .thumb.sel { border-color:var(--acc); }
+  .stage { position:relative; display:inline-block; max-width:100%; }
+  .stage img { display:block; max-width:100%; height:auto; border-radius:4px; }
+  .stage svg { position:absolute; inset:0; width:100%; height:100%; }
+  .box { fill:none; stroke:var(--acc); stroke-width:2; vector-effect:non-scaling-stroke; opacity:.55; }
+  .box.hot { stroke:#f59e0b; stroke-width:3; opacity:1; fill:rgba(245,158,11,.18); }
+  .box.low { stroke:#9ca3af; stroke-dasharray:4 3; }
+  .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; color:var(--mute); }
+  select, button.btn { font:inherit; padding:3px 8px; background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:4px; cursor:pointer; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:6px 4px; border-top:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:500; font-size:12px; border-top:none; }
+  .val { font-weight:600; word-break:break-word; }
+  .badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .b-extracted,.b-correct { background:var(--okbg); color:var(--ok); } .b-failed,.b-wrong { background:var(--rejbg); color:var(--rej); }
+  .b-not_available,.b-missing { background:var(--missbg); color:var(--miss); }
+  .why { color:var(--mute); font-size:12px; word-break:break-word; }
+  .lines { max-height:260px; overflow:auto; font:12px ui-monospace,monospace; }
+  .ln { display:flex; gap:8px; padding:2px 4px; border-radius:4px; }
+  .ln:hover, .ln.hot { background:var(--bg); outline:1px solid #f59e0b; }
+  .ln .c { flex:none; width:34px; color:var(--mute); } .ln .c.low { color:var(--rej); }
+  .banner { padding:8px 10px; border-radius:6px; background:var(--rejbg); color:var(--rej); margin-bottom:8px; }
+  .note { padding:8px 10px; border-radius:6px; background:var(--missbg); color:var(--miss); margin-bottom:8px; }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+  .stack > * + * { margin-top:12px; }
+  details summary { cursor:pointer; color:var(--mute); }
+  pre { margin:6px 0 0; padding:8px; background:var(--bg); border-radius:6px; overflow:auto; max-height:260px; font-size:12px; }
+  .tot { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:10px; } .tot b { font-size:18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OCR Card Tester</h1>
+  <span class="sub">template-guided extraction &middot; EasyOCR</span>
+  <span class="sub" id="share"></span>
+</header>
+<main>
+  <div class="panel"><div class="thumbs" id="thumbs"></div></div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <label>Engine <select id="engine"></select></label>
+      <label>Template <select id="tpl"><option value="">auto-detect</option><option>pan</option><option>aadhaar</option></select></label>
+      <label><input type="checkbox" id="showLow" checked> low-conf boxes</label>
+    </div>
+    <div class="toolbar"><span id="meta">Pick an image on the left.</span></div>
+    <div class="stage" id="stage"></div>
+    <h2 style="margin-top:12px">Raw OCR lines</h2>
+    <div class="lines" id="lines"></div>
+  </div>
+
+  <div class="stack">
+    <div class="panel">
+      <div class="toolbar"><h2 style="margin:0">Response</h2><button class="btn" id="bench">Run benchmark (all images)</button></div>
+      <div id="result" class="sub">&mdash;</div>
+    </div>
+    <div class="panel" id="benchPanel" hidden></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let current = null, lineData = {};   // lineData[engine] = {width,height,lines,seconds}
+let engines = {};
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const imgUrl = im => `/img/${im.group}/${encodeURIComponent(im.name)}`;
+
+async function init() {
+  fetch("/api/config").then(r => r.json()).then(c => {
+    $("share").innerHTML = `API endpoint for other devices: <b id="ep">${esc(c.extract_endpoint)}</b> <button class="btn" onclick="navigator.clipboard.writeText($('ep').textContent)">copy</button>`;
+  }).catch(() => {});
+  engines = await (await fetch("/api/engines")).json();
+  const opts = Object.entries(engines).map(([e, v]) => `<option value="${e}" ${v.available ? "" : "disabled"}>${e}${v.available ? "" : " (not installed)"}</option>`);
+  const usable = Object.values(engines).filter(v => v.available).length;
+  $("engine").innerHTML = opts.join("") + (usable > 1 ? '<option value="compare">compare all</option>' : "");
+  const imgs = await (await fetch("/api/images")).json();
+  const t = $("thumbs"); let g = "";
+  for (const im of imgs) {
+    if (im.group !== g) { g = im.group; t.insertAdjacentHTML("beforeend", `<h2>${esc(g)}</h2>`); }
+    const b = document.createElement("button");
+    b.className = "thumb"; b.title = im.name;
+    b.innerHTML = `<img loading="lazy" src="${imgUrl(im)}" alt="${esc(im.name)}">`;
+    b.onclick = () => { document.querySelectorAll(".thumb").forEach(x => x.classList.remove("sel")); b.classList.add("sel"); current = im; run(); };
+    t.appendChild(b);
+  }
+  $("engine").onchange = $("tpl").onchange = () => current && run();
+  $("showLow").onchange = () => current && drawBoxes();
+  $("bench").onclick = benchmark;
+}
+
+const selected = () => $("engine").value === "compare" ? Object.keys(engines).filter(e => engines[e].available) : [$("engine").value];
+
+async function run() {
+  const list = selected(), q = $("tpl").value ? `&template=${$("tpl").value}` : "";
+  $("meta").textContent = "Running OCR… (first run loads the models)";
+  $("result").innerHTML = '<span class="sub">Working…</span>'; $("lines").innerHTML = "";
+  const base = `${current.group}/${encodeURIComponent(current.name)}`;
+  try {
+    const out = await Promise.all(list.map(async e => {
+      const [resp, ln] = await Promise.all([
+        fetch(`/api/ocr/${base}?engine=${e}${q}`).then(r => r.json()),
+        fetch(`/api/lines/${base}?engine=${e}`).then(r => r.json())]);
+      lineData[e] = ln;
+      return [e, resp];
+    }));
+    renderResults(out);
+  } catch (err) { $("meta").textContent = "Error: " + err.message; return; }
+  const first = lineData[list[0]];
+  $("meta").textContent = `${first.width}×${first.height}px · ` + list.map(e => `${e}: ${lineData[e].lines.length} lines, ${lineData[e].seconds}s`).join(" · ");
+  drawBoxes();
+}
+
+function drawBoxes() {
+  const e = selected()[0], d = lineData[e];
+  const low = $("showLow").checked;
+  const boxes = d.lines.map((l, i) => {
+    const [x0, y0, x1, y1] = l.box;
+    return (!low && l.conf < 0.6) ? "" :
+      `<rect class="box ${l.conf < 0.6 ? "low" : ""}" id="b${i}" x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"/>`;
+  }).join("");
+  $("stage").innerHTML = `<img src="${imgUrl(current)}" alt=""><svg viewBox="0 0 ${d.width} ${d.height}" preserveAspectRatio="none">${boxes}</svg>`;
+  $("lines").innerHTML = d.lines.map((l, i) =>
+    `<div class="ln" id="l${i}" onmouseenter="hot(${i},1)" onmouseleave="hot(${i},0)">` +
+    `<span class="c ${l.conf < 0.6 ? "low" : ""}">${l.conf.toFixed(2)}</span><span>${esc(l.text)}</span></div>`).join("");
+}
+function hot(i, on) { $("b" + i)?.classList.toggle("hot", !!on); $("l" + i)?.classList.toggle("hot", !!on); }
+
+function fieldTable(resp) {
+  if (!resp.success) return `<div class="banner">${esc(resp.error?.message || resp.detail || "failed")}</div>`;
+  const rows = Object.entries(resp.fields).map(([k, f]) =>
+    `<tr><td>${esc(k)}</td><td><div class="val">${esc(f.value_en || "—")}</div>${f.value_hi ? `<div class="val" lang="hi">${esc(f.value_hi)}</div>` : ""}${f.reason ? `<div class="why">${esc(f.reason)}</div>` : ""}</td>` +
+    `<td><span class="badge b-${f.status}">${f.status}</span><div class="why">${f.confidence ? f.confidence.toFixed(2) : ""}</div></td></tr>`).join("");
+  return `<div class="why">template: <b>${esc(resp.template_type)}</b> · ${resp.processing_time_ms} ms</div>` +
+    `<table><tr><th>Field</th><th>Value</th><th>Status</th></tr>${rows}</table>` +
+    `<details><summary>raw JSON</summary><pre>${esc(JSON.stringify(resp, null, 2))}</pre></details>`;
+}
+
+function renderResults(out) {
+  $("result").innerHTML = `<div class="cols">` + out.map(([e, r]) =>
+    `<div>${out.length > 1 ? `<h2>${e}</h2>` : ""}${fieldTable(r)}</div>`).join("") + `</div>`;
+}
+
+async function benchmark() {
+  const p = $("benchPanel"); p.hidden = false; p.innerHTML = '<span class="sub">Running every image through every engine… this takes a minute or two.</span>';
+  const d = await (await fetch("/api/benchmark")).json();
+  const names = Object.keys(d.totals);
+  const tot = names.map(e => {
+    const t = d.totals[e];
+    return t.available
+      ? `<div><h2>${e}</h2><b>${t.correct}</b> correct · <b>${t.wrong}</b> wrong · <b>${t.missing}</b> missing<div class="why">avg ${t.avg_seconds}s / image</div></div>`
+      : `<div><h2>${e}</h2><div class="note">${esc(t.reason)}</div></div>`;
+  }).join("");
+  const avail = names.filter(e => d.totals[e].available);
+  const rows = d.images.map(im => {
+    const fields = Object.keys(im.engines[avail[0]]?.fields || {});
+    return fields.map((f, i) =>
+      `<tr>${i === 0 ? `<td rowspan="${fields.length}" title="${esc(im.name)}">${im.group}<br>${esc(im.name.slice(0, 6))}</td>` : ""}<td>${f}</td>` +
+      `<td>${esc(im.engines[avail[0]].fields[f].truth)}</td>` +
+      avail.map(e => { const c = im.engines[e].fields[f]; return `<td><span class="badge b-${c.verdict}">${c.verdict}</span> ${c.verdict === "wrong" ? esc(c.got) : ""}</td>`; }).join("") + `</tr>`).join("");
+  }).join("");
+  p.innerHTML = `<h2>Benchmark vs ground_truth.json</h2><div class="tot">${tot}</div>` +
+    (avail.length ? `<table><tr><th>Image</th><th>Field</th><th>Truth</th>${avail.map(e => `<th>${e}</th>`).join("")}</tr>${rows}</table>` : "");
+}
+init();
+</script>
+</body>
+</html>

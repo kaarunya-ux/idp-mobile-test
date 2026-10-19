@@ -1,0 +1,118 @@
+{
+  "doc_type": "aadhaar",
+  "detect": {
+    "keywords": [
+      "government\\s*of\\s*india",
+      "unique\\s*identification",
+      "aadhaar",
+      "\\bdob\\b",
+      "uidai",
+      "\\b(fe)?male\\b"
+    ],
+    "pattern_hits": [
+      "[0-9]{4}\\s[0-9]{4}\\s[0-9]{4}"
+    ],
+    "min_hits": 2
+  },
+  "fields": [
+    {
+      "name": "name",
+      "strategy": "above_anchor",
+      "anchor": "\\bdob\\b|date\\s*of\\s*birth|birth|[0-3][0-9][/.\\-][01][0-9][/.\\-][12][0-9]{3}",
+      "value_pattern": "^[A-Za-z][A-Za-z .'-]{2,48}$",
+      "max_lines_above": 3,
+      "min_conf": 0.8,
+      "side": "front",
+      "required": true
+    },
+    {
+      "name": "dob_or_yob",
+      "strategy": "regex",
+      "pattern": "[0-3][0-9]\\s?[/.\\-]\\s?[01][0-9]\\s?[/.\\-]\\s?[12][0-9.]{3,4}|(?<![0-9])[0-3][0-9]1[01][0-9]1[12][0-9]{3}(?![0-9])|(?i:(?:yob|year\\s*of\\s*birth)\\s*[:/]?\\s*)(?:19|20)[0-9]{2}",
+      "near_anchor": "\\bdob\\b|date\\s*of\\s*birth|birth|\\byob\\b",
+      "fix": "date",
+      "validator": "date",
+      "min_conf": 0.6,
+      "side": "front",
+      "required": true
+    },
+    {
+      "name": "gender",
+      "strategy": "regex",
+      "pattern": "(?i)\\b(female|male|transgender)\\b",
+      "map": {
+        "male": "Male",
+        "female": "Female",
+        "transgender": "Transgender"
+      },
+      "min_conf": 0.6,
+      "side": "front",
+      "required": true
+    },
+    {
+      "name": "aadhaar_number",
+      "strategy": "regex",
+      "pattern": "(?<![0-9])[2-9][0-9]{3}[\\s._,]?[0-9]{4}[\\s._,]?[0-9]{4}(?![0-9])|(?i:(?<![a-z0-9])[x*]{4}[\\s._,-]?[x*]{4}[\\s._,-]?[0-9]{4}(?![0-9]))",
+      "fix": "aadhaar",
+      "validator": "aadhaar",
+      "exclude_line": "vid",
+      "prefer": "most_frequent",
+      "min_conf": 0.5,
+      "side": "both",
+      "required": true
+    },
+    {
+      "name": "enrolment_number",
+      "strategy": "regex",
+      "pattern": "(?<![0-9])[0-9]{4}/[0-9]{5}/[0-9]{5}(?![0-9])",
+      "min_conf": 0.6,
+      "side": "back",
+      "required": false
+    },
+    {
+      "name": "care_of",
+      "strategy": "regex",
+      "pattern": "(?i)(?<![a-z])[csdwh]\\s*[/Il1|]\\s*[oO0]\\s*[:;.]\\s*[A-Za-z][A-Za-z .'-]{2,48}",
+      "min_conf": 0.8,
+      "side": "back",
+      "required": false,
+      "fix": "care_of"
+    },
+    {
+      "name": "address",
+      "strategy": "block_from_anchor",
+      "anchor": "(?i)^\\W*[a-z]?address|^\\W*(c|s|d|w|h)\\s*[/Il1|]\\s*[oO0]\\b",
+      "stop": "(?i)\\bvid\\b|1947|uidai|help|www|gov|mobile|[0-9]{4}[\\s._,-]?[0-9]{4}[\\s._,-]?[0-9]{4}|[xX*]{4}[\\s._,-]?[xX*]{4}|enrol|your\\s*aadhaar",
+      "max_lines": 8,
+      "min_conf": 0.7,
+      "line_min_conf": 0.8,
+      "line_charset": "[A-Za-z0-9 ,.:;/()'\\-]",
+      "require": "(?<![0-9])[1-9][0-9]{5}(?![0-9])",
+      "side": "back",
+      "required": true
+    },
+    {
+      "name": "pincode",
+      "strategy": "regex",
+      "scope": "address",
+      "pattern": "(?<![0-9])[1-9][0-9]{5}(?![0-9])",
+      "min_conf": 0.6,
+      "side": "back",
+      "required": true
+    },
+    {
+      "name": "photo",
+      "strategy": "image",
+      "detector": "face",
+      "side": "front",
+      "required": true
+    },
+    {
+      "name": "qr_code",
+      "strategy": "image",
+      "detector": "qr",
+      "side": "both",
+      "required": true
+    }
+  ]
+}
