@@ -1,6 +1,6 @@
 # IDP Code Consolidation Plan
 
-**Status:** Phase 1 complete (local, not pushed) · Phase 2 next · **Last updated:** 2026-10-19
+**Status:** Phase 1 complete · Phase 2a (repo cleanup) moves done, awaiting review · not pushed · **Last updated:** 2026-10-19
 
 ## Goal
 
@@ -78,7 +78,28 @@ Not included as separate sources: our own experiment branches (`3B-LFM2`, `featu
 
 ## Phase 2: Standardization
 
-Restructure the whole branch to the Python Engineering Standard: feature-first layout, `uv`, `ruff`, `mypy --strict`, tests. The detailed plan is written after Phase 1.
+Restructure the whole branch to the Python Engineering Standard: feature-first layout, `uv`, `ruff`, `mypy --strict`, tests.
+
+### Phase 2a: Repo cleanup (folders only, no code changes)
+
+Every file was moved with `git mv`, so its history follows it. Folders that read each other by path moved together.
+
+```
+README.md            map of the repo
+docs/                consolidation-plan.md, mobile-extraction/ (findings, handovers, figures; PDFs kept next to their Markdown)
+mobile/              idp-android/ (was home/aiteam/model_testing/android-app), idox-mobile/ (was idox_conversions/mobile/)
+services/            conversions/ (was idox_conversions/, still holding idocx_ai/), ocr/ (ocr_test_app + its two image folders)
+research/            inference-engines/qvac-visionpsy-nano, stage1-contract, benchmarks, test-images
+```
+
+| Decision | Detail |
+|---|---|
+| `services/` rather than `prototypes/` | The code goes under `services/` now and becomes the standard service layout in the next phase |
+| PDF copies of Markdown docs | Kept, next to their Markdown |
+| `.gitignore` | `home/` and `*.kts` rules removed; OCR, conversions and mobile rules point at the new paths |
+| Text edits | Only `.gitignore` files, and the six figure links in the LFM2 findings doc |
+| `idocx_ai/` stays inside `services/conversions/` | `tests/_load.py` reads its sample PDFs from `idocx_ai/features/fr_ai_04_translation/input`. Moving it out broke 10 tests. Separating them needs a code change, so it waits for standardization |
+| Two LFM2 asset files | `mobile/idp-android/app/src/main/assets/{grammars/pan_full_lfm2.gbnf, prompts/user_pan_full_lfm2.txt}` are loaded by `MainActivity.kt` but were never committed (hidden by the old `home/` rule). Now added |
 
 ## Phase 3: First Python service
 

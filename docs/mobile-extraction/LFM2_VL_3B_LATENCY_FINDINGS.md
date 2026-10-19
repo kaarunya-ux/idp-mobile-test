@@ -291,7 +291,7 @@ Read from the fork's source and confirmed in the verbose logs.
 
 ## 6. Where the time goes
 
-![Where one scan spends its time](docs/lfm2_figures/fig1_time_breakdown.svg)
+![Where one scan spends its time](lfm2_figures/fig1_time_breakdown.svg)
 
 ### 6.1 Stage table for the five full-card runs (cold CLI, 128 image tokens, BUL2 prompt; measured, then derived)
 
@@ -351,7 +351,7 @@ The model explains a run to within the heat effect, and it says where the second
 
 First measurements, on the field canvas (448×448), with the app's original `pan_full` prompt and JSON schema, `-c 4096`, one run each. Times are llama.cpp's total time, within about 1 s of wall clock on the runs where both were recorded.
 
-![Image tokens against latency](docs/lfm2_figures/fig2_image_tokens_vs_latency.svg)
+![Image tokens against latency](lfm2_figures/fig2_image_tokens_vs_latency.svg)
 
 | Image tokens | Card e time | Card c time | Card e fields | Card c fields | Encode | Image tokens through LM | Output |
 |---|---|---|---|---|---|---|---|
@@ -388,7 +388,7 @@ A second point from this table: with only two cards, card c's three nulls made L
 
 ### 8.1 Result (measured; 5 cards, one run each)
 
-![Nine configurations](docs/lfm2_figures/fig3_config_matrix.svg)
+![Nine configurations](lfm2_figures/fig3_config_matrix.svg)
 
 | Config | Avg time (range) | Fields right | Documents fully right | What went wrong |
 |---|---|---|---|---|
@@ -621,7 +621,7 @@ What went wrong:
 
 ### 13.2 Result (measured)
 
-![Share of CPU time by core](docs/lfm2_figures/fig6_core_usage.svg)
+![Share of CPU time by core](lfm2_figures/fig6_core_usage.svg)
 
 | | Pinned to 4–7 (current) | Unpinned |
 |---|---|---|
@@ -650,7 +650,7 @@ The **thread-count sweep** (3, 6, 8 threads; four threads unpinned; four threads
 
 ## 14. Thermal drift
 
-![The same prompt slows down as the phone heats up](docs/lfm2_figures/fig4_thermal_drift.svg)
+![The same prompt slows down as the phone heats up](lfm2_figures/fig4_thermal_drift.svg)
 
 The same 190-token prompt (image included) was processed at very different speeds depending on how many scans had just run:
 
@@ -815,7 +815,7 @@ For the user's AI-only direction, the OCR branch is **closed for now**: its conc
 
 "Predicted" is what I said before testing (an estimate); "Measured" is what the phone gave. Accuracy is on the five cards.
 
-![Every path measured](docs/lfm2_figures/fig5_paths_compared.svg)
+![Every path measured](lfm2_figures/fig5_paths_compared.svg)
 
 | # | Lever | Predicted | Measured | Accuracy effect | Status |
 |---|---|---|---|---|---|
