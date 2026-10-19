@@ -3,7 +3,7 @@
 idox_app.py -- a small local web app: upload a file, pick a conversion, download
 the result.
 
-    .venv/bin/python python_scripts/idox_app.py            then open  http://127.0.0.1:8765
+    .venv/bin/python web/idox_app.py            then open  http://127.0.0.1:8765
 
 WHY A SERVER AT ALL. Every converter here is a Python script, and a web page cannot
 run Python. This file is the missing piece: it serves idox_app.html, receives the
@@ -53,13 +53,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-SCRIPTS = Path(__file__).resolve().parent      # the converter scripts, this file among them
-REPO = SCRIPTS.parent                          # the repo root: input/, output/
+HERE = Path(__file__).resolve().parent         # web/: this app and its page
+SCRIPTS = HERE.parent / "python_scripts"       # the converter scripts
+REPO = SCRIPTS.parent                          # the project root: input/, output/
 PY = sys.executable
-PAGE = SCRIPTS / "idox_app.html"                # lives next to this file in python_scripts/
+PAGE = HERE / "idox_app.html"
 
 LOCAL_BASE = "http://127.0.0.1:8090"
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}       # the Host names the app answers to; --host adds one
+
+# LibreOffice's installer does not always put itself on PATH; add its usual folders so the Word conversions find it.
+for _lo in (r"C:\Program Files\LibreOffice\program", r"C:\Program Files (x86)\LibreOffice\program"):
+    if os.path.isdir(_lo) and _lo not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = _lo + os.pathsep + os.environ.get("PATH", "")
+
 MAX_UPLOAD = 300 * 1024 * 1024
 JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 PAGES_RE = re.compile(r"^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$")
@@ -114,6 +121,31 @@ ROUTES = {
     "docx_pdf": dict(src="docx", label="PDF", model=False, script="word_to_pdf.py",
                      needs=["soffice"],
                      note="LibreOffice renders it, then the result is checked against the Word file."),
+    "img_pptx": dict(src="image", label="PowerPoint (.pptx)", model=True, script="image_to_ppt.py",
+                     note="Reads the image with the model; the first heading becomes the slide title."),
+    "img_xml": dict(src="image", label="XML", model=True, script="image_to_xml.py",
+                    note="Headings, paragraphs, lists and tables as well-formed XML."),
+    "img_csv": dict(src="image", label="CSV", model=True, script="image_to_csv.py",
+                    note="Text one line per row, tables as rows and columns."),
+    "pdf_xml": dict(src="pdf", label="XML", model=True, script="pdf_to_xml.py", opts=["pages"],
+                    note="Headings, paragraphs, lists and tables as well-formed XML."),
+    "pdf_csv": dict(src="pdf", label="CSV", model=True, script="pdf_to_csv.py", opts=["pages"],
+                    note="Text one line per row, tables as rows and columns."),
+    "docx_xlsx": dict(src="docx", label="Excel (.xlsx)", model=True, script="word_to_xlsx.py",
+                      needs=["soffice"], opts=["pages"],
+                      note="Word is drawn by LibreOffice, then read by the model. Tables become sheet grids."),
+    "docx_pptx": dict(src="docx", label="PowerPoint (.pptx)", model=True, script="word_to_ppt.py",
+                      needs=["soffice"], opts=["pages"],
+                      note="Word is drawn by LibreOffice, then read by the model. One slide per page."),
+    "docx_xml": dict(src="docx", label="XML", model=True, script="word_to_xml.py",
+                     needs=["soffice"], opts=["pages"],
+                     note="Word is drawn by LibreOffice, then read by the model."),
+    "docx_csv": dict(src="docx", label="CSV", model=True, script="word_to_csv.py",
+                     needs=["soffice"], opts=["pages"],
+                     note="Word is drawn by LibreOffice, then read by the model. Text lines and tables."),
+    "docx_png": dict(src="docx", label="PNG images", model=False, script="word_to_image.py",
+                     needs=["soffice"], opts=["pages"],
+                     note="LibreOffice draws each page as a picture. No model."),
     "tiff_pdf": dict(src="tiff", label="Searchable PDF", model=False, script="tiff_to_pdf.py",
                      needs=["tesseract"],
                      note="Each frame becomes a page, unchanged, with a hidden text layer so it can be searched."),
@@ -166,7 +198,7 @@ ROUTES = {
 # ---------------------------------------------------------------------------
 
 CONFIG = {
-    "backend": "tuhin",                       # "tuhin" (remote API) or "local"
+    "backend": "local",                       # "local" (the llama-server on port 8090) or "tuhin" (remote API)
     "endpoint": "http://10.0.3.2:8080",       # tuhin-ai.local does not resolve on every machine
     "key": os.environ.get("TUHIN_AI_KEY", "").strip(),
     "thinking": False,

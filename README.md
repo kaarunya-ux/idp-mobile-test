@@ -8,7 +8,7 @@ Everything the team has built for IDP (Intelligent Document Processing): on-devi
 |---|---|---|
 | `mobile/idp-android/` | Android app: Aadhaar/PAN extraction with an on-device model (llama.cpp) | `qwen4bmodel` (Karunya, Sumukh) |
 | `mobile/idox-mobile/` | Android app: document conversion on the phone with 1–4B models, plus its reports and `memtest` | idox `IDP`/`testing` (Sumukh) |
-| `services/conversions/` | Conversion scripts (`python_scripts/`), their HTTP API (`api/`), tests and docs | idox `testing` + `testing2` (Sumukh, Karunya) |
+| `services/conversions/` | Conversion scripts (`python_scripts/`), their HTTP API (`api/`), a local web app (`web/`), tests and docs | idox `testing` + `testing2` (Sumukh, Karunya) |
 | `services/conversions/idocx_ai/` | iDocx AI features: workflow, forms, compare, translation, redaction, cleanup, accessibility. Kept inside `conversions/` for now, because the conversion tests read sample PDFs from it | idox (Prakyath) |
 | `services/ocr/` | OCR test app (`ocr_test_app/`) and the Aadhaar/PAN test images it reads | `easyocr` (Sumukh) |
 | `research/inference-engines/` | Inference engine experiments (llama.cpp, Hugging Face, vLLM) | `qwen4bmodel` |
