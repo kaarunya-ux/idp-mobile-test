@@ -1,6 +1,6 @@
 # IDP Code Consolidation Plan
 
-**Status:** Phase 1, Step 3 done · Step 4 next · **Last updated:** 2026-10-19
+**Status:** Phase 1, Step 3b done · Step 4 next · **Last updated:** 2026-10-19
 
 ## Goal
 
@@ -60,6 +60,7 @@ Not included as separate sources: our own experiment branches (`3B-LFM2`, `featu
 | 1 | Create the branch `feat/idp-consolidation` with sources 1 and 2 | Branch from `qwen4bmodel`, fast-forward to `easyocr`. Commit this plan and a `.gitignore` covering local junk and idox samples | Branch exists locally with both sources | ☑ |
 | 2 | Combine idox sources 3 and 4 | On a temporary local branch: start from `testing2`, merge `testing`, resolve the overlaps, move Sumukh's new files into `python_scripts/`. Run the idox tests | Combined idox passes its tests | ☑ |
 | 3 | Import the combined idox | Copy it into `idox_conversions/` as one commit credited to Sumukh, Karunya and Prakyath, leaving out the excluded folders | Folder in place, credits in the commit (`6ae45f5`) | ☑ |
+| 3b | Sync idox updates pushed on 2026-10-19 | Merge the new `testing` (`6ecf83f`) and `testing2` (`7674987`) commits into the combined idox, re-test, then update `idox_conversions/` | 12 files updated in one credited commit (`e02a4d3`); 155 tests OK in a fresh checkout | ☑ |
 | 4 | Verify | Run the idox tests from the new location, `ocr_test_app` tests, and the Android build if possible. Delete the temporary branch | Everything that worked before still works | ☐ |
 
 ## Phase 2: Standardization
@@ -77,6 +78,8 @@ Build one of the three services from IDP-03 using the consolidated code. Which o
 - **Model calls in conversions:** the idox conversions call the 4B model directly, through `ollama` and `requests`. In IDP, every model call has to go through ai-gateway (standard rule LLM-01), and `requests` is a forbidden library. Both change in Phase 2.
 - **Android app location:** the app lives under `home/aiteam/model_testing/`, and some `.gitignore` files ignore `home/`. Phase 2 moves it to a proper top-level folder.
 - **Real ID data:** images and results named after people are kept for now. Revisit before any production use (DPDP Act).
-- **idox tests need sample files that aren't in git.** 154 tests: 20 failures and 2 errors on Karunya's untouched `testing2` and on the combined result alike. 20 tests expect each script's `input/` and `output/` folders to exist; 2 need sample images (`demo2.png`, `fol.png`) that only exist on Karunya's machine. In Phase 2, tests should create temporary folders and carry small committed sample files.
+- **idox tests depend on local sample folders.** In a fresh checkout, 155 tests run and pass (4 skipped). If someone has *some* sample folders in `input/` and `output/` but not all of them, `test_every_new_script_has_its_folders` fails. In Phase 2, tests should create temporary folders and carry small committed sample files.
+- **`idox_app.py --host` has no login.** Sumukh's option lets colleagues on the VPN open the local idox app, and anyone who can reach that address can use it. Fine for a local tool; the IDP services need real authentication (Python standard SEC-01/02).
+- **Freeze the idox branches.** The interns pushed new idox work after the first import, which Step 3b had to catch up. From now on, new IDP work should go on `feat/idp-consolidation` (or branches off it), not on idox `testing`/`testing2`.
 - **Tools:** `uv` isn't installed on this laptop yet. It's needed for Phase 2.
 - **VPN:** GitHub can't be reached while the company VPN is on. Turn it off before any fetch or push.
