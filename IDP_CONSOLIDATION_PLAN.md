@@ -1,6 +1,6 @@
 # IDP Code Consolidation Plan
 
-**Status:** Phase 1, Step 2 done · Step 3 next · **Last updated:** 2026-10-19
+**Status:** Phase 1, Step 3 done · Step 4 next · **Last updated:** 2026-10-19
 
 ## Goal
 
@@ -59,7 +59,7 @@ Not included as separate sources: our own experiment branches (`3B-LFM2`, `featu
 | 0 | Inspect all 4 sources | Read-only fetch and comparison | Findings and decisions above agreed | ☑ |
 | 1 | Create the branch `feat/idp-consolidation` with sources 1 and 2 | Branch from `qwen4bmodel`, fast-forward to `easyocr`. Commit this plan and a `.gitignore` covering local junk and idox samples | Branch exists locally with both sources | ☑ |
 | 2 | Combine idox sources 3 and 4 | On a temporary local branch: start from `testing2`, merge `testing`, resolve the overlaps, move Sumukh's new files into `python_scripts/`. Run the idox tests | Combined idox passes its tests | ☑ |
-| 3 | Import the combined idox | Copy it into `idox_conversions/` as one commit credited to Sumukh, Karunya and Prakyath, leaving out the excluded folders | Folder in place, credits in the commit | ☐ |
+| 3 | Import the combined idox | Copy it into `idox_conversions/` as one commit credited to Sumukh, Karunya and Prakyath, leaving out the excluded folders | Folder in place, credits in the commit (`6ae45f5`) | ☑ |
 | 4 | Verify | Run the idox tests from the new location, `ocr_test_app` tests, and the Android build if possible. Delete the temporary branch | Everything that worked before still works | ☐ |
 
 ## Phase 2: Standardization
