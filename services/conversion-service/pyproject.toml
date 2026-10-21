@@ -75,12 +75,22 @@ markers = [
 ]
 
 # --- Architecture rules (standard ch. 21.6) -----------------------------------
-# More contracts arrive with the first feature in step 2 (layers, pure domain, independent features).
+# The "layers" contract (api -> application -> domain) arrives with the first application/infrastructure code.
 [tool.importlinter]
 root_package = "conversion"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "core does not depend on the entry points"
+name = "core does not depend on features or entry points"
 type = "forbidden"
 source_modules = ["conversion.core"]
-forbidden_modules = ["conversion.health"]
+forbidden_modules = ["conversion.conversion", "conversion.health"]
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure"
+type = "forbidden"
+source_modules = ["conversion.conversion.domain"]
+forbidden_modules = [
+    "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "httpx", "celery", "faststream", "redis",
+    "boto3", "structlog", "uvicorn", "conversion.core.config", "conversion.core.logging",
+]

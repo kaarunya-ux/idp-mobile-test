@@ -15,8 +15,8 @@ Each step is one branch and one reviewable pull request (about 400 changed lines
 
 | # | Step | What it produces | Status |
 |---|---|---|---|
-| 1 | Skeleton | `services/conversion-service/` with `uv`, settings, logging, a health endpoint, `make check` green. No business logic | done, in review (`feat/conversion-service-skeleton`) |
-| 2 | Domain | Formats, routes and the route planner as pure Python; a test that all 30 matrix pairs have a route | |
+| 1 | Skeleton | `services/conversion-service/` with `uv`, settings, logging, a health endpoint, `make check` green. No business logic | merged (PR #1) |
+| 2 | Domain | Formats, routes and the route planner as pure Python; a test that all 30 matrix pairs have a route | done, in review (`feat/conversion-service-route-planner`) |
 | 3 | First converters (no AI) | Image ↔ image, PDF ↔ images, Office → PDF, ported from `services/conversions/python_scripts/` with tests | |
 | 4 | Messaging and storage | Receive `ConversionRequested`, run Celery tasks, MinIO in and out, send `JobProgressed` / `ConversionCompleted` / `WorkFailed` | |
 | 5 | The rest | PDF edit plans, exports, previews. AI-assisted routes once ai-gateway exists | |
@@ -201,3 +201,97 @@ ENVIRONMENT=prodd make run                # see the startup validation refuse it
 The standard's install command (§0.5) is `curl -LsSf https://astral.sh/uv/install.sh | sh`.
 
 **Lesson:** VS Code on Ubuntu runs as a **snap**, which changes some environment variables inside its terminal. The installer therefore put `uv` in `~/snap/code/256/.local/bin`, a private VS Code folder that can change when VS Code updates, and added a line pointing there to `~/.bashrc`, `~/.profile` and `~/.zshrc`. Fix: move `uv` and `uvx` to `~/.local/bin` (already on the PATH via `~/.profile`) and remove the three added lines. To avoid it, run the installer from a normal terminal, or set `UV_INSTALL_DIR="$HOME/.local/bin"` first.
+
+---
+
+## Entry 2: Domain: formats, routes and the route planner (2026-10-21)
+
+**Goal:** teach the service to *plan* a conversion before it can perform one. Given a source and a target format, the planner returns the ordered steps, or a clear error. It's pure logic: no files, no network, no frameworks.
+
+### What we did
+
+```
+src/conversion/
+  core/error_codes.py        ErrorCode enum: CNV-422-ROUTE-001, with its HTTP status
+  core/errors.py             DomainError: base class of every business error
+  conversion/                the first feature (IDP-03 ch. 3.3 names it "conversion")
+    domain/formats.py        Format (PDF, DOCX, XLSX, CSV, PPTX, PNG, JPEG) and Representation
+    domain/route.py          Converter, Fidelity, Step, Route
+    domain/route_planner.py  RouteRequest, RoutePlanner and the route table
+    domain/exceptions.py     RouteNotFoundError, InvalidRouteError
+tests/unit/                  61 new tests (76 in total), 100 % coverage
+```
+
+### How it works
+
+**Two hubs keep the table small** (IDP-00 ch. 5, IDP-03 ch. 3.4). Seven formats give 42 possible pairs, but we don't write 42 converters:
+
+- **PDF is the visual hub:** anything → PDF → images or slides.
+- **The document model is the data hub:** pages → text blocks and tables, with positions. Every format is *read into* the model and *written out of* it.
+
+That's why `Representation` has one more member than `Format`: `DOCUMENT_MODEL`, which a step can produce or consume but a user can never ask for.
+
+**A route is a chain of steps:**
+
+| Request | Route | Fidelity |
+|---|---|---|
+| CSV → PDF | `xlsx_csv` (XLSX) → `office_to_pdf` (PDF) | H |
+| digital PDF → XLSX | `pdf_tables` (model) → `model_to_xlsx` (XLSX) | D |
+| scanned PDF → XLSX | `ocr_to_model` (model) → `model_to_xlsx` (XLSX) | D |
+| JPEG → PDF | `images_to_pdf` (PDF) | E |
+| JPEG → PDF, `ocr=ON` | `searchable_pdf` (PDF) | E |
+| DOCX → PPTX | `office_to_pdf` → `pdf_to_images` → `pptx_from_images` | A |
+| DOCX → DOCX | `RouteNotFoundError`: `CNV-422-ROUTE-001` | |
+
+**Variants.** Most pairs have one route. A few depend on facts about the request:
+- **`SCANNED`:** a PDF with no text layer has to be read with OCR. The planner learns this from `RouteRequest.pdf_is_scanned`, which the PREPARE stage will set after inspecting the file.
+- **`OCR`:** the user set `ocr=ON`, so an image → PDF conversion gets an invisible text layer.
+
+The planner tries the variant first and falls back to the standard route, so a scanned PDF → PNG simply uses the normal rendering route.
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| Plain dataclasses and enums, no Pydantic | `OBJ-04`, `PY-03`, `PY-04` | The domain is the part of the code that changes least and must be easiest to test. Frameworks belong at the edges |
+| `Route` checks its own chain when it's created | `DOM-02` | A broken route (step 2 reads XLSX but step 1 wrote CSV) **can't exist**; creating one raises `InvalidRouteError`. If someone edits the table wrongly, the service fails at startup and in tests, not halfway through a user's job |
+| `RouteNotFoundError` carries `ErrorCode.ROUTE_NOT_SUPPORTED` | `ERR-02`, `ERR-05`, `DOM-03` | Every business error has a stable code. In step 4 the consumer turns it into `WorkFailed { error.code: "CNV-422-ROUTE-001" }`, and Java maps that code to a message for the user |
+| `get_route` raises; it never returns `None` | §4.3 verb vocabulary | `get_*` means "must exist, raises if not"; `find_*` would return `None`. The name tells callers what to expect |
+| The table is data, built by small functions | `PY-11` | Each function stays under 50 lines and complexity 10, and the table reads like the IDP-03 §3.4 table it comes from |
+| "Domain is pure" import-linter contract | `DOM-01`, ch. 21.6 | The domain may not import FastAPI, Pydantic, SQLAlchemy, httpx, Celery, FastStream, Redis, boto3, structlog, or our own config and logging. This is enforced automatically on every `make check`, not left to code review |
+
+### How it connects
+
+- **Java → planner:** document-service validates job options (IDP-02 §3.6): `target`, `ocr`, `pageRange`, and so on. In step 4, `ConversionRequested.target` and `options.ocr` become a `RouteRequest`.
+- **Planner → workers:** each `Converter` becomes a Celery task in the right worker pool in steps 3–4: `office_to_pdf` on `worker-office`, OCR steps on `worker-ocr`, and so on.
+- **Errors → Java:** `RouteNotFoundError` becomes `WorkFailed` with `retryable: false`, so Java won't retry something that can never work.
+
+### Try it
+
+```bash
+cd services/conversion-service
+make check
+uv run pytest tests/unit/conversion -v        # see every matrix cell tested by name
+uv run python -c "
+from conversion.conversion.domain.formats import Format
+from conversion.conversion.domain.route_planner import RoutePlanner, RouteRequest
+print(RoutePlanner().get_route(RouteRequest(source=Format.DOCX, target=Format.PPTX)))"
+```
+
+### Lessons
+
+- **Test against the spec, not against the code.** The main test copies the conversion matrix *from IDP-00* into the test file and checks every cell. A test built from the route table itself would happily confirm a wrong table.
+- **Prove that a rule can fail.** A rule you've never seen fail proves nothing. We dropped a temporary file importing `structlog` into the domain, watched import-linter report `Domain is pure BROKEN` with the exact file and line, then removed it.
+- **Let the formatter format.** `make check` failed on two hand-wrapped lines. `make fmt` fixed them, so nobody argues about formatting in code review.
+
+### Decisions and deviations
+
+| Topic | Decision |
+|---|---|
+| Planner location | `domain/`, not `application/` as IDP-03 §3.3 suggests: it's a pure business rule (standard ch. 2.4). Agreed before building |
+| Reader names | IDP-03 names the writers (`model_to_docx`, ...) but not the readers, so we named them `docx_to_model`, `sheet_to_model`, `pptx_to_model`, `ocr_to_model` |
+| 30 cells → 42 pairs | IDP-00 treats PNG and JPEG as one column. In code they're separate formats, so the 30 matrix cells become 42 concrete pairs (including PNG ↔ JPEG) |
+| Same-format work | PDF → PDF (optimise or repair, and scanned → searchable, F-CV-03) isn't a route; it's `PDF_EDIT` work in step 5 |
+| `ocr=AUTO` for image → PDF | Behaves like `OFF`; IDP-03 only says `ocr=ON` produces a searchable PDF. **Open:** check with product whether AUTO should detect text instead |
+| `ErrorCode` and `DomainError` in `core/` | `PKG-02` says core waits until two features need something, but ch. 3.4 explicitly puts the error base classes in core, and every future feature (pdfedit, export, preview) needs them |
+| Layers contract | Waits until the feature has an `application/` layer (step 3 or 4); with only `domain/` there's nothing to layer |
