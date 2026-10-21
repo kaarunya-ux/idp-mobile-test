@@ -16,8 +16,10 @@ Each step is one branch and one reviewable pull request (about 400 changed lines
 | # | Step | What it produces | Status |
 |---|---|---|---|
 | 1 | Skeleton | `services/conversion-service/` with `uv`, settings, logging, a health endpoint, `make check` green. No business logic | merged (PR #1) |
-| 2 | Domain | Formats, routes and the route planner as pure Python; a test that all 30 matrix pairs have a route | done, in review (`feat/conversion-service-route-planner`) |
-| 3 | First converters (no AI) | Image ↔ image, PDF ↔ images, Office → PDF, ported from `services/conversions/python_scripts/` with tests | |
+| 2 | Domain | Formats, routes and the route planner as pure Python; a test that all 30 matrix pairs have a route | merged (PR #2) |
+| 3a | Image converters | PNG ↔ JPEG, images → PDF, PDF → images; the converter pattern (port, adapters, registry, use case) | done, in review (`feat/conversion-service-image-converters`) |
+| 3b | Office converters | Word, Excel and PowerPoint → PDF (LibreOffice), CSV ↔ XLSX | |
+| 3c | Data converters | The document model, plus readers and writers for DOCX, XLSX, CSV and PPTX, and PDF tables | |
 | 4 | Messaging and storage | Receive `ConversionRequested`, run Celery tasks, MinIO in and out, send `JobProgressed` / `ConversionCompleted` / `WorkFailed` | |
 | 5 | The rest | PDF edit plans, exports, previews. AI-assisted routes once ai-gateway exists | |
 
@@ -295,3 +297,98 @@ print(RoutePlanner().get_route(RouteRequest(source=Format.DOCX, target=Format.PP
 | `ocr=AUTO` for image → PDF | Behaves like `OFF`; IDP-03 only says `ocr=ON` produces a searchable PDF. **Open:** check with product whether AUTO should detect text instead |
 | `ErrorCode` and `DomainError` in `core/` | `PKG-02` says core waits until two features need something, but ch. 3.4 explicitly puts the error base classes in core, and every future feature (pdfedit, export, preview) needs them |
 | Layers contract | Waits until the feature has an `application/` layer (step 3 or 4); with only `domain/` there's nothing to layer |
+
+---
+
+## Entry 3: Image converters, and the converter pattern (step 3a, 2026-10-21)
+
+**Goal:** the first real conversions: PNG ↔ JPEG, images → PDF and PDF → images. More importantly, the **pattern** every later converter follows, so steps 3b and 3c (and the interns) only add adapters.
+
+### What we did
+
+```
+src/conversion/
+  bootstrap.py                       composition root: registry + ConvertFileService, built once per process
+  core/config.py                     + LimitsSettings (max pages, max pixels, max render size)
+  core/error_codes.py                + CNV-422-PDF-001/002, LIMIT-001, FILE-001 (new), OPTIONS-001 (new)
+  conversion/domain/options.py       PageRange ("1-3,5"), ConversionOptions (dpi, JPEG quality)
+  conversion/domain/ports.py         ConverterPort, ConverterLookupPort, StepRequest, StepResult
+  conversion/domain/exceptions.py    + errors for bad options, damaged or locked files, and size limits
+  conversion/application/            ConvertFileCommand, ConvertFileResult, services/convert_file.py
+  conversion/infrastructure/
+    converters/pillow_images.py      safe image opening (damaged files, decompression bombs)
+    converters/image_formats.py      PillowImageFormatConverter   (ported from jpg_to_png.py)
+    converters/pdf_to_images.py      PdfiumPageRenderer           (ported from pdf_to_png.py / pdf_to_jpg.py)
+    converters/images_to_pdf.py      Img2PdfImageWrapper          (lossless, as IDP-03 specifies)
+    registry.py                      ConverterRegistry: Converter -> adapter
+tests/unit/                          60 new tests (136 in total), 100 % coverage
+```
+
+### How the pattern works
+
+```
+ConvertFileService (application)                       uses only the PORTS (protocols in the domain)
+  1. RoutePlanner.get_route(...)            -> Route: [step 1, step 2, ...]
+  2. for each step:
+       registry.get(step.converter)          -> the adapter (ConverterPort)
+       adapter.convert(StepRequest)          -> StepResult (files written, pages processed)
+       the outputs become the next step's inputs; intermediate files stay in a temp folder
+  3. only the last step writes into the output folder
+
+bootstrap.py (composition root)                         the ONLY place that knows the concrete adapters
+  ConverterRegistry([PillowImageFormatConverter, PdfiumPageRenderer, Img2PdfImageWrapper])
+```
+
+To add a converter in 3b or 3c, write one adapter class with a `converter` property and a `convert(request)` method, register it in `bootstrap.py`, and test it. Nothing else changes.
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| Ports in the domain, adapters in infrastructure | ch. 2.4, ch. 7 | The application layer talks to "a converter", never to Pillow or PDFium. Swapping a library (as we did with PyMuPDF) touches one adapter. Two import-linter rules enforce this |
+| `bootstrap.py` is the only place that wires adapters | `DI-01`, `DI-03` | One wiring for every entry point: tests now, the RabbitMQ consumer and Celery workers in step 4 |
+| `ConvertFileService` is synchronous | ch. 15.1 | Conversions are CPU-bound and run in Celery workers, which are sync end to end. (`APP-01`'s "async method" is for API services; noted as a deliberate deviation) |
+| Sizes and limits in settings | `ML-07`, `FIL-05`, IDP-03 §3.5/3.7 | Max pages (1,000), max pixels (180 million) and max render size (5,000 px) can change per environment without a code change |
+| Images checked before decoding | `FIL-05` | A tiny file can claim billions of pixels and exhaust memory (a decompression bomb). We read the size from the header and refuse it before decoding |
+| Temp folders always cleaned up | `FIL-06` | Intermediate files live in `TemporaryDirectory()`; only final outputs reach the output folder |
+| PDF output streamed to disk | `FIL-07` | img2pdf writes straight into the file instead of building the whole PDF in memory |
+| Library errors become domain errors | `ERR-02`, `ERR-07` | A locked PDF becomes `PasswordRequiredError` (`CNV-422-PDF-001`) and a damaged one `CorruptPdfError` (`CNV-422-PDF-002`), chained with `from exc` so the original cause is kept for debugging |
+| Converter libraries in a `workers` extra | `ML-09`, `DPL-05` | The health server's image doesn't install Pillow, PDFium or img2pdf. An import-linter rule stops `health.py` from ever importing them |
+| Untyped libraries confined to one adapter each | `PY-01` | pypdfium2 and img2pdf have no type hints. The mypy override names them explicitly, and each adapter returns typed values |
+| `PageRange` tested with Hypothesis | `TST-08` | Instead of a few hand-picked cases, Hypothesis generates hundreds of random ranges and checks the rules always hold: inside the document, no repeats |
+
+### How it connects
+
+- **Java → options:** the job's `pageRange`, `dpi` and `imageFormat` options (IDP-02 §3.6) become `ConversionOptions`. Invalid values become `CNV-422-OPTIONS-001`.
+- **Errors → Java:** every error here becomes `WorkFailed` in step 4. **Two codes are new**, not yet in IDP-03 §3.8: `CNV-422-FILE-001` (damaged or unsupported image) and `CNV-422-OPTIONS-001` (bad option). Java must add messages for them; this needs telling the Java team.
+- **`page_count` → usage:** each result reports the pages it processed. In step 4 this becomes `usage.pages` in `ConversionCompleted`, which Java uses to settle quota. Exactly which count is billed (original pages, or pages output) still needs confirming against the contract.
+
+### Try it
+
+```bash
+cd services/conversion-service
+uv sync --all-extras       # installs the worker libraries too
+make check
+uv run pytest tests/unit/conversion/infrastructure -v
+```
+
+Then convert a real photo with the snippet at the end of the service README.
+
+### Lessons
+
+- **Check the real library API before writing code.** pypdfium2 5 differs from older examples online. We printed its signatures first, and found that errors carry `err_code` (4 = password, 3 = damaged file), which is how we tell those two apart.
+- **A test that won't pass may be telling you the code is wrong.** The test for "image too big for a PDF page" never passed. img2pdf's default (`allow_oversized=True`) keeps such pages valid using the PDF's UserUnit scaling, so our error branch was dead code. We deleted it and tested the real behaviour instead.
+- **Coverage gaps point at untested behaviour.** The last uncovered lines were colour-profile preservation and "missing file is our bug, not yours". Both are now tested.
+- **Damaged files fail in more than one place.** A JPEG cut short fails while *opening* (header); a PNG with cut pixel data fails while *decoding*. Both must become `CNV-422-FILE-001`, and a missing file must stay `FileNotFoundError`, because that one is our bug.
+- **Security-linter false positives deserve a real fix, not a silence.** `S105` flagged `PDF_PASSWORD_REQUIRED` as a "hardcoded password" because of the name. Renaming it to `PDF_ENCRYPTED` (same code) was clearer than a `# noqa`.
+
+### Decisions and deviations
+
+| Topic | Decision |
+|---|---|
+| PyMuPDF (AGPL) | **Not used.** The interns' PDF scripts were moved to pypdfium2 (approved). AGPL can require publishing the service's source, so pdf2docx (built on PyMuPDF and named in IDP-03 for PDF → DOCX) and the layout code need a company or legal decision before step 3c |
+| img2pdf | **Approved by the Python lead on 2026-10-21.** Not on the standard's list, but named in IDP-03 §3.4. LGPL-3.0 is fine for library use. Recorded in `pyproject.toml` |
+| New error codes | `CNV-422-FILE-001` and `CNV-422-OPTIONS-001` are added; tell the Java team |
+| Registry meaning | IDP-03 has the registry map (source, target) → route. The domain planner already does that, so the registry maps `Converter` → adapter |
+| Interns' `image_to_pdf.py` | It's an AI path (the model rebuilds the text), not IDP-03's plain `images_to_pdf`. It belongs with the AI and OCR routes later |
+| Pages over 200 inches | Kept valid with img2pdf's UserUnit scaling (its default), not refused |

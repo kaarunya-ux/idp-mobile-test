@@ -18,6 +18,14 @@ class LoggingSettings(BaseModel):
     format: Literal["json", "console"] = "json"
 
 
+class LimitsSettings(BaseModel):
+    """Caps that protect the workers from oversized input (IDP-03 ch. 3.5 and 3.7, FIL-05, ML-06)."""
+
+    max_pages: int = Field(1000, ge=1, le=10_000)
+    max_image_pixels: int = Field(180_000_000, ge=1_000_000, le=1_000_000_000)
+    max_render_side_px: int = Field(5000, ge=500, le=20_000)
+
+
 class Settings(BaseSettings):
     """All configuration for one process. Built once by ``get_settings()``; invalid values stop the process."""
 
@@ -26,6 +34,7 @@ class Settings(BaseSettings):
     service_name: str = Field("conversion-service", min_length=1, max_length=64)
     environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    limits: LimitsSettings = Field(default_factory=LimitsSettings)
 
 
 @lru_cache
