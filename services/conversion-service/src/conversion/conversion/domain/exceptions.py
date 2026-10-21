@@ -19,3 +19,58 @@ class RouteNotFoundError(DomainError):
 
 class InvalidRouteError(ValueError):
     """A route whose steps don't chain together. A bug in the route table, never a user error; tests catch it."""
+
+
+class InvalidOptionError(DomainError):
+    """A conversion option is outside its allowed values. Reported as ``CNV-422-OPTIONS-001``."""
+
+    code = ErrorCode.INVALID_OPTION
+    title = "Invalid conversion option"
+
+    def __init__(self, option: str, problem: str) -> None:
+        super().__init__(f"Option {option} {problem}.")
+        self.option = option
+
+
+class PageRangeOutsideDocumentError(InvalidOptionError):
+    """The page range names no page that exists in this document."""
+
+    def __init__(self, page_count: int) -> None:
+        super().__init__("pageRange", f"names no page of this {page_count}-page document")
+
+
+class UnreadableImageError(DomainError):
+    """The image is damaged or in a format Pillow can't read. Reported as ``CNV-422-FILE-001``."""
+
+    code = ErrorCode.FILE_UNREADABLE
+    title = "File can't be read"
+
+    def __init__(self) -> None:
+        super().__init__("The image is damaged or not in a supported format.")
+
+
+class CorruptPdfError(DomainError):
+    """The PDF can't be opened. Reported as ``CNV-422-PDF-002``."""
+
+    code = ErrorCode.PDF_CORRUPT
+    title = "PDF can't be read"
+
+    def __init__(self) -> None:
+        super().__init__("The PDF is damaged and can't be opened.")
+
+
+class PasswordRequiredError(DomainError):
+    """The PDF is encrypted and no password was given. Reported as ``CNV-422-PDF-001``."""
+
+    code = ErrorCode.PDF_ENCRYPTED
+    title = "PDF is password protected"
+
+    def __init__(self) -> None:
+        super().__init__("The PDF is protected by a password.")
+
+
+class LimitExceededError(DomainError):
+    """The input is bigger than the service accepts (pages, pixels, page size). Reported as ``CNV-422-LIMIT-001``."""
+
+    code = ErrorCode.LIMIT_EXCEEDED
+    title = "File too large"

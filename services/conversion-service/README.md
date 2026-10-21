@@ -4,14 +4,14 @@ Converts documents between PDF, Word, Excel, CSV, PowerPoint and images. Also ap
 
 There is **no public API**. document-service (Java) sends `ConversionRequested` messages over RabbitMQ, and this service replies with `JobProgressed`, `ConversionCompleted` or `WorkFailed` (IDP-00 ch. 7.6). Files go in and out through MinIO; messages carry only their locations.
 
-**Status:** step 2 of the [build log](../../docs/conversion-service/build-log.md). There's a health server, settings and logging, plus the route planner, which decides how to get from any format to any other. Nothing converts files yet; that logic is being ported from `services/conversions/`.
+**Status:** step 3a of the [build log](../../docs/conversion-service/build-log.md). It converts PNG ↔ JPEG, images → PDF and PDF → images, through the route planner, on local files. Office and data conversions come next (steps 3b–3c), ported from `services/conversions/`; RabbitMQ and MinIO come in step 4.
 
 ## Run it
 
 ```bash
-uv sync          # create .venv from uv.lock, with dev tools
-make check       # format, lint, types, architecture rules, tests: exactly what CI runs
-make run         # health server on http://127.0.0.1:8001/health/live
+uv sync --all-extras   # create .venv from uv.lock, with dev tools and the worker libraries
+make check             # format, lint, types, architecture rules, tests: exactly what CI runs
+make run               # health server on http://127.0.0.1:8001/health/live
 ```
 
 ## Processes
@@ -33,6 +33,9 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `ENVIRONMENT` | `local` | `local`, `dev`, `test`, `staging`, `prod` | Where the process runs |
 | `LOGGING__LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | Lowest level written |
 | `LOGGING__FORMAT` | `json` | `json`, `console` | `console` for readable local logs; JSON everywhere else |
+| `LIMITS__MAX_PAGES` | `1000` | 1–10,000 | PDFs with more pages are refused (`CNV-422-LIMIT-001`) |
+| `LIMITS__MAX_IMAGE_PIXELS` | `180000000` | 1M–1G | Images with more pixels are refused, which stops decompression bombs |
+| `LIMITS__MAX_RENDER_SIDE_PX` | `5000` | 500–20,000 | Rendered pages are scaled down so the longest side fits |
 
 For local runs, copy `.env.example` to `.env`.
 
@@ -40,18 +43,33 @@ For local runs, copy `.env.example` to `.env`.
 
 ```
 src/conversion/
-  health.py      probe endpoints (/health/live, /health/ready)
-  core/          config.py (settings), logging.py (structured logs), errors.py + error_codes.py
-  conversion/    the conversion feature
-    domain/      formats.py, route.py (Route, Step, Converter, Fidelity), route_planner.py, exceptions.py
-tests/unit/      mirrors src/
+  health.py        probe endpoints (/health/live, /health/ready)
+  bootstrap.py     composition root: builds the services and converters once per process
+  core/            config.py, logging.py, errors.py, error_codes.py
+  conversion/      the conversion feature
+    domain/          formats, route, route_planner, options, ports (protocols), exceptions
+    application/     commands, results, services/convert_file.py (ConvertFileService)
+    infrastructure/  converters/ (one adapter per library), registry.py
+tests/unit/        mirrors src/
 ```
 
-Ask the planner how a conversion would run:
+Convert files locally, or ask the planner how a conversion would run:
 
 ```bash
 uv run python -c "
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.route_planner import RoutePlanner, RouteRequest
 print(RoutePlanner().get_route(RouteRequest(source=Format.CSV, target=Format.PDF)).converters)"
+```
+
+```bash
+uv run python -c "
+from pathlib import Path
+from conversion.bootstrap import build_convert_file_service
+from conversion.conversion.application.commands import ConvertFileCommand
+from conversion.conversion.domain.formats import Format
+from conversion.core.config import get_settings
+result = build_convert_file_service(get_settings()).convert(ConvertFileCommand(
+    source=Format.JPEG, target=Format.PDF, inputs=(Path('photo.jpg'),), output_dir=Path('out')))
+print(result.outputs, result.page_count)"
 ```

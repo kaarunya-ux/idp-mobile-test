@@ -2,7 +2,7 @@
 .PHONY: sync fmt check test run
 
 sync:
-	uv sync
+	uv sync --all-extras
 
 fmt:
 	uv run ruff format .

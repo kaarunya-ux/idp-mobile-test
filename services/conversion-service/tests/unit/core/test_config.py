@@ -17,6 +17,8 @@ def test_uses_safe_defaults_when_nothing_is_set() -> None:
     assert settings.environment == "local"
     assert settings.logging.level == "INFO"
     assert settings.logging.format == "json"
+    assert (settings.limits.max_pages, settings.limits.max_image_pixels) == (1000, 180_000_000)
+    assert settings.limits.max_render_side_px == 5000
 
 
 def test_reads_nested_values_when_set_with_double_underscore(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,7 +35,14 @@ def test_reads_nested_values_when_set_with_double_underscore(monkeypatch: pytest
 
 @pytest.mark.parametrize(
     ("variable", "value"),
-    [("ENVIRONMENT", "production"), ("LOGGING__LEVEL", "LOUD"), ("LOGGING__FORMAT", "xml"), ("SERVICE_NAME", "")],
+    [
+        ("ENVIRONMENT", "production"),
+        ("LOGGING__LEVEL", "LOUD"),
+        ("LOGGING__FORMAT", "xml"),
+        ("SERVICE_NAME", ""),
+        ("LIMITS__MAX_PAGES", "0"),
+        ("LIMITS__MAX_RENDER_SIDE_PX", "99999"),
+    ],
 )
 def test_refuses_to_start_when_a_value_is_invalid(monkeypatch: pytest.MonkeyPatch, variable: str, value: str) -> None:
     monkeypatch.setenv(variable, value)

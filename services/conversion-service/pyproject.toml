@@ -12,6 +12,15 @@ dependencies = [
     "structlog>=24.4",
 ]
 
+[project.optional-dependencies]
+# Libraries only the worker processes need. The health server's image doesn't install them (ML-09, DPL-05).
+# img2pdf: lossless images -> PDF, named in IDP-03 ch. 3.4; approved for this project 2026-10-21 (build log entry 3).
+workers = [
+    "pillow>=10.4",
+    "pypdfium2>=4.30",
+    "img2pdf>=0.5",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -21,6 +30,8 @@ dev = [
     "mypy>=1.11",
     "ruff>=0.6",
     "import-linter>=2.1",
+    "hypothesis>=6.100",
+    "pikepdf>=9.0",
 ]
 
 [build-system]
@@ -40,9 +51,9 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "N", "UP", "B", "S", "C4", "SIM", "PL", "RUF", "ASYNC", "DTZ", "T20", "ERA", "PT", "TID", "C90", "PERF"]
 
 [tool.ruff.lint.per-file-ignores]
-# pytest checks results with plain assert statements (S101), and tests compare against
-# literal expected values on purpose (PLR2004).
-"tests/**" = ["S101", "PLR2004"]
+# pytest checks results with plain assert statements (S101), tests compare against literal expected values on
+# purpose (PLR2004), and they build locked PDFs with throwaway passwords (S106).
+"tests/**" = ["S101", "PLR2004", "S106"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -61,6 +72,12 @@ strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
 
+[[tool.mypy.overrides]]
+# pypdfium2 and img2pdf ship no type information. Each is used by exactly one adapter, which turns their
+# untyped results into typed values before returning them (PY-01: Any only at an untyped boundary).
+module = ["pypdfium2", "pypdfium2.*", "img2pdf"]
+ignore_missing_imports = true
+
 # --- Tests (standard ch. 21) --------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -75,7 +92,8 @@ markers = [
 ]
 
 # --- Architecture rules (standard ch. 21.6) -----------------------------------
-# The "layers" contract (api -> application -> domain) arrives with the first application/infrastructure code.
+# infrastructure -> domain is allowed (adapters implement domain ports); the reverse is not. Only bootstrap.py
+# (the composition root) imports from every layer.
 [tool.importlinter]
 root_package = "conversion"
 include_external_packages = true
@@ -93,4 +111,23 @@ source_modules = ["conversion.conversion.domain"]
 forbidden_modules = [
     "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "httpx", "celery", "faststream", "redis",
     "boto3", "structlog", "uvicorn", "conversion.core.config", "conversion.core.logging",
+    "PIL", "pypdfium2", "img2pdf", "conversion.conversion.infrastructure",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Layers inside the conversion feature"
+type = "layers"
+containers = ["conversion.conversion"]
+layers = ["application", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "Application depends on ports, not adapters"
+type = "forbidden"
+source_modules = ["conversion.conversion.application"]
+forbidden_modules = ["conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf"]
+
+[[tool.importlinter.contracts]]
+name = "Health server stays slim (no converter libraries in its image)"
+type = "forbidden"
+source_modules = ["conversion.health"]
+forbidden_modules = ["conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf"]
