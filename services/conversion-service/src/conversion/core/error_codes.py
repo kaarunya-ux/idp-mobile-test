@@ -15,8 +15,9 @@ class ErrorCode(StrEnum):
     PDF_ENCRYPTED = "CNV-422-PDF-001"  # a password is needed to open it
     PDF_CORRUPT = "CNV-422-PDF-002"
     LIMIT_EXCEEDED = "CNV-422-LIMIT-001"
-    FILE_UNREADABLE = "CNV-422-FILE-001"  # new, not in IDP-03 ch. 3.8: a damaged or unsupported image
+    FILE_UNREADABLE = "CNV-422-FILE-001"  # new, not in IDP-03 ch. 3.8: a damaged or unsupported file
     INVALID_OPTION = "CNV-422-OPTIONS-001"  # new, not in IDP-03 ch. 3.8: an option outside its allowed values
+    CONVERSION_TIMEOUT = "CNV-504-TIMEOUT-001"
 
     @property
     def http_status(self) -> int:

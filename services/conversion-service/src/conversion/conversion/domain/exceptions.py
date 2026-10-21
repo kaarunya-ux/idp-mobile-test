@@ -74,3 +74,30 @@ class LimitExceededError(DomainError):
 
     code = ErrorCode.LIMIT_EXCEEDED
     title = "File too large"
+
+
+class UnreadableDocumentError(DomainError):
+    """An Office document or CSV is damaged or not what it claims to be. Reported as ``CNV-422-FILE-001``."""
+
+    code = ErrorCode.FILE_UNREADABLE
+    title = "File can't be read"
+
+    def __init__(self) -> None:
+        super().__init__("The document is damaged or not in a supported format.")
+
+
+class SheetNotFoundError(InvalidOptionError):
+    """The ``sheet`` option names a sheet the workbook doesn't have."""
+
+    def __init__(self, sheet: str) -> None:
+        super().__init__("sheet", f"names '{sheet}', which is not a sheet in this workbook")
+
+
+class ConversionTimeoutError(DomainError):
+    """A converter ran past its time limit and was stopped. Reported as ``CNV-504-TIMEOUT-001``."""
+
+    code = ErrorCode.CONVERSION_TIMEOUT
+    title = "Conversion took too long"
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"The conversion took longer than {seconds:g} seconds and was stopped.")

@@ -17,8 +17,8 @@ Each step is one branch and one reviewable pull request (about 400 changed lines
 |---|---|---|---|
 | 1 | Skeleton | `services/conversion-service/` with `uv`, settings, logging, a health endpoint, `make check` green. No business logic | merged (PR #1) |
 | 2 | Domain | Formats, routes and the route planner as pure Python; a test that all 30 matrix pairs have a route | merged (PR #2) |
-| 3a | Image converters | PNG ↔ JPEG, images → PDF, PDF → images; the converter pattern (port, adapters, registry, use case) | done, in review (`feat/conversion-service-image-converters`) |
-| 3b | Office converters | Word, Excel and PowerPoint → PDF (LibreOffice), CSV ↔ XLSX | |
+| 3a | Image converters | PNG ↔ JPEG, images → PDF, PDF → images; the converter pattern (port, adapters, registry, use case) | merged (PR #3) |
+| 3b | Office converters | Word, Excel and PowerPoint → PDF (LibreOffice), CSV ↔ XLSX | done, in review (`feat/conversion-service-office-converters`) |
 | 3c | Data converters | The document model, plus readers and writers for DOCX, XLSX, CSV and PPTX, and PDF tables | |
 | 4 | Messaging and storage | Receive `ConversionRequested`, run Celery tasks, MinIO in and out, send `JobProgressed` / `ConversionCompleted` / `WorkFailed` | |
 | 5 | The rest | PDF edit plans, exports, previews. AI-assisted routes once ai-gateway exists | |
@@ -392,3 +392,105 @@ Then convert a real photo with the snippet at the end of the service README.
 | Registry meaning | IDP-03 has the registry map (source, target) → route. The domain planner already does that, so the registry maps `Converter` → adapter |
 | Interns' `image_to_pdf.py` | It's an AI path (the model rebuilds the text), not IDP-03's plain `images_to_pdf`. It belongs with the AI and OCR routes later |
 | Pages over 200 inches | Kept valid with img2pdf's UserUnit scaling (its default), not refused |
+
+---
+
+## Entry 4: Office converters: LibreOffice, and CSV ↔ XLSX (step 3b, 2026-10-21)
+
+**Goal:** Word, Excel and PowerPoint → PDF, and CSV ↔ Excel. With step 3a's converters, the two-step routes now work too: CSV → PDF, Office → PNG or JPEG, CSV → images.
+
+**Licensing decision taken before this step:** the Python lead decided on **free, permissively licensed libraries only**: no PyMuPDF, no pdf2docx (MIT itself but built on AGPL PyMuPDF), no Ghostscript, no paid SDKs. LibreOffice (MPL-2.0), openpyxl, python-docx and python-pptx (MIT) all fit.
+
+### What we did
+
+```
+core/config.py                       + OfficeSettings: OFFICE__BINARY, OFFICE__TIMEOUT (a timedelta, CFG-02)
+core/error_codes.py                  + CNV-504-TIMEOUT-001; CNV-422-FILE-001 now means "damaged or unsupported file"
+conversion/domain/cell_values.py     the CSV typing rules, pure: parse_number, plan_columns, number_format, has_header
+conversion/domain/options.py         + the sheet option
+conversion/domain/exceptions.py      + UnreadableDocumentError, SheetNotFoundError, ConversionTimeoutError
+infrastructure/converters/
+  office_to_pdf.py                   LibreOfficePdfConverter   (ported from word_to_pdf.py)
+  xlsx_csv.py                        OpenpyxlCsvConverter      (ported from csv_convert.py, without the AI step)
+bootstrap.py                         + both converters registered
+README.md                            + "System dependencies" (LibreOffice, Noto fonts), new settings
+tests/                               57 new tests (193 in total), 100 % coverage
+```
+
+Measured on this laptop: Word, Excel or PowerPoint → PDF takes about **1 second** (the IDP-00 §8 target is under 10 s for 10 pages). Hindi text renders with **Noto Sans Devanagari** embedded in the PDF.
+
+### How the LibreOffice adapter works
+
+```
+LibreOfficePdfConverter.convert(request)
+  temp folder ─┬─ profile/  a throwaway LibreOffice profile, unique to this run
+               └─ out/      where LibreOffice writes the PDF
+  soffice -env:UserInstallation=<profile> --headless --norestore --nolockcheck --convert-to pdf --outdir out <file>
+     started in its own process group, with a fixed argument list and no shell
+     past OFFICE__TIMEOUT: the whole group is killed  -> ConversionTimeoutError (CNV-504-TIMEOUT-001)
+  no PDF produced (LibreOffice exits 0 even when it can't open a file)  -> UnreadableDocumentError (CNV-422-FILE-001)
+  PDF moved to the output folder; pages counted with PDFium
+```
+
+### How CSV → XLSX decides types (ported rules)
+
+| Cell text | Becomes | Why |
+|---|---|---|
+| `1,250.50` | the number 1250.5, shown as `#,##0.00` | Numbers keep how they were written |
+| `₹950`, `12.5%` | 950 shown as `"₹"0`; 0.125 shown as `0.0%` | Currency and percent survive |
+| `0471`, `007` | text | A leading zero means an ID, PIN or phone number |
+| `4111111111111111` | text | **More than 15 significant digits:** Excel would round it (see lessons) |
+| `1.250,50` in a file using decimal commas | text, right-aligned | A number format can't show a decimal comma, so the value is kept exactly |
+| `=HYPERLINK(...)` | text | Never becomes a live formula (see lessons) |
+
+A column becomes numbers only when at least 95 % of its filled cells parse (`NUMERIC_SHARE`). Otherwise everything in it stays text.
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| A throwaway profile per LibreOffice run | IDP-03 §3.7 | Runs don't share state, so they can run in parallel, and a crash can't corrupt a profile the next run uses. A fresh profile also keeps LibreOffice's default "high" macro security, so document macros never run |
+| Kill the whole process group on timeout | IDP-03 §3.7, `CEL-06` | `soffice` starts a child process (`soffice.bin`). Killing only the parent leaves the child running forever and eating CPU |
+| A fixed argument list, no shell | `SEC-08` | A file name can never be interpreted as a command. The `# noqa: S603` says exactly that |
+| CSV typing rules in the domain | ch. 2.4, `TST-08` | They're pure business rules ("leading zeros mean an ID"), so they're unit- and property-tested without files |
+| `Decimal` in the domain, `float` only when writing XLSX | `PY-06` | Values stay exact while we reason about them. The XLSX format itself stores binary doubles, and we only convert numbers of 15 digits or fewer, which doubles hold exactly |
+| Write-only workbook | `FIL-07` | openpyxl streams rows to disk instead of building the whole workbook in memory, so a 1-million-row CSV doesn't exhaust the worker |
+| `types-openpyxl` stubs, plus two narrow `# type: ignore` with reasons | `PY-01`, `PY-14` | The stubs are missing two things that exist at runtime. Each ignore names the exact code and says why |
+| System packages in the README | §25.3 | LibreOffice and fonts aren't pip packages, so they're documented where people set up a machine, and the worker image installs them in step 4 |
+
+### How it connects
+
+- **Java's `sheet` option** (IDP-02 §3.6) selects the sheet for XLSX → CSV. A sheet that doesn't exist becomes `CNV-422-OPTIONS-001`, so the user learns which option was wrong.
+- **`CNV-504-TIMEOUT-001`** will be `retryable: true` in `WorkFailed` (step 4), because a timeout may be temporary load. A damaged file is `retryable: false`.
+- **The `office` worker pool** (IDP-03 §3.2) is where `office_to_pdf` will run in step 4, with its own concurrency.
+
+### Try it
+
+```bash
+cd services/conversion-service
+uv sync --all-extras
+make check                                                   # includes 3 real LibreOffice runs, about 6 s total
+uv run pytest tests/unit/conversion/infrastructure/converters/test_office_to_pdf.py -v
+```
+
+### Lessons
+
+- **Excel silently corrupts long numbers.** Excel keeps 15 significant digits, so a 16-digit card or account number without a leading zero (`4111111111111111`) becomes `4.11111E+15` and the last digits are lost. The interns' rules (and many converters) have this bug. We found it because mypy refused `Decimal` values; thinking about the `float` conversion led straight to it. Numbers longer than 15 digits now stay text.
+- **openpyxl turns text starting with `=` into a formula.** A CSV cell `=HYPERLINK("http://evil")` would become a live, clickable formula ("formula injection"). Text cells are forced to type `s` (string), and a test proves it.
+- **LibreOffice says "success" even when it fails.** It exits with code 0 when it can't open a file, so we check that the PDF actually exists.
+- **Stub gaps aren't code bugs.** The openpyxl stubs lack `column_dimensions` on write-only sheets and type `iter_rows` oddly. We checked at runtime that both work, then used narrow, explained ignores rather than silencing mypy for the whole file.
+- **A safety check in your own script can save you.** While escaping the Unicode minus sign, an `assert` in the editing script refused to write because the new comment still contained the character. Nothing half-done was written.
+- **An unreachable line is a design smell.** `_decode` ended with a `raise` that could never run, because Latin-1 decodes anything. We restructured so Latin-1 is the explicit last resort, and tested it with a byte that is invalid in both UTF-8 and Windows-1252.
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| One LibreOffice process per document | IDP-03 plans a pool of long-running `unoserver` instances, recycled every 200 conversions. One process per document (about 1 s) is simpler and meets the target; `unoserver` is an optimisation for production hardening |
+| Excel "fit to page" (IDP-00 §5) | **Deferred.** It needs editing the sheet's page setup. Doing that with openpyxl would drop charts and images from the workbook, so it waits for LibreOffice's own API (UNO, with `unoserver`) |
+| XLSX → CSV writes **stored** values | `1250.5`, not `1,250.50` as displayed. Excel's "Save as CSV" writes displayed values. Stored values are the exact data, matching IDP's "E" rating. **Open:** confirm with product |
+| CSV encoding and delimiter on output | UTF-8 without BOM, comma-separated. IDP-03 mentions BOM and delimiter options, but IDP-02's job options don't carry them yet, so this waits for the contract |
+| No title row in CSV → XLSX | The interns' script adds a title row from the file name; that breaks the exact CSV ↔ XLSX round trip, so it's left out |
+| Header detection | The ported rule takes a first row with words as a header even when it's data. The data can't tell them apart; the cost is header styling on one row, never lost data |
+| Usage for tables | A CSV or XLSX conversion counts as 1 page in `page_count`, pending the usage contract (step 4) |
+| python-docx and python-pptx | MIT, approved under the permissive-only decision. Dev-only for now (to build test files); they become worker libraries in 3c |

@@ -19,6 +19,8 @@ def test_uses_safe_defaults_when_nothing_is_set() -> None:
     assert settings.logging.format == "json"
     assert (settings.limits.max_pages, settings.limits.max_image_pixels) == (1000, 180_000_000)
     assert settings.limits.max_render_side_px == 5000
+    assert settings.office.binary == "soffice"
+    assert settings.office.timeout.total_seconds() == 60
 
 
 def test_reads_nested_values_when_set_with_double_underscore(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -42,6 +44,7 @@ def test_reads_nested_values_when_set_with_double_underscore(monkeypatch: pytest
         ("SERVICE_NAME", ""),
         ("LIMITS__MAX_PAGES", "0"),
         ("LIMITS__MAX_RENDER_SIDE_PX", "99999"),
+        ("OFFICE__TIMEOUT", "1"),
     ],
 )
 def test_refuses_to_start_when_a_value_is_invalid(monkeypatch: pytest.MonkeyPatch, variable: str, value: str) -> None:

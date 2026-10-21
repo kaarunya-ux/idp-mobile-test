@@ -4,7 +4,22 @@ Converts documents between PDF, Word, Excel, CSV, PowerPoint and images. Also ap
 
 There is **no public API**. document-service (Java) sends `ConversionRequested` messages over RabbitMQ, and this service replies with `JobProgressed`, `ConversionCompleted` or `WorkFailed` (IDP-00 ch. 7.6). Files go in and out through MinIO; messages carry only their locations.
 
-**Status:** step 3a of the [build log](../../docs/conversion-service/build-log.md). It converts PNG ↔ JPEG, images → PDF and PDF → images, through the route planner, on local files. Office and data conversions come next (steps 3b–3c), ported from `services/conversions/`; RabbitMQ and MinIO come in step 4.
+**Status:** step 3b of the [build log](../../docs/conversion-service/build-log.md). It converts PNG ↔ JPEG, images ↔ PDF, Word/Excel/PowerPoint → PDF (and on to images) and CSV ↔ XLSX, through the route planner, on local files. Data conversions via the document model come next (step 3c); RabbitMQ and MinIO come in step 4.
+
+## System dependencies
+
+The workers need these **system packages**. They aren't Python packages, so they aren't in `pyproject.toml`; the worker Docker image will install them in step 4.
+
+| Package | Why |
+|---|---|
+| `libreoffice-writer`, `libreoffice-calc`, `libreoffice-impress` | Word, Excel and PowerPoint → PDF |
+| `fonts-noto-core`, `fonts-noto-extra` | Fonts for Devanagari (Hindi) and other scripts, so text never turns into empty boxes (IDP-03 ch. 3.4) |
+
+```bash
+sudo apt install -y libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-core fonts-noto-extra
+```
+
+Without LibreOffice, the Office tests are skipped with a clear reason; everything else still runs.
 
 ## Run it
 
@@ -36,6 +51,8 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `LIMITS__MAX_PAGES` | `1000` | 1–10,000 | PDFs with more pages are refused (`CNV-422-LIMIT-001`) |
 | `LIMITS__MAX_IMAGE_PIXELS` | `180000000` | 1M–1G | Images with more pixels are refused, which stops decompression bombs |
 | `LIMITS__MAX_RENDER_SIDE_PX` | `5000` | 500–20,000 | Rendered pages are scaled down so the longest side fits |
+| `OFFICE__BINARY` | `soffice` | a command or absolute path | The LibreOffice program used for Office → PDF |
+| `OFFICE__TIMEOUT` | `60` | 5 s – 10 min (seconds, or an ISO 8601 duration like `PT90S`) | A run past this is stopped (`CNV-504-TIMEOUT-001`) |
 
 For local runs, copy `.env.example` to `.env`.
 
