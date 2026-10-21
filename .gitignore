@@ -56,6 +56,10 @@ venv/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 .env
 
 # services/conversions: sample inputs and outputs stay in the idox repo, not here
