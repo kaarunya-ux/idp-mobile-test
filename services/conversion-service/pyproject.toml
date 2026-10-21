@@ -19,6 +19,7 @@ workers = [
     "pillow>=10.4",
     "pypdfium2>=4.30",
     "img2pdf>=0.5",
+    "openpyxl>=3.1",
 ]
 
 [dependency-groups]
@@ -32,6 +33,10 @@ dev = [
     "import-linter>=2.1",
     "hypothesis>=6.100",
     "pikepdf>=9.0",
+    "types-openpyxl>=3.1",
+    # build Word and PowerPoint files for tests; they become worker libraries in step 3c
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
 ]
 
 [build-system]
@@ -111,7 +116,7 @@ source_modules = ["conversion.conversion.domain"]
 forbidden_modules = [
     "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "httpx", "celery", "faststream", "redis",
     "boto3", "structlog", "uvicorn", "conversion.core.config", "conversion.core.logging",
-    "PIL", "pypdfium2", "img2pdf", "conversion.conversion.infrastructure",
+    "PIL", "pypdfium2", "img2pdf", "openpyxl", "conversion.conversion.infrastructure",
 ]
 
 [[tool.importlinter.contracts]]
@@ -124,10 +129,10 @@ layers = ["application", "domain"]
 name = "Application depends on ports, not adapters"
 type = "forbidden"
 source_modules = ["conversion.conversion.application"]
-forbidden_modules = ["conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf"]
+forbidden_modules = ["conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf", "openpyxl"]
 
 [[tool.importlinter.contracts]]
 name = "Health server stays slim (no converter libraries in its image)"
 type = "forbidden"
 source_modules = ["conversion.health"]
-forbidden_modules = ["conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf"]
+forbidden_modules = ["conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf", "openpyxl"]

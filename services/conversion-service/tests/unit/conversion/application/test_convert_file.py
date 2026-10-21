@@ -104,14 +104,13 @@ def test_raises_cnv_422_route_001_when_the_conversion_does_not_exist(
 
 
 def test_raises_a_lookup_error_when_this_build_cannot_run_a_step_yet(
-    service: ConvertFileService, tmp_path: Path
+    service: ConvertFileService, make_image: MakeImage, tmp_path: Path
 ) -> None:
-    document = tmp_path / "letter.docx"
-    document.write_bytes(b"x")
-
-    with pytest.raises(ConverterNotRegisteredError):  # office_to_pdf arrives in step 3b
+    with pytest.raises(ConverterNotRegisteredError):  # OCR converters arrive once the OCR engines are chosen
         service.convert(
-            ConvertFileCommand(source=Format.DOCX, target=Format.PDF, inputs=(document,), output_dir=tmp_path / "r")
+            ConvertFileCommand(
+                source=Format.PNG, target=Format.DOCX, inputs=(make_image("scan.png"),), output_dir=tmp_path / "r"
+            )
         )
 
 

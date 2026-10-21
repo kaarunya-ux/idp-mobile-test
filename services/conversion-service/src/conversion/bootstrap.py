@@ -8,21 +8,26 @@ from conversion.conversion.application.services.convert_file import ConvertFileS
 from conversion.conversion.domain.route_planner import RoutePlanner
 from conversion.conversion.infrastructure.converters.image_formats import PillowImageFormatConverter
 from conversion.conversion.infrastructure.converters.images_to_pdf import Img2PdfImageWrapper
+from conversion.conversion.infrastructure.converters.office_to_pdf import LibreOfficePdfConverter
 from conversion.conversion.infrastructure.converters.pdf_to_images import PdfiumPageRenderer
+from conversion.conversion.infrastructure.converters.xlsx_csv import OpenpyxlCsvConverter
 from conversion.conversion.infrastructure.registry import ConverterRegistry
-from conversion.core.config import LimitsSettings, Settings
+from conversion.core.config import Settings
 
 
-def build_converter_registry(limits: LimitsSettings) -> ConverterRegistry:
+def build_converter_registry(settings: Settings) -> ConverterRegistry:
     """Every converter this build of the service can run."""
+    limits, office = settings.limits, settings.office
     return ConverterRegistry(
         [
             PillowImageFormatConverter(max_pixels=limits.max_image_pixels),
             PdfiumPageRenderer(max_pages=limits.max_pages, max_side_px=limits.max_render_side_px),
             Img2PdfImageWrapper(max_pixels=limits.max_image_pixels),
+            LibreOfficePdfConverter(binary=office.binary, timeout=office.timeout),
+            OpenpyxlCsvConverter(),
         ]
     )
 
 
 def build_convert_file_service(settings: Settings) -> ConvertFileService:
-    return ConvertFileService(RoutePlanner(), build_converter_registry(settings.limits))
+    return ConvertFileService(RoutePlanner(), build_converter_registry(settings))

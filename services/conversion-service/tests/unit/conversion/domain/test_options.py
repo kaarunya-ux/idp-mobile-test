@@ -75,3 +75,9 @@ def test_uses_sensible_defaults_when_no_options_are_given() -> None:
 def test_rejects_a_page_range_object_when_it_has_no_spans() -> None:
     with pytest.raises(InvalidOptionError, match="at least one page"):
         PageRange(())
+
+
+@pytest.mark.parametrize("sheet", ["", "x" * 32])
+def test_rejects_a_sheet_name_when_it_is_empty_or_longer_than_excel_allows(sheet: str) -> None:
+    with pytest.raises(InvalidOptionError, match="sheet"):
+        ConversionOptions(sheet=sheet)

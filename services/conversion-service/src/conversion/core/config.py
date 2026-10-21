@@ -4,6 +4,7 @@ Every environment variable is listed in README.md (CFG-05). Nested groups use a 
 ``LOGGING__LEVEL=DEBUG`` sets ``Settings.logging.level``.
 """
 
+from datetime import timedelta
 from functools import lru_cache
 from typing import Literal
 
@@ -26,6 +27,13 @@ class LimitsSettings(BaseModel):
     max_render_side_px: int = Field(5000, ge=500, le=20_000)
 
 
+class OfficeSettings(BaseModel):
+    """How LibreOffice is run for Office -> PDF (IDP-03 ch. 3.2 and 3.7)."""
+
+    binary: str = Field("soffice", min_length=1, max_length=255)
+    timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=5), le=timedelta(minutes=10))
+
+
 class Settings(BaseSettings):
     """All configuration for one process. Built once by ``get_settings()``; invalid values stop the process."""
 
@@ -35,6 +43,7 @@ class Settings(BaseSettings):
     environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     limits: LimitsSettings = Field(default_factory=LimitsSettings)
+    office: OfficeSettings = Field(default_factory=OfficeSettings)
 
 
 @lru_cache
