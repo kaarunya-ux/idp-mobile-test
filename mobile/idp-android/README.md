@@ -13,6 +13,10 @@ Requirements: Android Studio (or the Android SDK with platform 35), JDK 17, an a
 3. Build and install: `./gradlew :app:installDebug`.
 4. Models (`*.gguf`) are not in git. Push the model and its `mmproj` file to the app's files directory under `models/` (`adb push`). The app lists what it finds there.
 
+## Reading run logs
+
+`run_log.txt`, `ocr_results.txt` and `last_canvas.jpg` are in the app's private storage because they contain extracted document data. On a debug build: `adb shell run-as com.modeltesting.vlmtester cat files/run_log.txt`. Models and OCR input images (`ocr_in/`) stay in the external files folder, so `adb push` still works.
+
 ## Configuration
 
 There are no environment variables. Per-model settings (prompts, grammars, schemas, image-token caps, context size) are in `app/src/main/assets/` and in `MainActivity.kt`. Moving the thresholds out of code is tracked in ADR 0002.

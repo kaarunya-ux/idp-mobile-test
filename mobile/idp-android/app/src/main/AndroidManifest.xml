@@ -10,7 +10,7 @@
         android:allowBackup="false"
         android:label="VLM Tester"
         android:theme="@style/Theme.VlmTester"
-        android:usesCleartextTraffic="true">
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"

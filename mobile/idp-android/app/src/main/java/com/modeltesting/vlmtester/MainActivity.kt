@@ -243,8 +243,10 @@ class MainActivity : AppCompatActivity() {
     // images without tapping through the UI:
     //   adb shell am start -n com.modeltesting.vlmtester/.MainActivity --ez ocr_run true
     // Reads every image in <externalFilesDir>/ocr_in (adb push them there - that folder is
-    // readable without storage permission) and writes <externalFilesDir>/ocr_results.txt:
-    // per image the decoded size, OCR time, and every recognised line with its bounding box.
+    // readable without storage permission) and writes <filesDir>/ocr_results.txt (private
+    // storage: it holds recognised document text): per image the decoded size, OCR time,
+    // and every recognised line with its bounding box. Read it from a debug build with
+    //   adb shell run-as com.modeltesting.vlmtester cat files/ocr_results.txt
     private val ocrRecognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
@@ -255,7 +257,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try { runOcrOnFolder() }
             catch (e: Exception) {
-                File(getExternalFilesDir(null), "ocr_results.txt").writeText("OCR run failed: $e\n")
+                File(filesDir, "ocr_results.txt").writeText("OCR run failed: ${e.javaClass.simpleName}\n")
             }
         }.start()
     }
@@ -292,7 +294,7 @@ class MainActivity : AppCompatActivity() {
             }
             bmp.recycle()
         }
-        File(getExternalFilesDir(null), "ocr_results.txt").writeText(sb.toString())
+        File(filesDir, "ocr_results.txt").writeText(sb.toString())
     }
 
     // Shows/hides the back-side picker depending on whether the selected type needs
@@ -413,7 +415,9 @@ class MainActivity : AppCompatActivity() {
         return next
     }
 
-    private fun runLogFile(): File = File(getExternalFilesDir(null), "run_log.txt")
+    // Private storage, not the external folder: the log holds extracted document fields.
+    // Pull it from a debug build with: adb shell run-as com.modeltesting.vlmtester cat files/run_log.txt
+    private fun runLogFile(): File = File(filesDir, "run_log.txt")
 
     private fun saveRun(runNumber: Int, docType: String, body: String) {
         val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
@@ -776,8 +780,8 @@ class MainActivity : AppCompatActivity() {
         val outFile = File(cacheDir, "field_canvas.jpg")
         FileOutputStream(outFile).use { o -> out.compress(Bitmap.CompressFormat.JPEG, 95, o) }
         out.recycle()
-        // Kept next to run_log.txt so a bad crop can be inspected after the fact.
-        try { outFile.copyTo(File(getExternalFilesDir(null), "last_canvas.jpg"), overwrite = true) }
+        // Kept next to run_log.txt (private storage) so a bad crop can be inspected after the fact.
+        try { outFile.copyTo(File(filesDir, "last_canvas.jpg"), overwrite = true) }
         catch (_: Exception) {}
         return outFile
     }
@@ -1210,12 +1214,14 @@ class MainActivity : AppCompatActivity() {
             // Drain the server's own log output on its own thread so it never blocks on
             // a full stdout pipe - readiness is polled via /health below, not by
             // parsing log text (simpler, and doesn't break if the log format changes).
-            // Forwarded to logcat (not discarded) so a failed startup is diagnosable -
-            // this is the only place the server's own stderr/stdout ends up anywhere.
+            // Forwarded to logcat on debuggable builds only, so a failed startup is
+            // diagnosable in development but server output (which can echo request
+            // content) never reaches the log of a release build. Always drained.
+            val forwardServerLog = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
             Thread {
                 try {
                     process.inputStream.bufferedReader().forEachLine { line ->
-                        android.util.Log.d("LlamaServer", line)
+                        if (forwardServerLog) android.util.Log.d("LlamaServer", line)
                     }
                 } catch (e: Exception) { }
             }.start()
