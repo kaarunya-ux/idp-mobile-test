@@ -40,14 +40,18 @@ Native runtime (not Java, but the app depends on it): llama.cpp built with Andro
 
 ## Running the tests
 
-Normal route (needs the Android SDK, which is not installed on every machine):
+Normal route (needs a JDK 17 and the Android SDK; neither is committed to the repo):
 
 ```bash
 cd mobile/idp-android
 echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties   # git-ignored
-./gradlew :app:testDebugUnitTest
+export JAVA_HOME=<path to a JDK 17>
+./gradlew :app:testDebugUnitTest      # 38 tests
+./gradlew :app:assembleDebug          # builds app/build/outputs/apk/debug/app-debug.apk
 ```
 
-This route has not been run yet: the machine used so far had no Android SDK.
+Both commands were run on 2026-10-22 and succeeded (38 tests, 0 failures; the debug APK is about 44 MB with the native libraries inside). The compiler printed one warning, which was already in the code before the move: `obj.optString(k, null)` in `ExtractionRules.str`.
 
-What was actually run: the rules file and the test file were compiled with the standalone Kotlin compiler 1.9.24 on Temurin JDK 17.0.20.1, against JUnit 4.13.2, Hamcrest 1.3 and org.json 20240303. Result: 38 tests, all passed. Four deliberate bugs placed in a scratch copy (a Verhoeff table value, the PAN entity letters, the year bound, the MEDIUM grade threshold) were each caught by at least one test. `MainActivity.kt` itself was not compiled in that check, because it needs the Android SDK; its edits are the delegates and storage changes listed above.
+Local setup used on that machine, all outside the repository: Temurin JDK 17.0.20.1 in `~/Library/Android/jdk-17`; Android SDK in `~/Library/Android/sdk` with command-line tools, platform-tools 37.0.1, platform android-35 and build-tools 34.0.0. The SDK licences were accepted when it was installed. The native libraries must be present in `app/src/main/jniLibs/arm64-v8a/` (see the README) or the APK will build without them.
+
+Before that, the rules and tests were also checked with the standalone Kotlin compiler 1.9.24 on that JDK, against JUnit 4.13.2, Hamcrest 1.3 and org.json 20240303. Four deliberate bugs placed in a scratch copy (a Verhoeff table value, the PAN entity letters, the year bound, the MEDIUM grade threshold) were each caught by at least one test.
