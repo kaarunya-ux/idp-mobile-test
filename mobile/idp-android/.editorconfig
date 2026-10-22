@@ -6,3 +6,8 @@ indent_size = 4
 max_line_length = 120
 insert_final_newline = true
 ktlint_code_style = android_studio
+
+# MainActivity.kt is being split up and does not follow the style yet (ADR 0003);
+# it is switched off here so neither ktlintCheck nor ktlintFormat touches it.
+[**/MainActivity.kt]
+ktlint = disabled

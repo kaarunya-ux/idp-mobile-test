@@ -338,4 +338,96 @@ class ExtractionRulesTest {
         assertTrue(ExtractionRules.validateAadhaar(obj, 2026).contains("dob year 2030 implausible"))
         assertFalse(ExtractionRules.validateAadhaar(obj, 2031).contains("implausible"))
     }
+
+    // --- validateDl ----------------------------------------------------------------
+
+    private fun validDl() = json(
+        "document_type" to "dl",
+        "license_number" to "MH12 20190012345",
+        "name" to "ASHA RAO",
+        "dob" to "01/01/1990",
+        "address" to "12 MG Road, Pune",
+        "issue_date" to "10/05/2019",
+        "validity_nt" to "09/05/2039",
+        "validity_tr" to null,
+        "blood_group" to null,
+        "organ_donor" to "N",
+        "vehicle_classes" to "LMV MCWG"
+    )
+
+    @Test
+    fun `validateDl grades a clean record HIGH and does not grade the often-blank fields`() {
+        val report = ExtractionRules.validateDl(validDl(), year)
+        assertTrue(report, report.startsWith("DL check: HIGH - 8/8 fields read"))
+        assertTrue(report.contains("often blank on this document, not graded: validity_tr=null, blood_group=null"))
+        assertFalse(report.contains("  - "))
+    }
+
+    @Test
+    fun `validateDl grades a missing licence number MEDIUM`() {
+        val report = ExtractionRules.validateDl(validDl().put("license_number", JSONObject.NULL), year)
+        assertTrue(report, report.startsWith("DL check: MEDIUM - 7/8 fields read, null: license_number"))
+    }
+
+    @Test
+    fun `validateDl flags a wrong document type`() {
+        val report = ExtractionRules.validateDl(validDl().put("document_type", "pan"), year)
+        assertTrue(report.contains("document_type is not 'dl'"))
+    }
+
+    @Test
+    fun `validateDl flags an issue date copied into validity_nt`() {
+        val obj = validDl().put("validity_nt", "10/05/2019")
+        val report = ExtractionRules.validateDl(obj, year)
+        assertTrue(report.startsWith("DL check: LOW"))
+        assertTrue(report.contains("issue_date and validity_nt are identical ('10/05/2019')"))
+    }
+
+    @Test
+    fun `validateDl only notes identical NT and TR validity dates`() {
+        val obj = validDl().put("validity_tr", "09/05/2039")
+        val report = ExtractionRules.validateDl(obj, year)
+        assertTrue(report, report.startsWith("DL check: HIGH"))
+        assertTrue(report.contains("note: validity_nt and validity_tr are identical ('09/05/2039')"))
+    }
+
+    @Test
+    fun `validateDl notes a blood group for manual verification`() {
+        val report = ExtractionRules.validateDl(validDl().put("blood_group", "O+"), year)
+        assertTrue(report.startsWith("DL check: HIGH"))
+        assertTrue(report.contains("note: blood_group = 'O+' - this kind of field is known to sometimes be fabricated"))
+    }
+
+    @Test
+    fun `validateDl flags an address that reuses the holder's name`() {
+        val obj = validDl().put("address", "ASHA RAO, 12 MG Road, Pune")
+        assertTrue(
+            ExtractionRules.validateDl(obj, year).contains("address reuses this record's own name/dob/license_number")
+        )
+    }
+
+    @Test
+    fun `validateDl flags an address that reuses the date of birth`() {
+        val obj = validDl().put("address", "Pune 01/01/1990")
+        assertTrue(ExtractionRules.validateDl(obj, year).contains("address reuses this record's own"))
+    }
+
+    @Test
+    fun `validateDl flags an address that reuses the licence number ignoring spaces and hyphens`() {
+        val obj = validDl().put("address", "Pune MH-12-20190012345")
+        assertTrue(ExtractionRules.validateDl(obj, year).contains("address reuses this record's own"))
+    }
+
+    @Test
+    fun `validateDl flags an address that reuses a hyphenated licence number written without hyphens`() {
+        val obj = validDl().put("license_number", "MH-12 2019-0012345").put("address", "Pune MH1220190012345")
+        assertTrue(ExtractionRules.validateDl(obj, year).contains("address reuses this record's own"))
+    }
+
+    @Test
+    fun `validateDl uses the injected year plus twenty as the upper bound for validity dates`() {
+        val obj = validDl().put("validity_nt", "09/05/2050")
+        assertTrue(ExtractionRules.validateDl(obj, 2026).contains("validity_nt year 2050 implausible"))
+        assertFalse(ExtractionRules.validateDl(obj, 2031).contains("implausible"))
+    }
 }

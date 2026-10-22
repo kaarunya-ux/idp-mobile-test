@@ -26,10 +26,10 @@ Native runtime (not Java, but the app depends on it): llama.cpp built with Andro
 
 | File | Change | Why |
 |---|---|---|
-| `app/src/main/java/.../ExtractionRules.kt` (new) | Date normalisation, Verhoeff (Aadhaar checksum), PAN and Aadhaar validation and the coverage grade, moved out of `MainActivity.kt` with the code unchanged. The current year is now a parameter instead of a clock read | So the rules can be tested on a plain JVM, and as a first step toward the `engine:extract` module in IDP-04 |
+| `app/src/main/java/.../ExtractionRules.kt` (new) | Date normalisation, Verhoeff (Aadhaar checksum), PAN, Aadhaar and Indian driving licence validation and the coverage grade, moved out of `MainActivity.kt` with the code unchanged. The current year is now a parameter instead of a clock read | So the rules can be tested on a plain JVM, and as a first step toward the `engine:extract` module in IDP-04 |
 | `app/src/main/java/.../MainActivity.kt` | The moved functions are replaced by one-line delegates with the same names and signatures, so the other validators did not change. Run logs, OCR results and the last field canvas are written to private storage (`filesDir`) instead of the external folder. `llama-server` output is sent to logcat only on debuggable builds | Privacy: these files hold extracted document data (IDP-04 Ch. 3.8) |
 | `app/src/main/res/xml/network_security_config.xml` (new) and `AndroidManifest.xml` | Cleartext HTTP is allowed to `127.0.0.1` and `localhost` only; `usesCleartextTraffic` removed | The app talks to its own local server; everything else must be HTTPS |
-| `app/src/test/java/.../ExtractionRulesTest.kt` (new) | 38 JVM unit tests for the rules above | IDP-04 Ch. 3.9 |
+| `app/src/test/java/.../ExtractionRulesTest.kt` (new) | 49 JVM unit tests for the rules above | IDP-04 Ch. 3.9 |
 | `app/build.gradle.kts` | Added `testImplementation` for JUnit and org.json | Needed by the tests |
 | `gradle/wrapper/*`, `gradlew`, `gradlew.bat` | Gradle wrapper, copied from `mobile/idox-mobile` (same version, 8.9) | So everyone builds with the same Gradle |
 | `.gitignore` | Ignores `jniLibs/`, `*.apk`, `*.aab`, `*.keystore`, `*.jks`, `.idea/`, `*.hprof` | Native libraries, models and signing keys stay out of git |
@@ -48,12 +48,12 @@ Normal route (needs a JDK 17 and the Android SDK; neither is committed to the re
 cd mobile/idp-android
 echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties   # git-ignored
 export JAVA_HOME=<path to a JDK 17>
-./gradlew :app:testDebugUnitTest      # 38 tests
+./gradlew :app:testDebugUnitTest      # 49 tests
 ./gradlew :app:assembleDebug          # builds app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:ktlintCheck :app:detekt   # style and size gates (ADR 0003)
 ```
 
-Both commands were run on 2026-10-22 and succeeded (38 tests, 0 failures; the debug APK is about 44 MB with the native libraries inside). The compiler printed one warning, which was already in the code before the move: `obj.optString(k, null)` in `ExtractionRules.str`.
+Both commands were run on 2026-10-22 and succeeded (49 tests, 0 failures; the debug APK is about 44 MB with the native libraries inside). The compiler printed one warning, which was already in the code before the move: `obj.optString(k, null)` in `ExtractionRules.str`.
 
 Local setup used on that machine, all outside the repository: Temurin JDK 17.0.20.1 in `~/Library/Android/jdk-17`; Android SDK in `~/Library/Android/sdk` with command-line tools, platform-tools 37.0.1, platform android-35 and build-tools 34.0.0. The SDK licences were accepted when it was installed. The native libraries must be present in `app/src/main/jniLibs/arm64-v8a/` (see the README) or the APK will build without them.
 
