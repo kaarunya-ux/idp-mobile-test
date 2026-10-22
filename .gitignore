@@ -79,3 +79,6 @@ mobile/idp-android/app/src/main/jniLibs/
 *.jks
 .idea/
 *.hprof
+
+# Company standards documents: local reference only, not part of the repository
+/standards_docs/

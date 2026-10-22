@@ -6,7 +6,7 @@ plugins {
 }
 
 // Lint and format gates (ADR 0003). ktlint checks every Kotlin file except MainActivity.kt (switched
-// off in .editorconfig), which joins as it is split up. detekt checks only the files listed under `source` below.
+// off in .editorconfig), which joins as it is split up. detekt checks the same files plus the tests.
 ktlint {
     version.set("1.3.1")
     android.set(true)
@@ -15,7 +15,10 @@ ktlint {
 detekt {
     config.setFrom(file("$rootDir/config/detekt/detekt.yml"))
     buildUponDefaultConfig = true
-    source.setFrom("src/main/java/com/modeltesting/vlmtester/ExtractionRules.kt", "src/test/java")
+    source.setFrom(
+        fileTree("src/main/java") { exclude("**/MainActivity.kt") },
+        "src/test/java"
+    )
 }
 
 android {
@@ -31,8 +34,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // JaCoCo coverage of the unit tests: ./gradlew :app:createDebugUnitTestCoverageReport (ADR 0006).
+            enableUnitTestCoverage = true
+        }
         release {
-            isMinifyEnabled = false
+            // R8 shrinks and obfuscates the app's own code (rules in proguard-rules.pro). Check a release
+            // build on a phone before shipping it; unsigned until a signing config is agreed.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 

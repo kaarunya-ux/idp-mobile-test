@@ -1,13 +1,14 @@
 package com.modeltesting.vlmtester
 
 /**
- * Deterministic checks on what the model returned: date normalisation, the Aadhaar
- * (Verhoeff) checksum, PAN structure and the coverage grade. Pure functions of their
- * inputs, with no Android or activity state, so they run in plain JVM unit tests
- * (app/src/test). The calendar year is a parameter, never read from the clock here.
+ * Shared building blocks for the per-document checks (PanRules, AadhaarRules, DlRules,
+ * PassportRules): date normalisation, the Aadhaar (Verhoeff) checksum and the coverage
+ * grade. Pure functions of their inputs, with no Android or activity state, so they run
+ * in plain JVM unit tests (app/src/test). The calendar year is a parameter, never read
+ * from the clock here.
  *
  * Moved out of MainActivity without changing behaviour; MainActivity keeps thin
- * delegates with the same names so the remaining validators are untouched.
+ * delegates with the same names.
  */
 object ExtractionRules {
     fun str(obj: org.json.JSONObject, k: String): String? =
@@ -130,313 +131,20 @@ object ExtractionRules {
         else -> "LOW"
     }
 
-    fun validatePan(obj: org.json.JSONObject, currentYear: Int): String {
-        val fields = listOf("name", "parent_name", "parent_relation", "dob", "pan_number")
-        val problems = mutableListOf<String>()
-        val notes = mutableListOf<String>()
-
-        if (str(obj, "document_type") != "pan") problems += "document_type is not 'pan'"
-        for (k in listOf("gender", "address", "expiry_date", "issue_date", "confidence")) {
-            if (obj.has(k)) problems += "$k must not appear on a PAN record"
-        }
-
-        val name = str(obj, "name")
-        val parent = str(obj, "parent_name")
-        if (name != null && parent != null && name.equals(parent, ignoreCase = true)) {
-            problems += "name and parent_name are identical"
-        }
-
-        checkDateShape(problems, notes, obj, "dob", 1900, currentYear)
-
-        val pan = str(obj, "pan_number")
-        if (pan != null) checkPanNumber(pan, name, problems, notes)
-
-        return coverageReport("PAN", obj, fields, problems, notes)
-    }
-
-    // PAN structure: 3 series letters, entity type, surname/given-name initial, 4
-    // digits, check letter.
-    private fun checkPanNumber(pan: String, name: String?, problems: MutableList<String>, notes: MutableList<String>) {
-        if (!Regex("^[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z]$").matches(pan)) {
-            problems += "pan_number '$pan' is not a valid PAN structure"
-        } else if (pan[3] == 'P') {
-            checkPanInitial(pan, name, notes)
+    /** The LFM2 grammar has no document_type key (the BUL2 prompt does not ask for it) but
+     *  validatePan() requires document_type == "pan". It is added only for the check; the
+     *  output shown to the user is the model's own, unmodified text. The Qwen PAN and
+     *  Aadhaar grammars are the same shape (no document_type), so they use this too. */
+    fun withDocumentType(text: String, type: String): String {
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start < 0 || end <= start) return text
+        return try {
+            val obj = org.json.JSONObject(text.substring(start, end + 1))
+            if (!obj.has("document_type")) obj.put("document_type", type)
+            obj.toString()
+        } catch (_: org.json.JSONException) {
+            text
         }
     }
-
-    // Individual: character 5 is meant to be the initial of the holder's
-    // surname, but which WORD of "name" carries that surname is not fixed -
-    // confirmed on two real cards. "D MANIKANDAN" (Tamil-style initial +
-    // given name) matched its LAST word (M); "KOCHERLA SRIKANTH" (surname
-    // first) matched its FIRST word (K), and both pan_number/name reads were
-    // independently verified character-perfect against the physical card.
-    // So: check every word in name, not one fixed position, and only note a
-    // possible mismatch rather than call it a "problem" - a real, correct
-    // read can legitimately match none of them for a naming style not yet
-    // seen, and this check must never drag a correct read down to LOW.
-    private fun checkPanInitial(pan: String, name: String?, notes: MutableList<String>) {
-        val nameInitials = name?.trim()?.split(Regex("\\s+"))
-            ?.mapNotNull { it.firstOrNull()?.uppercaseChar() }.orEmpty()
-        if (nameInitials.isNotEmpty() && pan[4] !in nameInitials) {
-            notes += "note: pan_number char 5 '${pan[4]}' matches none of name's " +
-                "word-initials (${nameInitials.joinToString("")}) - " +
-                "worth a manual glance, not necessarily wrong"
-        }
-    }
-
-    fun validateAadhaar(obj: org.json.JSONObject, currentYear: Int): String {
-        // Qwen profile only: address_visible=false means the card genuinely prints no address, so
-        // address/pincode are not misses - leave them out of the graded fields (shown for
-        // information instead) so a front-only card can grade HIGH.
-        val addressDeclaredAbsent = obj.has("address_visible") && !obj.optBoolean("address_visible", false)
-        val fields = if (addressDeclaredAbsent) {
-            listOf("name", "dob", "gender", "aadhaar_number")
-        } else {
-            listOf("name", "dob", "gender", "aadhaar_number", "address", "pincode")
-        }
-        val problems = mutableListOf<String>()
-        val notes = mutableListOf<String>()
-
-        if (str(obj, "document_type") != "aadhaar") problems += "document_type is not 'aadhaar'"
-        // issue_date was dropped from the schema entirely: it's printed in a corner
-        // stamp too small for this vision encoder to reliably resolve, and the model
-        // was fabricating a plausible-looking date rather than admitting it couldn't
-        // read it (found 2026-09-16, "25/04/2017" on a card with no such date visible).
-        if (obj.has("issue_date")) problems += "issue_date must not appear on an Aadhaar record"
-
-        checkDateShape(problems, notes, obj, "dob", 1900, currentYear)
-
-        val aadhaarRaw = str(obj, "aadhaar_number")
-        checkAadhaarNumber(aadhaarRaw, problems, notes)
-
-        val pin = str(obj, "pincode")
-        if (pin != null && !Regex("^[0-9]{6}$").matches(pin)) {
-            problems += "pincode '$pin' is not 6 digits"
-        }
-
-        checkAddressConsistency(obj, aadhaarRaw, pin, problems)
-        checkAddressVisibility(obj, pin, problems, notes)
-
-        return coverageReport(
-            "Aadhaar",
-            obj,
-            fields,
-            problems,
-            notes,
-            oftenNullFields = if (addressDeclaredAbsent) listOf("address", "pincode") else emptyList()
-        )
-    }
-
-    // The schema now accepts the number in its natural printed grouping ("1234 5678
-    // 9012") as well as bare digits, because forcing bare-digits-only previously gave
-    // the model no legal way to emit the number the way it naturally reads it - the
-    // grammar rejected the spaced form and the value fell through into "address"
-    // instead (found 2026-09-16). Normalize here rather than relying on the model to
-    // strip spaces itself, the same reasoning as the date normalizer.
-    private fun checkAadhaarNumber(aadhaarRaw: String?, problems: MutableList<String>, notes: MutableList<String>) {
-        if (aadhaarRaw == null) return
-        val aadhaar = aadhaarRaw.replace(" ", "")
-        if (!Regex("^[0-9]{12}$").matches(aadhaar)) {
-            problems += "aadhaar_number '$aadhaarRaw' is not 12 digits"
-        } else {
-            notes += "aadhaar_number -> $aadhaar"
-            if (!verhoeffValid(aadhaar)) {
-                problems += "aadhaar_number '$aadhaarRaw' fails the Aadhaar checksum " +
-                    "(Verhoeff algorithm) - at least one digit is misread"
-            }
-        }
-    }
-
-    // Observed live, three times now on three different cards, with no address block
-    // actually visible: rather than returning null as instructed, the model fabricates
-    // an "address" by recombining content it already generated for OTHER fields on the
-    // same record - or content belonging to a DIFFERENT field entirely. Card 1: address
-    // was a verbatim duplicate of aadhaar_number. Card 2: address embedded name
-    // ("Basant Raj") and dob ("01/01/2000") verbatim, plus invented filler text, with
-    // pincode a plausible-looking but unconnected invented number. Card 3 (same
-    // "Basant Raj" card, re-tested 2026-09-17): a DIFFERENT fabrication this time -
-    // "Nawabzat R expanse / Enrolment No.: 4049/30507/00690" - no longer duplicating
-    // this record's own fields, but instead referencing "Enrolment No.", which is a
-    // real but DIFFERENT Aadhaar field (the enrollment ID, distinct from the Aadhaar
-    // number) that has no business appearing inside an address. Confirmed by the user:
-    // this card has no real address printed. Same underlying behaviour every time -
-    // when this field has nothing real to point to, the model recombines whatever
-    // concept is "nearby" rather than admitting it doesn't know. A prose "use null"
-    // instruction has proven unreliable against this, so detect it instead: a genuine
-    // address never legitimately contains the resident's own name/dob/aadhaar_number,
-    // nor a reference to the enrollment-number field.
-    private fun checkAddressConsistency(
-        obj: org.json.JSONObject,
-        aadhaarRaw: String?,
-        pin: String?,
-        problems: MutableList<String>
-    ) {
-        val addr = str(obj, "address")
-        val aadhaarDigitsOnly = aadhaarRaw?.replace(" ", "")
-        if (isFabricatedAddress(addr, str(obj, "name"), str(obj, "dob"), aadhaarDigitsOnly)) {
-            problems += "address reuses this record's own name/dob/aadhaar_number, or " +
-                "references the enrollment-number field - almost certainly fabricated, " +
-                "not a real address"
-            // A PIN with no genuine address behind it has no legitimate source either.
-            if (pin != null) problems += "pincode has no genuine address to derive from"
-        } else if (pin != null && aadhaarDigitsOnly != null && aadhaarDigitsOnly.startsWith(pin)) {
-            problems += "pincode '$pin' looks derived from aadhaar_number, not a real PIN"
-        } else if (addr != null && pin != null) {
-            // Found live 2026-09-17: address ended "...Andhra Pradesh - 516309" while the
-            // separate pincode field said "759831" - two different numbers for what should
-            // be the same PIN. A real address's own trailing PIN and the standalone
-            // pincode field must agree; take the LAST 6-digit run in the address as its
-            // embedded PIN, since that's where a genuine Indian address prints one.
-            val addrPin = Regex("\\b[0-9]{6}\\b").findAll(addr).lastOrNull()?.value
-            if (addrPin != null && addrPin != pin) {
-                problems += "address ends in PIN '$addrPin' but the separate pincode field " +
-                    "says '$pin' - these should be the same PIN and are not"
-            }
-        }
-    }
-
-    private fun isFabricatedAddress(
-        addr: String?,
-        name: String?,
-        dobRaw: String?,
-        aadhaarDigitsOnly: String?
-    ): Boolean = addr != null &&
-        (
-            (aadhaarDigitsOnly != null && addr.replace(" ", "") == aadhaarDigitsOnly) ||
-                (name != null && addr.contains(name, ignoreCase = true)) ||
-                (dobRaw != null && addr.contains(dobRaw)) ||
-                Regex("enrolment no|enrollment no|\\beid\\b", RegexOption.IGNORE_CASE).containsMatchIn(addr)
-            )
-
-    // Qwen profile: the address_visible flag must agree with what was returned. The grammar
-    // already forces these when it can; the app re-checks them so a scan that breaks the
-    // contract is flagged instead of trusted. A genuine block-wide copy is also expected to
-    // contain its own PIN, and an address with a PIN in it but a null pincode field is wrong.
-    private fun checkAddressVisibility(
-        obj: org.json.JSONObject,
-        pin: String?,
-        problems: MutableList<String>,
-        notes: MutableList<String>
-    ) {
-        if (!obj.has("address_visible")) return
-        val addr = str(obj, "address")
-        if (obj.optBoolean("address_visible", false)) {
-            checkVisibleAddress(addr, pin, problems, notes)
-        } else if (addr != null || pin != null) {
-            problems += "address_visible is false but an address or pincode was returned"
-        }
-    }
-
-    private fun checkVisibleAddress(
-        addr: String?,
-        pin: String?,
-        problems: MutableList<String>,
-        notes: MutableList<String>
-    ) {
-        if (addr == null || addr.length < 15) {
-            problems += "address_visible is true but the address is missing or too short"
-            return
-        }
-        val embeddedPin = Regex("\\b[0-9]{6}\\b").findAll(addr).lastOrNull()?.value
-        if (pin != null && !addr.contains(pin)) {
-            problems += "address does not contain the pincode '$pin'"
-        } else if (pin == null && embeddedPin != null) {
-            problems += "address contains the PIN '$embeddedPin' but the pincode field is null"
-        } else if (pin == null) {
-            notes += "address read, but no 6-digit PIN was found in it - check the address is complete"
-        }
-    }
-
-    fun validateDl(obj: org.json.JSONObject, currentYear: Int): String {
-        // Field list corrected 2026-09-17 to match a real Indian DL: license_number,
-        // name, dob, address (its PIN code is embedded in this text, not a separate
-        // field), issue_date, validity_nt/validity_tr (split from a single expiry_date
-        // - Indian DLs print separate validity dates for Non-Transport and Transport
-        // vehicle categories; validity_tr is commonly blank), blood_group (commonly
-        // blank), organ_donor (Y/N). gender, a standalone pincode field, and
-        // issuing_authority were removed entirely - confirmed not present on this card.
-        val fields = listOf(
-            "license_number",
-            "name",
-            "dob",
-            "address",
-            "issue_date",
-            "validity_nt",
-            "organ_donor",
-            "vehicle_classes"
-        )
-        val oftenNullFields = listOf("validity_tr", "blood_group")
-        val problems = mutableListOf<String>()
-        val notes = mutableListOf<String>()
-
-        if (str(obj, "document_type") != "dl") problems += "document_type is not 'dl'"
-
-        checkDateShape(problems, notes, obj, "dob", 1900, currentYear)
-        checkDateShape(problems, notes, obj, "issue_date", 1990, currentYear)
-        checkDateShape(problems, notes, obj, "validity_nt", 1990, currentYear + 20)
-        checkDateShape(problems, notes, obj, "validity_tr", 1990, currentYear + 20)
-
-        checkDlValidityDates(obj, problems, notes)
-        checkDlAddress(obj, problems)
-
-        // validity_tr and blood_group are commonly blank on real cards - excluded from
-        // the grading ratio via oftenNullFields. Both are also known-fabrication-risk
-        // fields (same pattern confirmed live on tt_id's blood_group), so flag them for
-        // manual verification whenever non-null rather than trusting them silently.
-        for (k in oftenNullFields) {
-            val v = str(obj, k)
-            if (v != null) {
-                notes += "note: $k = '$v' - this kind of field is known to sometimes be " +
-                    "fabricated when genuinely absent; verify against the physical document"
-            }
-        }
-
-        return coverageReport("DL", obj, fields, problems, notes, oftenNullFields)
-    }
-
-    private fun checkDlValidityDates(
-        obj: org.json.JSONObject,
-        problems: MutableList<String>,
-        notes: MutableList<String>
-    ) {
-        // A DL's validity period is normally years long - issue_date and validity_nt
-        // being byte-identical is a strong tell that the model duplicated one into the
-        // other rather than genuinely reading a separate field (this exact pattern was
-        // found live 2026-09-16, back when this field was still called expiry_date).
-        val issueRaw = str(obj, "issue_date")
-        val validityNtRaw = str(obj, "validity_nt")
-        val validityTrRaw = str(obj, "validity_tr")
-        if (issueRaw != null && validityNtRaw != null && issueRaw == validityNtRaw) {
-            problems += "issue_date and validity_nt are identical ('$issueRaw') - " +
-                "likely one was duplicated rather than genuinely read"
-        }
-        // Less clear-cut than issue==validity_nt: NT and TR could legitimately share a
-        // date if both endorsements were renewed together, so this is only a note.
-        if (validityNtRaw != null && validityTrRaw != null && validityNtRaw == validityTrRaw) {
-            notes += "note: validity_nt and validity_tr are identical ('$validityNtRaw') - " +
-                "possible, but worth a manual glance since these cover different vehicle categories"
-        }
-    }
-
-    // Same fabrication pattern confirmed live on Aadhaar - a genuine address never
-    // legitimately contains the record's own name/dob/license_number.
-    private fun checkDlAddress(obj: org.json.JSONObject, problems: MutableList<String>) {
-        val addr = str(obj, "address")
-        if (isFabricatedDlAddress(addr, str(obj, "name"), str(obj, "dob"), str(obj, "license_number"))) {
-            problems += "address reuses this record's own name/dob/license_number - " +
-                "almost certainly fabricated, not a real address"
-        }
-    }
-
-    private fun isFabricatedDlAddress(addr: String?, name: String?, dobRaw: String?, license: String?): Boolean =
-        addr != null &&
-            (
-                (name != null && addr.contains(name, ignoreCase = true)) ||
-                    (dobRaw != null && addr.contains(dobRaw)) ||
-                    (
-                        license != null &&
-                            addr.replace(" ", "").replace("-", "")
-                                .contains(license.replace(" ", "").replace("-", ""))
-                        )
-                )
 }
