@@ -52,4 +52,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     // On-device OCR (bundled Latin model, no Play Services download). Used by the OCR-first path.
     implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // JVM unit tests (app/src/test). org.json is listed because the stub copy inside
+    // android.jar throws "not mocked" when called from a unit test.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
