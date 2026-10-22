@@ -1,6 +1,24 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jlleitschuh.gradle.ktlint")
+    id("io.gitlab.arturbosch.detekt")
+}
+
+// Lint and format gates (ADR 0003). ktlint checks every Kotlin file except MainActivity.kt, which
+// joins as it is split up. detekt checks only the files listed under `source` below.
+ktlint {
+    version.set("1.3.1")
+    android.set(true)
+    filter {
+        exclude("**/MainActivity.kt")
+    }
+}
+
+detekt {
+    config.setFrom(file("$rootDir/config/detekt/detekt.yml"))
+    buildUponDefaultConfig = true
+    source.setFrom("src/main/java/com/modeltesting/vlmtester/ExtractionRules.kt", "src/test/java")
 }
 
 android {

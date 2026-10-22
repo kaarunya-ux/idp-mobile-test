@@ -15,6 +15,8 @@ For developers who know Java but not this app. Scope: `mobile/idp-android/` only
 | AndroidX core-ktx / appcompat / activity-ktx / lifecycle-runtime-ktx | 1.13.1 / 1.7.0 / 1.9.2 / 2.8.4 | `app/build.gradle.kts` |
 | Material Components | 1.12.0 | same |
 | ML Kit text recognition (bundled Latin model) | 16.0.1 | same |
+| ktlint plugin / ktlint | 12.1.1 / 1.3.1 | `build.gradle.kts`, `app/build.gradle.kts` |
+| detekt | 1.23.6 | same, rules in `config/detekt/detekt.yml` |
 | JUnit (tests) | 4.13.2 | same |
 | org.json (tests) | 20240303 | same |
 
@@ -48,6 +50,7 @@ echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties   # git-ignored
 export JAVA_HOME=<path to a JDK 17>
 ./gradlew :app:testDebugUnitTest      # 38 tests
 ./gradlew :app:assembleDebug          # builds app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:ktlintCheck :app:detekt   # style and size gates (ADR 0003)
 ```
 
 Both commands were run on 2026-10-22 and succeeded (38 tests, 0 failures; the debug APK is about 44 MB with the native libraries inside). The compiler printed one warning, which was already in the code before the move: `obj.optString(k, null)` in `ExtractionRules.str`.

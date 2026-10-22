@@ -24,14 +24,22 @@ class ExtractionRulesTest {
     }
 
     private fun validPan() = json(
-        "document_type" to "pan", "name" to "RAMESH KUMAR", "parent_name" to "SURESH KUMAR",
-        "parent_relation" to "father", "dob" to "15/08/1990", "pan_number" to "ABCPK1234F"
+        "document_type" to "pan",
+        "name" to "RAMESH KUMAR",
+        "parent_name" to "SURESH KUMAR",
+        "parent_relation" to "father",
+        "dob" to "15/08/1990",
+        "pan_number" to "ABCPK1234F"
     )
 
     private fun validAadhaar() = json(
-        "document_type" to "aadhaar", "name" to "ASHA RAO", "dob" to "01/01/1990",
-        "gender" to "F", "aadhaar_number" to "2345 6789 0124",
-        "address" to "12 MG Road, Pune, Maharashtra 411001", "pincode" to "411001"
+        "document_type" to "aadhaar",
+        "name" to "ASHA RAO",
+        "dob" to "01/01/1990",
+        "gender" to "F",
+        "aadhaar_number" to "2345 6789 0124",
+        "address" to "12 MG Road, Pune, Maharashtra 411001",
+        "pincode" to "411001"
     )
 
     // --- str -----------------------------------------------------------------------
