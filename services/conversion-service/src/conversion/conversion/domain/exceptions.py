@@ -21,6 +21,10 @@ class InvalidRouteError(ValueError):
     """A route whose steps don't chain together. A bug in the route table, never a user error; tests catch it."""
 
 
+class InvalidDocumentModelError(ValueError):
+    """A reader built an impossible document model (a ragged table, empty text). A bug, never a user error."""
+
+
 class InvalidOptionError(DomainError):
     """A conversion option is outside its allowed values. Reported as ``CNV-422-OPTIONS-001``."""
 
@@ -101,3 +105,13 @@ class ConversionTimeoutError(DomainError):
 
     def __init__(self, seconds: float) -> None:
         super().__init__(f"The conversion took longer than {seconds:g} seconds and was stopped.")
+
+
+class NoTableFoundError(DomainError):
+    """A CSV export was asked of a document with no table. Reported as ``CNV-422-TABLE-001``."""
+
+    code = ErrorCode.NO_TABLE
+    title = "No table found"
+
+    def __init__(self) -> None:
+        super().__init__("The document has no table to export.")

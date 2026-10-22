@@ -25,6 +25,7 @@ class LimitsSettings(BaseModel):
     max_pages: int = Field(1000, ge=1, le=10_000)
     max_image_pixels: int = Field(180_000_000, ge=1_000_000, le=1_000_000_000)
     max_render_side_px: int = Field(5000, ge=500, le=20_000)
+    max_document_table_rows: int = Field(20_000, ge=100, le=1_000_000)  # tables written into Word or slides
 
 
 class OfficeSettings(BaseModel):

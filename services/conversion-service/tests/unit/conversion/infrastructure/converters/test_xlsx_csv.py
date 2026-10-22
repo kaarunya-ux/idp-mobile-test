@@ -12,7 +12,7 @@ from conversion.conversion.domain.formats import Representation
 from conversion.conversion.domain.options import ConversionOptions
 from conversion.conversion.domain.ports import StepRequest
 from conversion.conversion.domain.route import Converter
-from conversion.conversion.infrastructure.converters import xlsx_csv
+from conversion.conversion.infrastructure.converters import spreadsheets
 from conversion.conversion.infrastructure.converters.xlsx_csv import OpenpyxlCsvConverter
 
 R = Representation
@@ -102,7 +102,7 @@ def test_reports_cnv_422_file_001_when_the_csv_is_really_a_binary_file(
 def test_refuses_when_the_table_is_bigger_than_a_spreadsheet(
     tmp_path: Path, make_request: MakeRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(xlsx_csv, "EXCEL_MAX_ROWS", 2)
+    monkeypatch.setattr(spreadsheets, "EXCEL_MAX_ROWS", 2)
 
     with pytest.raises(LimitExceededError):
         _to_xlsx(_csv(tmp_path, "a\n1\n2\n3\n"), make_request)

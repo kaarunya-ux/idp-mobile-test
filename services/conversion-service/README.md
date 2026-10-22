@@ -4,7 +4,7 @@ Converts documents between PDF, Word, Excel, CSV, PowerPoint and images. Also ap
 
 There is **no public API**. document-service (Java) sends `ConversionRequested` messages over RabbitMQ, and this service replies with `JobProgressed`, `ConversionCompleted` or `WorkFailed` (IDP-00 ch. 7.6). Files go in and out through MinIO; messages carry only their locations.
 
-**Status:** step 3b of the [build log](../../docs/conversion-service/build-log.md). It converts PNG ↔ JPEG, images ↔ PDF, Word/Excel/PowerPoint → PDF (and on to images) and CSV ↔ XLSX, through the route planner, on local files. Data conversions via the document model come next (step 3c); RabbitMQ and MinIO come in step 4.
+**Status:** step 3c of the [build log](../../docs/conversion-service/build-log.md). On local files it runs every conversion in the IDP-00 matrix that needs no OCR (36 of 47 routes): PNG ↔ JPEG, images ↔ PDF, Office → PDF and images, CSV ↔ XLSX, images and PDF → PowerPoint, and the data routes through the document model (Word, Excel, CSV, PowerPoint and digital PDF in; Word, Excel, CSV and PowerPoint out). Scanned PDF and image → Word/Excel/CSV wait for OCR; RabbitMQ and MinIO come in step 4.
 
 ## System dependencies
 
@@ -51,6 +51,7 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `LIMITS__MAX_PAGES` | `1000` | 1–10,000 | PDFs with more pages are refused (`CNV-422-LIMIT-001`) |
 | `LIMITS__MAX_IMAGE_PIXELS` | `180000000` | 1M–1G | Images with more pixels are refused, which stops decompression bombs |
 | `LIMITS__MAX_RENDER_SIDE_PX` | `5000` | 500–20,000 | Rendered pages are scaled down so the longest side fits |
+| `LIMITS__MAX_DOCUMENT_TABLE_ROWS` | `20000` | 100–1,000,000 | Tables longer than this aren't written into Word or slides; XLSX/CSV suit them |
 | `OFFICE__BINARY` | `soffice` | a command or absolute path | The LibreOffice program used for Office → PDF |
 | `OFFICE__TIMEOUT` | `60` | 5 s – 10 min (seconds, or an ISO 8601 duration like `PT90S`) | A run past this is stopped (`CNV-504-TIMEOUT-001`) |
 
@@ -66,7 +67,8 @@ src/conversion/
   conversion/      the conversion feature
     domain/          formats, route, route_planner, options, ports (protocols), exceptions
     application/     commands, results, services/convert_file.py (ConvertFileService)
-    infrastructure/  converters/ (one adapter per library), registry.py
+    domain/document_model.py  pages -> text blocks and tables: the hub for data conversions
+    infrastructure/  converters/ (one adapter per library), registry.py, model_file.py (the model as JSON)
 tests/unit/        mirrors src/
 ```
 

@@ -18,8 +18,10 @@ Each step is one branch and one reviewable pull request (about 400 changed lines
 | 1 | Skeleton | `services/conversion-service/` with `uv`, settings, logging, a health endpoint, `make check` green. No business logic | merged (PR #1) |
 | 2 | Domain | Formats, routes and the route planner as pure Python; a test that all 30 matrix pairs have a route | merged (PR #2) |
 | 3a | Image converters | PNG ↔ JPEG, images → PDF, PDF → images; the converter pattern (port, adapters, registry, use case) | merged (PR #3) |
-| 3b | Office converters | Word, Excel and PowerPoint → PDF (LibreOffice), CSV ↔ XLSX | done, in review (`feat/conversion-service-office-converters`) |
-| 3c | Data converters | The document model, plus readers and writers for DOCX, XLSX, CSV and PPTX, and PDF tables | |
+| 3b | Office converters | Word, Excel and PowerPoint → PDF (LibreOffice), CSV ↔ XLSX | merged (PR #4) |
+| 3c-1 | Document model: Word and sheets | The document model; Word ↔ Excel/CSV, Excel/CSV → Word | done |
+| 3c-2 | PowerPoint routes | PowerPoint → Word/Excel/CSV, Excel/CSV → PowerPoint, images and PDF → PowerPoint | done |
+| 3c-3 | PDF data routes | PDF tables → Excel/CSV, PDF → Word, rebuilt on the document model (pdfplumber, no PyMuPDF) | done; 3c-1 to 3c-3 are one PR (`feat/conversion-service-document-model`) |
 | 4 | Messaging and storage | Receive `ConversionRequested`, run Celery tasks, MinIO in and out, send `JobProgressed` / `ConversionCompleted` / `WorkFailed` | |
 | 5 | The rest | PDF edit plans, exports, previews. AI-assisted routes once ai-gateway exists | |
 
@@ -238,7 +240,7 @@ That's why `Representation` has one more member than `Format`: `DOCUMENT_MODEL`,
 | Request | Route | Fidelity |
 |---|---|---|
 | CSV → PDF | `xlsx_csv` (XLSX) → `office_to_pdf` (PDF) | H |
-| digital PDF → XLSX | `pdf_tables` (model) → `model_to_xlsx` (XLSX) | D |
+| digital PDF → XLSX | `pdf_tables` (model) → `model_to_xlsx` (XLSX); renamed `pdf_to_model` in step 3c-3 | D |
 | scanned PDF → XLSX | `ocr_to_model` (model) → `model_to_xlsx` (XLSX) | D |
 | JPEG → PDF | `images_to_pdf` (PDF) | E |
 | JPEG → PDF, `ocr=ON` | `searchable_pdf` (PDF) | E |
@@ -494,3 +496,277 @@ uv run pytest tests/unit/conversion/infrastructure/converters/test_office_to_pdf
 | Header detection | The ported rule takes a first row with words as a header even when it's data. The data can't tell them apart; the cost is header styling on one row, never lost data |
 | Usage for tables | A CSV or XLSX conversion counts as 1 page in `page_count`, pending the usage contract (step 4) |
 | python-docx and python-pptx | MIT, approved under the permissive-only decision. Dev-only for now (to build test files); they become worker libraries in 3c |
+
+---
+
+## Entry 5: The document model, and Word ↔ Excel/CSV (step 3c-1, 2026-10-22)
+
+**Goal:** the first *data* conversions, where the content stays editable instead of becoming a picture or a PDF. Step 3c-1 adds the shared middle format (the **document model**), readers for Word, Excel and CSV, and writers for Word, Excel and CSV. Four matrix pairs now work: **DOCX → XLSX, DOCX → CSV, XLSX → DOCX, CSV → DOCX**.
+
+### What we did
+
+```
+conversion/domain/document_model.py     DocumentModel -> Page -> Block (TextBlock | Table); validated on creation
+conversion/domain/exceptions.py         + NoTableFoundError
+core/error_codes.py                     + CNV-422-TABLE-001 (a table export from a document without tables)
+core/config.py                          + LIMITS__MAX_DOCUMENT_TABLE_ROWS (20,000)
+infrastructure/model_file.py            the model as versioned JSON (<stem>.model.json), read back through Pydantic
+infrastructure/converters/
+  spreadsheets.py                       shared CSV/XLSX helpers, moved out of xlsx_csv.py so the new converters reuse them
+  xlsx_csv.py                           now a thin adapter over spreadsheets.py (same behaviour, same tests)
+  docx_to_model.py                      PythonDocxReader     Word -> model
+  sheet_to_model.py                     SheetReader          CSV/XLSX -> model
+  model_to_docx.py                      PythonDocxWriter     model -> Word
+  model_to_sheets.py                    OpenpyxlModelWriter, CsvModelWriter    model -> XLSX / CSV
+bootstrap.py                            + the five new converters registered
+pyproject.toml                          python-docx moved from dev to the workers extra; import rules cover `docx`
+tests/                                  49 new tests (242 in total), 100 % coverage
+```
+
+### How the document model works
+
+```
+DocumentModel
+  └─ Page (name: "Sales" for a sheet, None for a Word document)
+       └─ blocks, in reading order:
+            TextBlock(text, kind = HEADING | PARAGRAPH | LIST_ITEM | CAPTION, level 1–6, alignment, bold)
+            Table(rows of text, header_rows)
+```
+
+Every data route is **reader → model → writer**. DOCX → XLSX is `DOCX_TO_MODEL` then `MODEL_TO_XLSX`, and the route planner from step 2 already chains them. Because readers and writers only meet at the model, a new format needs one reader and one writer, not one converter per pair. 3c-2 (PowerPoint) and 3c-3 (PDF) plug into the same model.
+
+What each reader keeps:
+
+| Source | Becomes |
+|---|---|
+| Word "Title", "Heading 1–9" | `HEADING`, level 1–6 (Word goes to 9; deeper levels are capped at 6) |
+| Word "List Bullet 2", or numbering depth (`w:ilvl`) | `LIST_ITEM` with its depth |
+| Word "Caption" | `CAPTION` |
+| Centred / right alignment, bold paragraphs | kept; justified reads as left |
+| Merged table cells | the text once, in the top-left cell; the other cells are empty |
+| Rows Word repeats on each page (`w:tblHeader`), or else a bold first row | `header_rows` |
+| A CSV file | one unnamed page with one table |
+| An XLSX workbook | one page per sheet with data, named after the sheet; empty edges trimmed |
+
+What each writer produces:
+
+| Target | Output |
+|---|---|
+| Word | Page name as Heading 1, Word's own styles for each role (headings in black), tables in "Table Grid" with bold header rows that repeat on each printed page |
+| XLSX | One sheet per table, typed with step 3b's CSV rules (numbers, currency, IDs stay text). Named after its page when the page has one table, else "Table N" |
+| CSV | One table: the first one, or the one on the page named by the `sheet` option |
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| The model is plain frozen dataclasses in the domain, checked when created | ch. 2.4, `DOM-01`, `DOM-02`, `PY-03` | An empty heading or a ragged table can't exist, so every writer can trust its input. No library types leak into it |
+| Steps hand over a JSON file, not a Python object | IDP-03 ch. 3.4 | In step 4 a reader and a writer may run in different worker processes. A file is what crosses that gap |
+| Pydantic DTOs only in `model_file.py`, `extra="forbid"`, `schema_version: 1` | `OBJ-01` | A model file from a different version, or a typo in a field, fails loudly at the boundary instead of producing a quietly wrong document |
+| Shared helpers moved to `spreadsheets.py` | one rule, one place | XLSX → CSV, CSV → XLSX and model → XLSX all type cells the same way, so a fix lands everywhere at once |
+| A row limit for tables written into Word | IDP-00 §8 (limits) | A 1-million-row sheet would make an unusable, gigabyte-sized Word file and exhaust the worker. Past the limit the error says to use XLSX or CSV (`CNV-422-LIMIT-001`) |
+| `CNV-422-TABLE-001` for "no tables" | `ERR-05` | "Word → Excel" on a letter without tables is a user error with a clear fix, not a crash. Java can show a precise message |
+| `docx` added to the import rules | ch. 3.3 | The domain, the application layer and the slim health server still can't import a converter library |
+
+### How it connects
+
+- **Java's `sheet` option** now also picks which table goes into a CSV when a document has several. A name that doesn't exist is `CNV-422-OPTIONS-001`; a page with no table is `CNV-422-TABLE-001`.
+- **New error code for Java:** `CNV-422-TABLE-001`. Add it to the list for the Java team with `CNV-422-FILE-001` and `CNV-422-OPTIONS-001`.
+- **The model file is internal.** It lives in the conversion's temp folder and never reaches MinIO or Java.
+
+### Try it
+
+```bash
+cd services/conversion-service
+make check
+uv run pytest tests/unit/conversion/infrastructure/converters/test_docx_to_model.py -v
+uv run pytest tests/unit/conversion/infrastructure/converters/test_model_writers.py -v
+```
+
+### Lessons
+
+- **A middle format pays off from the second format onward.** Four routes needed only three readers and three writers, and PowerPoint and PDF will reuse all three writers.
+- **Refactor before you copy.** The XLSX writer needed the cell typing from `xlsx_csv.py`. Moving it into `spreadsheets.py` first, with the old tests still passing, proved the move changed nothing before anything new used it.
+- **Word's merged cells repeat.** python-docx returns the same cell object for every grid position a merged cell covers, so a naive read writes "Wide Wide". The reader checks the underlying XML element (`_tc`) and keeps the text once.
+- **python-docx has no API for some things.** List depth from numbering and repeating header rows needed small, tested XML reads and writes (`w:ilvl`, `w:tblHeader`).
+- **Word's template has three list levels.** "List Bullet 4" doesn't exist in the default template, so deeper items use "List Bullet 3" rather than crashing.
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| What the model keeps | Text roles, levels, alignment, bold and tables. **Not** fonts, colours, images or italics yet: they don't survive a sheet anyway, and images arrive with the PDF and PowerPoint routes if product needs them |
+| Header detection in Word tables | Marked repeating rows win. Otherwise a fully bold first row counts, but only in tables with at least two rows |
+| Which table goes into a CSV | The first one, unless the `sheet` option names a page. One CSV file can hold only one table; a ZIP of several CSVs waits for the outputs contract |
+| PR size | About 770 lines of source and 530 of tests, above the ~400-line guide (ch. 25). The model, its file format and the first readers and writers only make sense together. The Python lead then chose to ship 3c-1 to 3c-3 as **one PR** (see Entry 7) |
+
+---
+
+## Entry 6: PowerPoint routes (step 3c-2, 2026-10-22)
+
+**Goal:** PowerPoint in and out. Nine more matrix routes now run: **PPTX → DOCX, XLSX, CSV**; **XLSX and CSV → PPTX**; **PNG, JPEG, PDF and DOCX → PPTX** (the last two through `pdf_to_images`, as IDP-03 plans).
+
+### What we did
+
+```
+infrastructure/converters/
+  pptx_to_model.py       PythonPptxReader   PowerPoint -> model   (ported from ppt_to_office.py, without the AI step)
+  model_to_pptx.py       PythonPptxWriter   model -> PowerPoint   (rules from to_pptx.py)
+  pptx_from_images.py    PptxImageSlides    images -> PowerPoint, one slide per image
+domain/document_model.py + check_table_sizes, moved here from model_to_docx.py: Word and PowerPoint share the rule
+bootstrap.py             + the three converters
+pyproject.toml           python-pptx moved from dev to the workers extra; import rules cover `pptx`
+tests/                   31 new tests
+```
+
+### How the reader works
+
+| In the deck | In the model |
+|---|---|
+| A slide | A page named after the slide title, or "Slide 3" when it has none. The title isn't repeated as text |
+| Shapes | Read top to bottom in bands of a quarter inch, then left to right. A group's shapes are read in place of the group |
+| A paragraph with a bullet (its own `a:buChar` / `a:buAutoNum`, or from a body placeholder's layout) | `LIST_ITEM` at the paragraph's level |
+| Other text | `PARAGRAPH`, with alignment and bold |
+| A table | A table; merged cells read once; one header row when PowerPoint's "Header Row" option is on |
+| A chart | A caption ("Chart: Sales") and the chart's own data as a table: categories down, one column per series |
+| Pictures, SmartArt, speaker notes | Not read yet (see decisions) |
+
+### How the writer lays out slides
+
+A slide doesn't flow like a Word page, so nothing is squeezed onto it. Content that doesn't fit continues on a new slide:
+
+```
+page "Sales" (heading, 3 paragraphs, a 31-row table)
+  slide 1  "Sales"           the text (up to 10 blocks per slide)
+  slide 2  "Sales (cont.)"   table rows 1-14, under the header row
+  slide 3  "Sales (cont.)"   table rows 15-28, header repeated
+  slide 4  "Sales (cont.)"   table rows 29-30, header repeated
+```
+
+- **15 rows per slide**, header rows included (IDP-03 ch. 3.4). Cell text shrinks from 14 pt to 8 pt as tables get wider.
+- **16:9 slides.** python-pptx's template is 4:3, so the title box is moved to fit.
+- **Real bullets.** python-pptx has no bullet API for text boxes, so the writer adds `a:buChar` to the XML. LibreOffice renders it, which we checked by converting a generated deck to PDF.
+- The slide title is the page name, else a leading heading, else the file name (a CSV has no sheet name).
+
+**Images → slides:** each image is embedded byte for byte and fitted without cropping. The deck takes the first image's shape, so a portrait PDF gives portrait slides, within PowerPoint's 1–56 inch limits. A phone photo with an EXIF "rotate" tag is turned upright first, because PowerPoint ignores the tag.
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| Continuation slides instead of shrinking | IDP-03 ch. 3.4 | Shrunk text becomes unreadable and runs off the slide. The interns reached the same rule in `to_pptx.py` |
+| `check_table_sizes` moved to the domain | `DOM-01`, one rule in one place | It's a business rule ("too long for a document or a deck"), and two adapters need it. Importing one adapter from another would couple them |
+| Chart data as a table | IDP-00 ch. 5 ("slide tables") | The numbers behind a chart are data the user owns; a picture of the chart can't go into a sheet |
+| Pictures, SmartArt and notes left out | ch. 25 (small steps) | Images need a change to the model and its file (an image block plus the image files). That is its own step, not a side effect of this one |
+
+### Try it
+
+```bash
+cd services/conversion-service
+uv run pytest tests/unit/conversion/infrastructure/converters/test_pptx_to_model.py \
+              tests/unit/conversion/infrastructure/converters/test_model_to_pptx.py -v
+```
+
+### Lessons
+
+- **A round-trip test catches design surprises.** Writing a model to PowerPoint and reading it back gave two pages, not one, because text and a table go on separate slides. The behaviour was right; the test's expectation was wrong. Writing it down made the rule visible.
+- **python-pptx creates new objects on every access.** `slide.shapes.title is shape` is always false, so the reader compares `shape_id` instead.
+- **Placeholders hide their bullets in the layout.** A paragraph in a body placeholder has no bullet in its own XML but shows one on screen. The reader checks the paragraph first, then the placeholder type.
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| PPTX → DOCX "text + images" (IDP-03) | **Text and tables only for now.** Images need an image block in the model. **Open:** confirm with product whether images are needed for the MVP |
+| Hidden slides | Included. Backup slides often hold the data people want in a sheet |
+| Speaker notes | Not read. They aren't slide content; easy to add as captions if product wants them |
+| Wide tables on slides | Never refused; text shrinks to 8 pt. Splitting columns across slides is possible later |
+| PDF → PPTX "+ text boxes from the model" (IDP-03) | Images only for now. Text boxes over the picture come once the PDF reader keeps positions |
+
+---
+
+## Entry 7: PDF data routes (step 3c-3, 2026-10-22)
+
+**Goal:** digital PDF → Word, Excel and CSV without PyMuPDF or pdf2docx. This finishes step 3c: **every route in the matrix that needs no OCR now runs (36 of 47)**. The other 11 (scanned PDF or image → Word/Excel/CSV, and searchable PDF) wait for the OCR decision D-1.
+
+**One PR for 3c:** the Python lead chose to review 3c-1, 3c-2 and 3c-3 together, as one PR from `feat/conversion-service-document-model`. That's about 1,450 lines of source and 1,300 of tests, well above the ~400-line guide (ch. 25). The entries 5–7 split it into reviewable parts.
+
+### What we did
+
+```
+domain/route.py                       PDF_TABLES and PDF_TO_DOCX replaced by one step: PDF_TO_MODEL
+domain/route_planner.py               digital PDF -> DOCX now goes PDF_TO_MODEL -> MODEL_TO_DOCX
+infrastructure/converters/
+  pdf_to_model.py                     PdfplumberReader   digital PDF -> model (pdfplumber, MIT)
+bootstrap.py                          + the reader
+pyproject.toml                        + pdfplumber in the workers extra; import rules cover `pdfplumber`
+tests/                                12 new tests; "every non-OCR route can run" replaces a hand-picked list
+```
+
+**New library: pdfplumber 0.11** (MIT), with pdfminer.six (MIT), cryptography (Apache-2.0/BSD), charset-normalizer (MIT) and cffi (MIT). All permissive, so it fits the licensing decision.
+
+### Why the route changed
+
+IDP-03 plans `pdf_to_docx` with **pdf2docx**, which requires PyMuPDF (AGPL), so it's out. IDP-03 already sends **scanned** PDFs to Word through the document model (`ocr_to_model` → `model_to_docx`). Digital PDFs now take the same path with a different reader:
+
+```
+digital PDF ─ pdf_to_model (pdfplumber) ─┐
+scanned PDF ─ ocr_to_model (OCR, later) ─┼─ document model ─┬─ model_to_docx  (A)
+                                         │                  ├─ model_to_xlsx  (D)
+                                         │                  └─ model_to_csv   (D)
+```
+
+One reader serves Word, Excel and CSV. The fidelity ratings don't change: Word is A (layout rebuilt), sheets are D.
+
+### How the reader works
+
+| In the PDF | In the model |
+|---|---|
+| A page | An unnamed page (Word doesn't print "Page 3" headings; sheets are named "Table N") |
+| A ruled table (pdfplumber's "lines" strategy) | A table. The header row uses the same rule as CSV: words above numbers |
+| A box of one row or one column | Text, not a table: it's a frame around a notice |
+| Lines close together in the same size and weight | One paragraph |
+| A line clearly bigger than the body text (×1.15 or more) | A heading. The largest size in the document is level 1, the next is 2, and so on |
+| A line starting with a bullet or "2." / "b)" | A list item. Depth counts from the page's least-indented bullet, one level per quarter inch |
+| Lines in the middle of the page / ending at the right margin | Centred / right-aligned |
+
+The body size is the size most characters have, measured across the whole document, so heading levels stay the same from page to page. The PDF is opened with PDFium first, so a locked or damaged file gets the same error as in `pdf_to_images` (`CNV-422-PDF-001` / `-002`).
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| No pdf2docx, no PyMuPDF | licensing decision (Entry 4) | AGPL would oblige us to publish the service's source to its users |
+| Ruled tables only | IDP-03 ch. 3.4 ("camelot lattice for ruled tables") | pdfplumber's "text" strategy finds tables in ordinary paragraphs. A false table in a sheet is worse than a missed one |
+| One page at a time, `page.close()` after each | `FIL-07` | A 1,000-page PDF never holds every page's parsed characters in memory at once |
+| PDFium checks the file before pdfplumber | `ERR-05` | One error code for one problem, whichever converter meets it |
+| Real file tested through LibreOffice | `TST-09` (a bug fix starts with a failing test) | Synthetic PDFs use Helvetica. Real Word PDFs use Symbol-font bullets, which the synthetic test could never show. The test fails without the fix |
+
+### How it connects
+
+- **Scanned or not** is decided in step 4's PREPARE stage (`RouteRequest.pdf_is_scanned`). This reader assumes a text layer; a scanned PDF must never reach it. Step 4 needs a "has a text layer" check (pypdfium2 can count characters per page).
+- **`ConverterRegistry` coverage:** the test `test_this_build_can_run_every_route_that_needs_no_ocr` now proves the whole non-OCR matrix is wired, so a converter can't be forgotten in `bootstrap.py`.
+
+### Try it
+
+```bash
+cd services/conversion-service
+make check                                                 # 280 tests, 100 % coverage
+uv run pytest tests/unit/conversion/infrastructure/converters/test_pdf_to_model.py -v
+```
+
+### Lessons
+
+- **Test with a real file before calling it done.** All synthetic tests passed, then a Word file → LibreOffice → PDF → our reader lost every bullet. Word's bullets are drawn with the Symbol font, whose bullet is a private-area character (U+F0B7), not "•". The same file showed that Word indents first-level bullets, so measuring depth from the page margin made every list one level too deep. Both are fixed, and the real round trip is now a test.
+- **A coverage gap can mean the test doesn't test what you think.** The "frame, not a table" branch was never reached: pdfplumber doesn't report a single box as a table at all. The test passed for a different reason than intended. A one-column box does reach the branch.
+- **Tools can change what you write.** The editor turned `•` escapes into literal characters, and ruff flagged the literal en dash as ambiguous. Escapes are now written by a script, and the comment says which characters they are.
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| IDP-03's `pdf_tables` and `pdf_to_docx` | **Deviation:** replaced by one step, `pdf_to_model`, because pdf2docx is AGPL-bound. Tell whoever owns IDP-03 |
+| Unruled tables | Not detected (they come out as paragraphs). **Open:** if real customer PDFs need them, try pdfplumber's text strategy behind a stricter check, or the AI `table-repair` route |
+| Multi-column pages | Read top to bottom across columns, so two columns interleave. Acceptable for fidelity A; column detection is a later improvement |
+| Images in PDF → DOCX | Not carried over (same image-block question as PowerPoint) |
+| Hyphenated line ends | Kept as written ("inter- national"). Joining them risks breaking real hyphenated words |
