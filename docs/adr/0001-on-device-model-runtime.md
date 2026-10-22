@@ -9,6 +9,7 @@ IDP-04 Ch. 3.1 leaves the on-device small language model open (decision D-2, IDP
 `mobile/idp-android` already runs vision-language models through llama.cpp:
 
 - `llama-mtmd-cli` (one process per extraction) and `llama-server` (started once, reused over loopback HTTP), both shipped as renamed `.so` files and executed from `nativeLibraryDir` (`useLegacyPackaging = true`).
+- The shipped build is CPU-only: ARMv8.2 with dot-product and fp16, OpenMP, Vulkan off. A Vulkan GPU build was tried and dropped because it gave poor results.
 - Models tried so far: Qwen3-VL (2B and 4B), LFM2-VL-3B, MiniCPM-V 4.6, PaddleOCR-VL and VisionPsy-Nano, each with its own prompt, GBNF grammar and image-token settings. Measurements are in `docs/mobile-extraction/`.
 - ML Kit text recognition for the OCR-first path.
 

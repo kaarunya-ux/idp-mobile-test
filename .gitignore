@@ -70,3 +70,12 @@ services/conversions/output/
 mobile/idox-mobile/results/
 mobile/vlmtester/
 mobile/llama_dotprod_libs/
+
+# mobile/idp-android: native runtime, models, signing keys and APKs are local only
+mobile/idp-android/app/src/main/jniLibs/
+*.apk
+*.aab
+*.keystore
+*.jks
+.idea/
+*.hprof
