@@ -6,7 +6,8 @@ import com.modeltesting.vlmtester.ExtractionRules.str
 
 /** Checks on an Indian driving licence record (pure; see ExtractionRules). */
 object DlRules {
-    fun validate(obj: org.json.JSONObject, currentYear: Int): String {
+    /** [compact] grades only the five fields of the compact profile (see ModelProfiles.useCompactDocument). */
+    fun validate(obj: org.json.JSONObject, currentYear: Int, compact: Boolean = false): String {
         // Field list corrected 2026-09-17 to match a real Indian DL: license_number,
         // name, dob, address (its PIN code is embedded in this text, not a separate
         // field), issue_date, validity_nt/validity_tr (split from a single expiry_date
@@ -14,29 +15,36 @@ object DlRules {
         // vehicle categories; validity_tr is commonly blank), blood_group (commonly
         // blank), organ_donor (Y/N). gender, a standalone pincode field, and
         // issuing_authority were removed entirely - confirmed not present on this card.
-        val fields = listOf(
-            "license_number",
-            "name",
-            "dob",
-            "address",
-            "issue_date",
-            "validity_nt",
-            "organ_donor",
-            "vehicle_classes"
-        )
-        val oftenNullFields = listOf("validity_tr", "blood_group")
+        val fields = if (compact) {
+            listOf("license_number", "name", "dob", "issue_date", "validity_nt")
+        } else {
+            listOf(
+                "license_number",
+                "name",
+                "dob",
+                "address",
+                "issue_date",
+                "validity_nt",
+                "organ_donor",
+                "vehicle_classes"
+            )
+        }
+        val oftenNullFields = if (compact) emptyList() else listOf("validity_tr", "blood_group")
         val problems = mutableListOf<String>()
         val notes = mutableListOf<String>()
 
         if (str(obj, "document_type") != "dl") problems += "document_type is not 'dl'"
 
         checkDateShape(problems, notes, obj, "dob", 1900, currentYear)
-        checkDateShape(problems, notes, obj, "issue_date", 1990, currentYear)
+        // Issue dates go back well before 1990 (an Odisha licence issued 03-09-1980 is still valid),
+        // so the lower bound is 1950; validity dates keep 1990.
+        checkDateShape(problems, notes, obj, "issue_date", 1950, currentYear)
         checkDateShape(problems, notes, obj, "validity_nt", 1990, currentYear + 20)
         checkDateShape(problems, notes, obj, "validity_tr", 1990, currentYear + 20)
 
         checkDlValidityDates(obj, problems, notes)
         checkDlAddress(obj, problems)
+        checkLicenseLabel(obj, problems)
 
         // validity_tr and blood_group are commonly blank on real cards - excluded from
         // the grading ratio via oftenNullFields. Both are also known-fabrication-risk
@@ -74,6 +82,17 @@ object DlRules {
         if (validityNtRaw != null && validityTrRaw != null && validityNtRaw == validityTrRaw) {
             notes += "note: validity_nt and validity_tr are identical ('$validityNtRaw') - " +
                 "possible, but worth a manual glance since these cover different vehicle categories"
+        }
+    }
+
+    // Found live 2026-10-23: the model returned "DL NO KL21 2019002" and "DL NO MH03 200800 " - the printed
+    // label copied into the value, and the number cut short. A real number never starts with the
+    // words DL NO (Delhi numbers start "DL-04..." with a dash and a digit, which this does not match).
+    private fun checkLicenseLabel(obj: org.json.JSONObject, problems: MutableList<String>) {
+        val number = str(obj, "license_number") ?: return
+        if (Regex("^(DL|LICEN[CS]E)\\.?\\s*NO\\b", RegexOption.IGNORE_CASE).containsMatchIn(number)) {
+            problems += "license_number '$number' starts with the label 'DL No', not the number - " +
+                "the label was copied into the value and the number may be cut short"
         }
     }
 

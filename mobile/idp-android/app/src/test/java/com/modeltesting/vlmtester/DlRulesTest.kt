@@ -117,4 +117,70 @@ class DlRulesTest {
         val different = validDl().put("validity_tr", "09/05/2040")
         assertFalse(DlRules.validate(different, year).contains("validity_nt and validity_tr are identical"))
     }
+
+    // --- compact profile -----------------------------------------------------------
+
+    private fun compactDl() = json(
+        "document_type" to "dl",
+        "license_number" to "MH12 20190012345",
+        "name" to "ASHA RAO",
+        "dob" to "01/01/1990",
+        "issue_date" to "10/05/2019",
+        "validity_nt" to "09/05/2039"
+    )
+
+    @Test
+    fun `validateDl in compact mode grades the five compact fields HIGH`() {
+        val report = DlRules.validate(compactDl(), year, compact = true)
+        assertTrue(report, report.startsWith("DL check: HIGH - 5/5 fields read"))
+        assertFalse(report.contains("often blank"))
+        assertFalse(report.contains("  - "))
+    }
+
+    @Test
+    fun `validateDl without compact still expects the full field list`() {
+        val report = DlRules.validate(compactDl(), year)
+        assertTrue(report, report.startsWith("DL check: LOW - 5/8 fields read"))
+    }
+
+    @Test
+    fun `validateDl in compact mode still flags a bad date`() {
+        val report = DlRules.validate(compactDl().put("dob", "32/01/1990"), year, compact = true)
+        assertTrue(report, report.contains("dob day out of range"))
+        assertTrue(report, report.startsWith("DL check: LOW"))
+    }
+
+    // --- licence number label, issue year ------------------------------------------
+
+    @Test
+    fun `validateDl flags a licence number that starts with the DL No label`() {
+        val labelled = listOf("DL NO KL21 2019002", "DL NO MH03 200800 ", "dl no MH03 20080022135", "DL.NO KL21 2019002")
+        for (bad in labelled) {
+            val report = DlRules.validate(validDl().put("license_number", bad), year)
+            assertTrue(report, report.contains("starts with the label 'DL No'"))
+            assertTrue(report, report.startsWith("DL check: LOW"))
+        }
+    }
+
+    @Test
+    fun `validateDl accepts real licence numbers including the Delhi format with a dash`() {
+        for (good in listOf("DL-0420110149646", "KL21 20190023531", "MH02 20120037319", "OD15 19800170087")) {
+            val report = DlRules.validate(validDl().put("license_number", good), year)
+            assertFalse(report, report.contains("starts with the label"))
+        }
+    }
+
+    @Test
+    fun `validateDl accepts an issue date in 1980 and flags one before 1950`() {
+        val ok = DlRules.validate(validDl().put("issue_date", "03-09-1980"), year)
+        assertFalse(ok, ok.contains("issue_date year"))
+        val bad = DlRules.validate(validDl().put("issue_date", "03-09-1949"), year)
+        assertTrue(bad, bad.contains("issue_date year 1949 implausible"))
+    }
+
+    @Test
+    fun `validateDl still flags a validity date before 1990`() {
+        val report = DlRules.validate(validDl().put("validity_nt", "01-01-1985"), year)
+        assertTrue(report, report.contains("validity_nt year 1985 implausible"))
+    }
 }

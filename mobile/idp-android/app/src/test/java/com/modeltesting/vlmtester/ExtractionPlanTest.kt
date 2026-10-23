@@ -74,7 +74,87 @@ class ExtractionPlanTest {
             assertEquals("pan", plan.validationDocumentType)
             assertFalse(plan.useSystemPrompt)
             assertEquals(200, plan.maxTokens)
+            assertEquals(500, plan.maxEdge)
         }
+    }
+
+    @Test
+    fun `LFM2 with aadhaar, dl or passport gets a shrunk image and the compact prompt and grammar`() {
+        for (docType in listOf("aadhaar", "dl", "passport")) {
+            val plan = plan(docType, lfm2)
+            assertEquals(docType, ImagePrep.LFM2, plan.imagePrep)
+            assertEquals(docType, 560, plan.maxEdge)
+            assertEquals(docType, 1024, plan.tokenCap)
+            assertEquals(docType, "prompts/user_${docType}_compact.v1.md", plan.promptAsset)
+            assertEquals(docType, "grammars/${docType}_compact.gbnf", plan.grammarAsset)
+            assertEquals(docType, docType, plan.validationDocumentType)
+            assertEquals(docType, 512, plan.maxTokens)
+            assertTrue(docType, plan.compact)
+            assertTrue(docType, plan.useGrammar)
+            assertFalse(docType, plan.useSystemPrompt)
+        }
+    }
+
+    @Test
+    fun `MiniCPM and Qwen get the compact prompt for dl and passport, MiniCPM also for aadhaar`() {
+        for (model in listOf(miniCpm, qwen4b, qwen2b)) {
+            for (docType in listOf("dl", "passport")) {
+                val plan = plan(docType, model)
+                assertTrue("$model $docType", plan.compact)
+                assertEquals("prompts/user_${docType}_compact.v1.md", plan.promptAsset)
+                assertEquals("grammars/${docType}_compact.gbnf", plan.grammarAsset)
+                assertEquals(docType, plan.validationDocumentType)
+                assertFalse("$model $docType", plan.useSystemPrompt)
+                assertEquals(1024, plan.tokenCap)
+            }
+        }
+        val miniAadhaar = plan("aadhaar", miniCpm)
+        assertTrue(miniAadhaar.compact)
+        assertEquals("prompts/user_aadhaar_compact.v1.md", miniAadhaar.promptAsset)
+        assertEquals("grammars/aadhaar_compact.gbnf", miniAadhaar.grammarAsset)
+        assertEquals(ImagePrep.MINICPM, miniAadhaar.imagePrep)
+        assertEquals(ImagePrep.QWEN, plan("dl", qwen4b).imagePrep)
+    }
+
+    @Test
+    fun `Qwen keeps its own aadhaar profile and other families and documents keep the full prompt`() {
+        val qwenAadhaar = plan("aadhaar", qwen4b)
+        assertFalse(qwenAadhaar.compact)
+        assertEquals("prompts/user_aadhaar_qwen.v1.md", qwenAadhaar.promptAsset)
+        assertEquals("grammars/aadhaar_qwen.gbnf", qwenAadhaar.grammarAsset)
+        for (docType in listOf("aadhaar", "dl", "passport")) {
+            val plan = plan(docType, other)
+            assertFalse(docType, plan.compact)
+            assertEquals("prompts/user_$docType.v1.md", plan.promptAsset)
+            assertTrue(docType, plan.useSystemPrompt)
+            assertNull(docType, plan.grammarAsset)
+        }
+        for (model in listOf(lfm2, miniCpm, qwen4b)) {
+            for (docType in listOf("pan", "pan_full", "tt_dl", "tt_passport", "pan_crop")) {
+                assertFalse("$model $docType", plan(docType, model).compact)
+            }
+        }
+    }
+
+    @Test
+    fun `LFM2 with other document types still gets the image as it is`() {
+        for (docType in listOf("pan", "tt_dl", "tt_passport", "tt_id_front", "pan_crop")) {
+            val plan = plan(docType, lfm2)
+            assertEquals(docType, ImagePrep.NONE, plan.imagePrep)
+            assertEquals(docType, 0, plan.maxEdge)
+        }
+    }
+
+    @Test
+    fun `only LFM2 plans carry a longest edge and the other models keep their image preparation`() {
+        for (docType in listOf("aadhaar", "dl", "passport", "pan_full")) {
+            assertEquals(docType, 0, plan(docType, qwen4b).maxEdge)
+            assertEquals(docType, 0, plan(docType, miniCpm).maxEdge)
+            assertEquals(docType, 0, plan(docType, other).maxEdge)
+        }
+        assertEquals(ImagePrep.QWEN, plan("dl", qwen4b).imagePrep)
+        assertEquals(ImagePrep.MINICPM, plan("dl", miniCpm).imagePrep)
+        assertEquals(ImagePrep.NONE, plan("dl", other).imagePrep)
     }
 
     @Test
@@ -118,7 +198,7 @@ class ExtractionPlanTest {
     @Test
     fun `other document types use the default prompt, a cap of 1024 and the full output budget`() {
         for (docType in listOf("dl", "passport", "pan", "aadhaar")) {
-            val model = if (docType == "aadhaar") other else qwen4b
+            val model = if (docType in listOf("aadhaar", "dl", "passport")) other else qwen4b
             val plan = plan(docType, model)
             assertEquals("prompts/user_$docType.v1.md", plan.promptAsset)
             assertEquals(1024, plan.tokenCap)

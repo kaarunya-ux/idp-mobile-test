@@ -6,15 +6,20 @@ import com.modeltesting.vlmtester.ExtractionRules.str
 
 /** Checks on the personal-particulars page of an Indian passport (pure; see ExtractionRules). */
 object PassportRules {
-    fun validate(obj: org.json.JSONObject, currentYear: Int): String {
+    /** [compact] grades only the seven fields of the compact profile (see ModelProfiles.useCompactDocument). */
+    fun validate(obj: org.json.JSONObject, currentYear: Int, compact: Boolean = false): String {
         // father_name dropped: modern Indian passports don't print it on this page
         // (removed from the printed booklet after a 2018 government notification), and
         // asking for a field that isn't there is exactly the pattern that made the model
         // fabricate a PAN gender and an Aadhaar issue date earlier this session.
-        val fields = listOf(
-            "name", "dob", "gender", "place_of_birth",
-            "passport_number", "issue_date", "expiry_date", "issuing_authority", "nationality"
-        )
+        val fields = if (compact) {
+            listOf("name", "dob", "gender", "place_of_birth", "passport_number", "issue_date", "expiry_date")
+        } else {
+            listOf(
+                "name", "dob", "gender", "place_of_birth",
+                "passport_number", "issue_date", "expiry_date", "issuing_authority", "nationality"
+            )
+        }
         val problems = mutableListOf<String>()
         val notes = mutableListOf<String>()
 

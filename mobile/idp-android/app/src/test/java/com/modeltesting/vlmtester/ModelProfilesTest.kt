@@ -58,6 +58,38 @@ class ModelProfilesTest {
     }
 
     @Test
+    fun `uses the compact prompt for dl and passport with the three tested models and for aadhaar except with Qwen`() {
+        val lfm2 = "LFM2-VL-3B-Q4_K_M.gguf"
+        val mini = "minicpm-v-4.6-q4_k_m.gguf"
+        val qwen = "qwen3vl-2b-instruct-q4_k_m.gguf"
+        for (model in listOf(lfm2, mini, qwen)) {
+            assertTrue(model, ModelProfiles.useCompactDocument("dl", model))
+            assertTrue(model, ModelProfiles.useCompactDocument("passport", model))
+        }
+        assertTrue(ModelProfiles.useCompactDocument("aadhaar", lfm2))
+        assertTrue(ModelProfiles.useCompactDocument("aadhaar", mini))
+        assertFalse(ModelProfiles.useCompactDocument("aadhaar", qwen))
+        for (docType in listOf("dl", "passport", "aadhaar")) {
+            assertFalse(docType, ModelProfiles.useCompactDocument(docType, "VisionPsy-Nano-Q5_K_M.gguf"))
+        }
+        for (docType in listOf("pan", "pan_full", "tt_dl", "tt_passport", "tt_id_front", "pan_crop")) {
+            assertFalse(docType, ModelProfiles.useCompactDocument(docType, lfm2))
+        }
+    }
+
+    @Test
+    fun `shrinks the LFM2 image only for aadhaar, dl and passport with an LFM2 model`() {
+        for (docType in listOf("aadhaar", "dl", "passport")) {
+            assertTrue(docType, ModelProfiles.useLfm2DocumentResize(docType, "LFM2-VL-3B-Q4_K_M.gguf"))
+            assertFalse(docType, ModelProfiles.useLfm2DocumentResize(docType, "qwen3-vl-4b.gguf"))
+            assertFalse(docType, ModelProfiles.useLfm2DocumentResize(docType, "minicpm-v-4.6.gguf"))
+        }
+        for (docType in listOf("pan_full", "pan", "tt_dl", "pan_crop", "aadhaar_stage1")) {
+            assertFalse(docType, ModelProfiles.useLfm2DocumentResize(docType, "LFM2-VL-3B-Q4_K_M.gguf"))
+        }
+    }
+
+    @Test
     fun `selects the Qwen Aadhaar profile only for aadhaar with a Qwen model`() {
         assertTrue(ModelProfiles.useQwenAadhaarProfile("aadhaar", "qwen3-vl-2b.gguf"))
         assertFalse(ModelProfiles.useQwenAadhaarProfile("aadhaar_stage1", "qwen3-vl-2b.gguf"))
@@ -86,6 +118,8 @@ class ModelProfilesTest {
     @Test
     fun `keeps the measured profile constants`() {
         assertEquals(128, ModelProfiles.LFM2_PAN_IMAGE_TOKEN_CAP)
+        assertEquals(500, ModelProfiles.LFM2_PAN_MAX_EDGE)
+        assertEquals(560, ModelProfiles.LFM2_DOCUMENT_MAX_EDGE)
         assertEquals(256, ModelProfiles.QWEN_PAN_IMAGE_TOKEN_CAP)
         assertEquals(480, ModelProfiles.QWEN_PAN_CARD_EDGE)
         assertEquals(1000, ModelProfiles.QWEN_PAN_CROP_MAX_EDGE)

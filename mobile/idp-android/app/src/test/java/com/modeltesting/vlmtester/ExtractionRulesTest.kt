@@ -178,4 +178,30 @@ class ExtractionRulesTest {
         assertEquals("pan", result.getString("document_type"))
         assertEquals("A", result.getString("name"))
     }
+
+    // --- days in the month ---------------------------------------------------------
+
+    @Test
+    fun `checkDateShape flags a day that does not exist in the month`() {
+        assertTrue(checkDate("31/09/2001").first.contains("dob day 31 does not exist in month 9 of 2001"))
+        assertTrue(checkDate("31/04/1999").first.contains("dob day 31 does not exist in month 4 of 1999"))
+        assertTrue(checkDate("30/02/2000").first.contains("dob day 30 does not exist in month 2 of 2000"))
+    }
+
+    @Test
+    fun `checkDateShape knows leap years`() {
+        assertTrue(checkDate("29/02/2000").first.isEmpty())
+        assertTrue(checkDate("29/02/2004").first.isEmpty())
+        assertTrue(checkDate("29/02/2001").first.contains("dob day 29 does not exist in month 2 of 2001"))
+        assertTrue(checkDate("29/02/1900").first.contains("dob day 29 does not exist in month 2 of 1900"))
+    }
+
+    @Test
+    fun `checkDateShape accepts the last day of every month`() {
+        val last = listOf(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+        for ((index, day) in last.withIndex()) {
+            val month = (index + 1).toString().padStart(2, '0')
+            assertTrue("$day/$month", checkDate("$day/$month/2001").first.isEmpty())
+        }
+    }
 }

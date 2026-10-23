@@ -4,7 +4,7 @@ Where the app stands against the IDP standards, rule by rule. Status as of 2026-
 
 **How to read it.** *Met* has evidence you can run. *Partly* says what is missing. *Not met* has a plan or an ADR. *Held* waits on a decision from the team lead (the on-device model direction). *N/A today* means the rule is about something this app does not have yet (accounts, a database, a server connection). Nothing here has run on a phone; "Met" means built, linted and unit-tested on a Mac.
 
-Evidence command: `mobile/idp-android/scripts/check.sh` (227 unit tests, ktlint, detekt, Android Lint, debug and release builds, no forbidden files tracked).
+Evidence command: `mobile/idp-android/scripts/check.sh` (231 unit tests, ktlint, detekt, Android Lint, debug and release builds, no forbidden files tracked).
 
 Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules apply to any code that calls a model; the style and size limits are applied to Kotlin by analogy, see ADR 0003), the Java Standard Ch. 33–34 (git, ADRs, documentation, which the Python Standard adopts).
 
@@ -18,7 +18,7 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 | IDP-04 3.1 | Kotlin 2.x | Not met | Kotlin 1.9.24 |
 | IDP-04 3.1 | min SDK 26 | Not met | 28, because the native libraries are built for android-28. ADR 0002 row 2 |
 | PKG-01 | No `utils` / `helpers` / `common` files | Met | None exist |
-| PY-11 / Ch. 27.2 | Files ≤ 400 lines | Partly | All 19 extracted files are under 400. `MainActivity.kt` is 1,779 |
+| PY-11 / Ch. 27.2 | Files ≤ 400 lines | Partly | All 19 extracted files are under 400. `MainActivity.kt` is 1,781 |
 | PY-11 / Ch. 27.2 | Functions ≤ 50 lines, complexity ≤ 10, ≤ 7 parameters | Partly | Enforced by detekt on the 19 extracted files. `MainActivity.kt` is not checked yet |
 | DOM-01 | Domain code has no framework or I/O imports | Met | The `*Rules`, `ModelProfiles`, `ImageSizing`, `ModelFiles`, `ProcessStats`, `OutputParser` files import only `org.json` (the platform JSON) and the Kotlin library |
 | DOM-05 | Time and randomness injected, never read inside the domain | Met | The calendar year is a parameter in every rule; `RunLog` takes the date as an argument |
@@ -36,7 +36,7 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 | 3.8 | Nothing leaves the phone through backup or device transfer | Met | `allowBackup="false"` and `data_extraction_rules.xml` exclude the app's files, database, preferences and external files from cloud backup and device-to-device transfer. Not yet seen on a phone |
 | CFG-03 | No secrets in git | Met | `*.jks`, `*.keystore`, `local.properties`, `.env` ignored; the check script fails if any is tracked |
 | Release | Signed release build | Not met | The release build is minified and unsigned. The standards do not describe Android signing or distribution, so no signing is added |
-| BLD-02, DPL-01/02 | Pinned, reproducible builds; never "latest" | Partly | `native/build_llama_dotprod.sh` is pinned to llama.cpp commit 000bee5 (found inside the shipped libraries), NDK and CMake versions fixed, no machine-specific paths. Tested with stand-in tools only; a real compile has not been run here. **Found 2026-10-22:** the "dist_dot" libraries built on another machine from this commit tile LFM2 images and make LFM2 about 3x slower than the old libraries (handoff section 5); until the team lead picks a fix the build is not reproducible to the old speed. The Gradle dependencies use fixed versions |
+| BLD-02, DPL-01/02 | Pinned, reproducible builds; never "latest" | Partly | `native/build_llama_dotprod.sh` is pinned to llama.cpp commit 000bee5 (found inside the shipped libraries), NDK and CMake versions fixed, no machine-specific paths. Tested with stand-in tools only; a real compile has not been run here. **Found 2026-10-22:** the "dist_dot" libraries built on another machine from this commit tile LFM2 images and make LFM2 about 3x slower than the old libraries (handoff section 5); until the team lead picks a fix the build is not reproducible to the old speed. The app now shrinks LFM2 input images (ADR 0007, option B), which restores LFM2 speed in command-line tests; not yet run in the app. The Gradle dependencies use fixed versions |
 
 ## 3. Model calling (Python Standard Ch. 18, `[ML]`)
 
@@ -63,9 +63,9 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 
 | Rule | Asks for | Status | Evidence / plan |
 |---|---|---|---|
-| 3.9 | Unit tests for rules | Met | 227 tests; planted-bug checks on each new group |
+| 3.9 | Unit tests for rules | Met | 231 tests; planted-bug checks on each new group |
 | TST-10 | No `sleep` in tests | Met | |
-| 21.2, 27.2 | Coverage ≥ 85% of lines on domain code, ≥ 70% of branches | Met | JaCoCo (ADR 0006): 99.9% of lines and 90.1% of branches of the extracted logic; `check.sh` fails below the floors. `MainActivity.kt` is not measured (needs a phone) |
+| 21.2, 27.2 | Coverage ≥ 85% of lines on domain code, ≥ 70% of branches | Met | JaCoCo (ADR 0006): 99.7% of lines and 90.3% of branches of the extracted logic; `check.sh` fails below the floors. `MainActivity.kt` is not measured (needs a phone) |
 | 3.9 | View-model, repository, Room, WorkManager, Compose tests | N/A today | Those layers do not exist |
 | 3.9 | Quality-gate tests with golden images | N/A today | No quality gate |
 | 3.9 | Macrobenchmark for startup and scrolling | Not met | |

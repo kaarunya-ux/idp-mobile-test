@@ -1,0 +1,6 @@
+root ::= "{\"passport_number\": " pn ", \"name\": " nm ", \"dob\": " dt ", \"gender\": " gen ", \"place_of_birth\": " pl ", \"issue_date\": " dt ", \"expiry_date\": " dt "}"
+pn ::= "\"" [A-Z] [0-9]{7} "\"" | "null"
+nm ::= "\"" [A-Za-z] [A-Za-z .'-]{1,48} "\"" | "null"
+pl ::= "\"" [A-Za-z] [A-Za-z ,.'-]{1,48} "\"" | "null"
+dt ::= "\"" [0-9] [0-9] [-/] [0-9] [0-9] [-/] [0-9] [0-9] [0-9] [0-9] "\"" | "null"
+gen ::= "\"M\"" | "\"F\"" | "null"

@@ -177,7 +177,13 @@ class MainActivity : AppCompatActivity() {
                 }
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
             }
-        binding.switchServerMode.setOnCheckedChangeListener { _, _ -> warmUpQwenServer() }
+        binding.switchServerMode.setOnCheckedChangeListener { _, serverMode ->
+            // A warm server keeps the whole model in memory (about 2.2 GB for LFM2-VL). Turning server
+            // mode off must not leave it running; on its own thread because a start in progress holds
+            // the server lock for its whole duration.
+            if (!serverMode && !binding.btnStop.isEnabled) Thread { stopServer() }.start()
+            warmUpQwenServer()
+        }
         refreshDeviceInfo()
         setupThreadSlider()
         setupGpuSwitch()
@@ -554,11 +560,13 @@ class MainActivity : AppCompatActivity() {
         return outFile
     }
 
-    /** LFM2-VL: the model resizes to its own ~131,072-pixel budget (128 tokens) anyway, so a
-     *  12MP camera photo only costs extra JPEG decode and upload time. 1280px is well above
-     *  what it keeps (about 460x290 for a card), so this never removes detail it would use. */
-    private fun downscaleForLfm2(imageFile: File): File =
-        downscaleForMiniCpm(imageFile, 1280, "lfm2_resized.jpg")
+    /** LFM2-VL: the longest edge comes from the plan (ModelProfiles.LFM2_PAN_MAX_EDGE for pan_full,
+     *  LFM2_DOCUMENT_MAX_EDGE for aadhaar, dl and passport). It used to be 1280 on the assumption
+     *  that the model shrinks the image itself; the libraries built from llama.cpp 000bee5 tile a
+     *  large image instead, which made LFM2 about 3x slower (see the comments on those constants
+     *  and docs/mobile-extraction/ON_DEVICE_LATENCY_AND_ACCURACY_FINDINGS.md). */
+    private fun downscaleForLfm2(imageFile: File, longestEdge: Int): File =
+        downscaleForMiniCpm(imageFile, longestEdge, "lfm2_resized.jpg")
 
     /** Qwen3-VL: the model resizes every image to its own pixel budget (tokenCap x 32x32 px,
      *  since patch 16 x 2x2 merge) however large it arrives, so a camera photo only adds JPEG
@@ -1229,6 +1237,9 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
+                // A one-shot scan loads the whole model again; a warm server left from an earlier scan
+                // would hold a second copy (about 2.2 GB for LFM2-VL) and the phone starts swapping.
+                if (!useServerMode) stopServer()
                 val modelPath = File(modelsDir(), modelName).absolutePath
                 val mmprojPath = File(modelsDir(), mmprojName).absolutePath
                 val mode = "$docType | " +
@@ -1287,7 +1298,7 @@ class MainActivity : AppCompatActivity() {
                     val passImageFile = when (plan.imagePrep) {
                         ExtractionPlan.ImagePrep.CANVAS -> buildFieldCanvasFile(imageFile)
                         ExtractionPlan.ImagePrep.MINICPM -> downscaleForMiniCpm(imageFile)
-                        ExtractionPlan.ImagePrep.LFM2 -> downscaleForLfm2(imageFile)
+                        ExtractionPlan.ImagePrep.LFM2 -> downscaleForLfm2(imageFile, plan.maxEdge)
                         ExtractionPlan.ImagePrep.QWEN_PAN -> downscaleForQwenPan(imageFile, cap)
                         ExtractionPlan.ImagePrep.QWEN -> downscaleForQwen(imageFile, cap)
                         ExtractionPlan.ImagePrep.NONE -> imageFile
@@ -1317,7 +1328,8 @@ class MainActivity : AppCompatActivity() {
                     val cleaned = extractAnswer(outcome.rawOutput)
                     val report = if (plan.isCrop) validateCropField(docType, cleaned)
                         else validateExtraction(docType,
-                            plan.validationDocumentType?.let { withDocumentType(cleaned, it) } ?: cleaned)
+                            plan.validationDocumentType?.let { withDocumentType(cleaned, it) } ?: cleaned,
+                            plan.compact)
                     val runNumber = nextRunNumber()
                     // Header is formatted on its own and the model output is concatenated
                     // afterwards, rather than interpolated into the same format string.
@@ -1472,16 +1484,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun validateCropField(docType: String, text: String): String = PanRules.validateCrop(docType, text)
 
-    private fun validateExtraction(docType: String, text: String): String {
+    private fun validateExtraction(docType: String, text: String, compact: Boolean = false): String {
         val (obj, err) = parseSide(docType.uppercase(), text)
         if (err != null) return err
 
         return when (docType) {
             "pan" -> validatePan(obj!!)
             "pan_full" -> validatePan(obj!!)
-            "aadhaar" -> validateAadhaar(obj!!)
-            "passport" -> validatePassport(obj!!)
-            "dl" -> validateDl(obj!!)
+            "aadhaar" -> validateAadhaar(obj!!, compact)
+            "passport" -> validatePassport(obj!!, compact)
+            "dl" -> validateDl(obj!!, compact)
             "tt_passport" -> validateTtPassport(obj!!)
             "tt_dl" -> validateTtDl(obj!!)
             "pan_stage1" -> validateStage1Pan(obj!!)
@@ -1509,16 +1521,16 @@ class MainActivity : AppCompatActivity() {
     private fun validatePan(obj: org.json.JSONObject): String =
         PanRules.validate(obj, currentYear())
 
-    private fun validateAadhaar(obj: org.json.JSONObject): String =
-        AadhaarRules.validate(obj, currentYear())
+    private fun validateAadhaar(obj: org.json.JSONObject, compact: Boolean = false): String =
+        AadhaarRules.validate(obj, currentYear(), compact)
 
     private fun validateStage1Pan(obj: org.json.JSONObject): String = Stage1Rules.validatePan(obj, currentYear())
 
     private fun validateStage1Aadhaar(obj: org.json.JSONObject): String =
         Stage1Rules.validateAadhaar(obj, currentYear())
 
-    private fun validatePassport(obj: org.json.JSONObject): String =
-        PassportRules.validate(obj, currentYear())
+    private fun validatePassport(obj: org.json.JSONObject, compact: Boolean = false): String =
+        PassportRules.validate(obj, currentYear(), compact)
 
     private fun validateTtPassport(obj: org.json.JSONObject): String {
         // Trinidad & Tobago passport. Field list corrected 2026-09-16 to match what is
@@ -1694,8 +1706,8 @@ class MainActivity : AppCompatActivity() {
         return coverageReport("TT National ID", merged, coreFields, problems, notes, oftenNullFields)
     }
 
-    private fun validateDl(obj: org.json.JSONObject): String =
-        DlRules.validate(obj, currentYear())
+    private fun validateDl(obj: org.json.JSONObject, compact: Boolean = false): String =
+        DlRules.validate(obj, currentYear(), compact)
 
     private class MonitorHandle { @Volatile var stop = false }
 

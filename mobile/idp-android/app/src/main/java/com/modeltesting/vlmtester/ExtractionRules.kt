@@ -65,8 +65,19 @@ object ExtractionRules {
         val (y, mo, d) = iso.split("-").map { it.toInt() }
         if (d !in 1..31) problems += "$key day out of range"
         if (mo !in 1..12) problems += "$key month out of range"
+        if (d in 1..31 && mo in 1..12 && d > daysInMonth(y, mo)) {
+            problems += "$key day $d does not exist in month $mo of $y"
+        }
         if (y !in minYear..maxYear) problems += "$key year $y implausible"
         if (problems.none { it.startsWith(key) }) notes += "$key -> $iso"
+    }
+
+    /** Days in [month] (1 to 12) of [year], leap years included. Found 2026-10-23: a PAN date of
+     *  birth read as 31/09/2001 (the card says 31/01/2001) graded HIGH because only 1..31 was checked. */
+    private fun daysInMonth(year: Int, month: Int): Int = when (month) {
+        2 -> if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) 29 else 28
+        4, 6, 9, 11 -> 30
+        else -> 31
     }
 
     // Verhoeff checksum tables - the algorithm UIDAI uses for the 12th (check) digit of

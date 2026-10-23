@@ -173,4 +173,36 @@ class AadhaarRulesTest {
         val obj = validAadhaar().put("address", "EID 1234/56789 Pune").put("pincode", JSONObject.NULL)
         assertTrue(AadhaarRules.validate(obj, year).contains("references the enrollment-number field"))
     }
+
+    // --- compact profile -----------------------------------------------------------
+
+    private fun compactAadhaar() = json(
+        "document_type" to "aadhaar",
+        "name" to "ASHA RAO",
+        "dob" to "01/01/1990",
+        "gender" to "F",
+        "aadhaar_number" to "2345 6789 0124"
+    )
+
+    @Test
+    fun `validateAadhaar in compact mode grades the four compact fields HIGH`() {
+        val report = AadhaarRules.validate(compactAadhaar(), year, compact = true)
+        assertTrue(report, report.startsWith("Aadhaar check: HIGH - 4/4 fields read"))
+        assertTrue(report.contains("aadhaar_number -> 234567890124"))
+        assertFalse(report.contains("  - "))
+    }
+
+    @Test
+    fun `validateAadhaar without compact still expects the address and pincode`() {
+        val report = AadhaarRules.validate(compactAadhaar(), year)
+        assertTrue(report, report.startsWith("Aadhaar check: LOW - 4/6 fields read"))
+    }
+
+    @Test
+    fun `validateAadhaar in compact mode still checks the Verhoeff checksum`() {
+        val bad = compactAadhaar().put("aadhaar_number", "2345 6789 0125")
+        val report = AadhaarRules.validate(bad, year, compact = true)
+        assertTrue(report, report.contains("fails the Aadhaar checksum"))
+        assertTrue(report, report.startsWith("Aadhaar check: LOW"))
+    }
 }

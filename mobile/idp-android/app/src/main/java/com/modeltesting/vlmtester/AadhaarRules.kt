@@ -7,12 +7,13 @@ import com.modeltesting.vlmtester.ExtractionRules.verhoeffValid
 
 /** Checks on an Aadhaar card record (pure; see ExtractionRules). */
 object AadhaarRules {
-    fun validate(obj: org.json.JSONObject, currentYear: Int): String {
+    /** [compact] grades only name, dob, gender and the number, as when the address is declared absent. */
+    fun validate(obj: org.json.JSONObject, currentYear: Int, compact: Boolean = false): String {
         // Qwen profile only: address_visible=false means the card genuinely prints no address, so
         // address/pincode are not misses - leave them out of the graded fields (shown for
         // information instead) so a front-only card can grade HIGH.
         val addressDeclaredAbsent = obj.has("address_visible") && !obj.optBoolean("address_visible", false)
-        val fields = if (addressDeclaredAbsent) {
+        val fields = if (addressDeclaredAbsent || compact) {
             listOf("name", "dob", "gender", "aadhaar_number")
         } else {
             listOf("name", "dob", "gender", "aadhaar_number", "address", "pincode")

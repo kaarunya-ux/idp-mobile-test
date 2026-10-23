@@ -48,6 +48,53 @@ object ModelProfiles {
      *  LFM2 and would add ~0.15s per extra token (~+19s). */
     const val LFM2_PAN_IMAGE_TOKEN_CAP = 128
 
+    /** The Indian identity documents, besides PAN, whose image is shrunk before LFM2-VL reads it. */
+    private val lfm2ResizedDocuments = setOf("aadhaar", "dl", "passport")
+
+    /** LFM2-VL on aadhaar, dl or passport: the image is shrunk to [LFM2_DOCUMENT_MAX_EDGE]. */
+    fun useLfm2DocumentResize(docType: String, fileName: String): Boolean =
+        isLfm2(fileName) && docType in lfm2ResizedDocuments
+
+    /** Longest image edge sent to LFM2-VL for pan_full. llama.cpp 000bee5 (upstream #27057) cuts
+     *  an image into 512px tiles of 256 tokens each when its area exceeds twice the pixel budget
+     *  of the token cap; at a cap of 128 that is 262,144 px, and an 860x538 card (468,000 px)
+     *  became 15 tiles, about 3,800 tokens and 85 to 95+ s. At 500px the card stays one image of
+     *  112 tokens. Measured 2026-10-22 on five cards, new libraries, app flags: 22 to 26 s and
+     *  24/25 fields at 500px, 23 to 27 s but misread digits at 400px, 24 to 26 s and the same
+     *  fields at 600px (closer to the tiling limit). Command-line test with the image resized by
+     *  sips, not yet run through the app's own resize. See
+     *  docs/mobile-extraction/ON_DEVICE_LATENCY_AND_ACCURACY_FINDINGS.md. */
+    const val LFM2_PAN_MAX_EDGE = 500
+
+    /** Longest image edge sent to LFM2-VL for aadhaar, dl and passport. These images used to go
+     *  at full size (many reach 800 to 1,000 tokens, and a 2743x1904 photo tiled to 2,589).
+     *  Measured 2026-10-23, warm server, compact prompt, 560px: DL 23 to 29 s (13/15 fields),
+     *  passport 25 to 29 s (30/34), Aadhaar 14 to 22 s (19/24); at full size the large cards took
+     *  81 s to over 170 s. The accuracy cost against full size is not measured for LFM2 (for
+     *  Qwen on passport it was 33/34 to 28/34), and small print may blur. */
+    const val LFM2_DOCUMENT_MAX_EDGE = 560
+
+    private val compactDocuments = setOf("aadhaar", "dl", "passport")
+
+    /** aadhaar, dl and passport with LFM2-VL, MiniCPM-V or Qwen3-VL: a short prompt, no system
+     *  prompt, and a small grammar that fixes the answer (assets/prompts/user_<doc>_compact.v1.md,
+     *  assets/grammars/<doc>_compact.gbnf) instead of the long prompt and the full JSON schema.
+     *  The full DL prompt plus system prompt is about 800 tokens and its answer 146 tokens; on the
+     *  Galaxy M35 the in-app LFM2 DL scan took 63.5 s (1,075 prompt tokens, 43.6 s to read them).
+     *  Measured 2026-10-23 (warm server, resized image, compact prompt): DL 23 to 29 s on LFM2,
+     *  Qwen 29 to 46 s and MiniCPM 23 to 25 s, against 50+ s and 33 to 43 s with the full prompt.
+     *  The answer carries only the fields the tests read: DL licence number, name, DOB, issue date,
+     *  NT validity; passport number, name, DOB, gender, place of birth, issue and expiry dates;
+     *  Aadhaar number, name, DOB, gender. Address, blood group, organ donor, vehicle classes, TR
+     *  validity, issuing authority, nationality, PIN and address are not asked for. Aadhaar with
+     *  Qwen keeps its own profile (useQwenAadhaarProfile). Other model families keep the full
+     *  prompt. The checks grade only these fields (DlRules, PassportRules, AadhaarRules). */
+    fun useCompactDocument(docType: String, fileName: String): Boolean = when {
+        docType !in compactDocuments -> false
+        docType == "aadhaar" -> (isLfm2(fileName) || isMiniCpm(fileName)) && !isQwen(fileName)
+        else -> isLfm2(fileName) || isMiniCpm(fileName) || isQwen(fileName)
+    }
+
     /** pan_full + Qwen3-VL only: warm server + a one-line GBNF (assets/grammars/pan_full_qwen.gbnf)
      *  + a card image sent at 480px. On the 4B (Q4_K_M + Q8_0 mmproj) in the adb harness,
      *  2026-10-06, on the four cards of pan_test_images: 44.6s average (41.4-50.3), 20/20 fields,

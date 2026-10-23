@@ -19,15 +19,18 @@ class PromptFileTest {
      */
     private val validatedBodyHashes = mapOf(
         "system" to "c055e9d51a9c906936e80e6b02b6e86d2708c1e9df1500091395abc238819622",
+        "user_aadhaar_compact" to "4d1185ab2d049516d81adc9458f25a1d96c8902a1efd61304cb0568013a54715",
         "user_aadhaar" to "c7e0a030a029bd1cb824f308ff3704f0f3a23f06e203030713bd510ad6d2ea26",
         "user_aadhaar_qwen" to "64adf914a9d9e93078a08a25fbdfa082e673dfdc97c5e1b6dd7800d7f8fcbe92",
         "user_aadhaar_stage1" to "177fe0a6c7d854ca5d6d4bada0f4aeca72808a68f3088bf89c398e9d41b63069",
+        "user_dl_compact" to "7e1f3e325ebe17dfe9f7d0219b05a3a77c61acecd33991a7594d69973c325a86",
         "user_dl" to "2b9ce1a7895ccf31d03fcb57c79eae7e8f3b1bbfe076adb506d7f57c3b5e9ad3",
         "user_pan" to "b6137099e21cd8011870d7ccad8616803ff7d5f5d09dd7be0cf5dba65b64fbc9",
         "user_pan_crop" to "19b68765c1c80ee95c7a7d6dcff50c5d2503533392ec4265cb264b2066448c5f",
         "user_pan_full" to "3f0048d6a7cb1aed1c08ad59040306a939c464cabf29b38d44c771de31be9585",
         "user_pan_full_lfm2" to "06ce2a0713a61e58d6975c109f83f202b010f66322ba767a981973344fb5aca7",
         "user_pan_stage1" to "5331e76b69f4c7757d955358b0f921389ee9b3ddc81708402e76b49b21852abe",
+        "user_passport_compact" to "59087453545f76b68f3f2706565093ca60e9b39a66a051e6e5ce37ce61fe0411",
         "user_passport" to "c122dcef952244eb152c73050a63b60beb20a82115825ff7be863937960798bc",
         "user_tt_dl" to "7947bb63ea743ba8957b2ca24ccc96a33f64db30fe62593167403d64eeba326b",
         "user_tt_id_back" to "5e32ed9feda5323293517f2cc815030225dac00ba9e8e988cf416db093129bad",

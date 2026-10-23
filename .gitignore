@@ -82,3 +82,6 @@ mobile/idp-android/app/src/main/jniLibs/
 
 # Company standards documents: local reference only, not part of the repository
 /standards_docs/
+
+# Local test documents (dummy ID images and their expected values): never committed
+/data/

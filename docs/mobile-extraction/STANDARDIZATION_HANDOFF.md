@@ -18,7 +18,7 @@ Standardize the existing on-device document extraction (`mobile/idp-android`, Aa
 | Area | What changed | Standards touched |
 |---|---|---|
 | Logic split out of the activity | The rules, parsing, request-building and launch-argument code moved from `MainActivity.kt` into 19 small pure Kotlin files (`*Rules`, `OutputParser`, `ModelProfiles`, `ExtractionPlan`, `ImageSizing`, `LlamaLaunch`, `LlamaRequest`, `ModelFiles`, `RunLog`, `ByteFormat`, `ProcessStats`, `GpuSupport`, `PromptFile`, `ModelRegistry`) | PY-11, DOM-01, DOM-05, PKG-01, LLM-01 (partly) |
-| Tests | 227 JVM unit tests, planted-bug checks on each group, JaCoCo coverage (99.9% of lines, 90.1% of branches of the extracted logic) | IDP-04 3.9, Ch. 21, TST-10 |
+| Tests | 231 JVM unit tests, planted-bug checks on each group, JaCoCo coverage (99.7% of lines, 90.3% of branches of the extracted logic) | IDP-04 3.9, Ch. 21, TST-10 |
 | Lint and gates | ktlint 1.3.1, detekt 1.23.6 (limits borrowed from the Python Standard: complexity 10, 50 lines, 7 parameters, 400 lines), Android Lint, `scripts/check.sh` | Ch. 27, ADR 0003 |
 | Prompts | 15 prompts are now `<name>.v1.md` with front matter (model, temperature, schema); the run-log header records the prompt version; a test pins the SHA-256 of every body | LLM-02, ML-04, IDP-03 |
 | Model registry | `assets/models.yaml` (5 models) with a strict reader; the run log records registry name, version and checksum | ML-01, ML-02, ML-04 |
@@ -26,7 +26,8 @@ Standardize the existing on-device document extraction (`mobile/idp-android`, Aa
 | GPU switch | The "Use GPU (Vulkan)" switch is disabled when the build has no Vulkan library, so it can no longer silently run on the CPU | ML-10 |
 | Resources | 30 hard-coded texts moved to `strings.xml`; content descriptions added | IDP-04 3.7 (Lint) |
 | Build | `native/build_llama_dotprod.sh` pinned to llama.cpp commit `000bee5`, fixed NDK and CMake versions, no machine-specific paths | BLD-02, DPL-01/02 |
-| Decisions and docs | ADRs 0001 to 0006 (all Proposed, none approved), compliance matrix, architecture note, phone checklist, toolchain versions, a repo-root `CLAUDE.md` | Java Std 33.6, 34.1 |
+| LFM2 input size | LFM2-VL gets a shrunk image: PAN 500 px, Aadhaar, DL and passport 560 px (`ModelProfiles`, `ExtractionPlan.Plan.maxEdge`, `MainActivity.downscaleForLfm2`). Unit-tested, not yet run on a phone (section 5) | ML-07, ML-05, ADR 0007 |
+| Decisions and docs | ADRs 0001 to 0007 (all Proposed, none approved), compliance matrix, architecture note, phone checklist, toolchain versions, a repo-root `CLAUDE.md` | Java Std 33.6, 34.1 |
 
 Files and folders: `mobile/idp-android/app/src/main/java/com/modeltesting/vlmtester/` (the new files and `README.md`), `app/src/test/`, `app/src/main/assets/prompts/` and `models.yaml`, `scripts/check.sh`, `config/detekt/`, `.editorconfig`, `native/build_llama_dotprod.sh`, `docs/adr/`, `docs/mobile-extraction/`.
 
@@ -115,7 +116,9 @@ Recommended size if B is chosen: 500 px longest edge. The old library read card 
 
 Limits: five cards, one run each, command line only (not the app), the app's resize and canvas code rebuilt outside the app (sips and a small Java program). No camera photos were tested.
 
-**Consequence.** The pinned build script does not reproduce the old app's LFM2 speed unless the input is resized (B) or the old `libmtmd` is used (C). Until the team lead decides, do not call the dot-product build from that script "the build". It belongs in the build ADR (0001) and in the compliance matrix (BLD-02).
+**Change made on 2026-10-23 (option B, in the working tree, not committed).** The app now shrinks the image before LFM2 reads it: PAN to 500 px, Aadhaar, DL and passport to 560 px. Before the change the app capped LFM2 at 1,280 px, which left an 860 px PAN card unshrunk (the old code comment assumed the model shrinks the image itself, which was true of the old libraries and is not true of the new `libmtmd`). Code: `ModelProfiles.LFM2_PAN_MAX_EDGE`, `LFM2_DOCUMENT_MAX_EDGE`, `useLfm2DocumentResize`; `ExtractionPlan.Plan.maxEdge`; `MainActivity.downscaleForLfm2(imageFile, longestEdge)`. Tests: 231 pass, and three planted bugs (wrong set, wrong edge, ignored resize) each fail the new tests. Decision record: [ADR 0007](../adr/0007-shrink-lfm2-input-images.md). **Not done:** the app's own resize has not been run on a phone (the numbers above came from images resized with `sips` and a command-line run), and the accuracy cost for LFM2 against full size is not measured. Qwen3-VL and MiniCPM-V are unchanged.
+
+**Consequence.** The pinned build script does not reproduce the old app's LFM2 speed unless the input is resized (B, now in the code) or the old `libmtmd` is used (C). Until the team lead decides, do not call the dot-product build from that script "the build". It belongs in the build ADR (0001) and in the compliance matrix (BLD-02).
 
 ## 6. Open items
 
@@ -126,18 +129,18 @@ Needs the team lead:
 3. Whether the on-device model stays, against the standards' direction for model calls through Python.
 4. Whether the Compose, Hilt and Room stack is in scope.
 5. Run-log content: it holds extracted fields on purpose (ADR 0002 row 4).
-6. Choose A, B or C in section 5. Recommendation: B at 500 px, with the accuracy re-checked on more cards and in the app; C only as a fallback.
+6. Approve or change option B (now in the code, ADR 0007), or choose A or C in section 5. B still needs an in-app phone check and the accuracy re-checked on more cards; C only as a fallback.
 
 Needs the team or more work:
 
 7. Model registry gaps: the 4B model has no file name, versions are `unversioned`, 2 checksums are missing.
 8. Evaluation set and CI (ML-11, ML-12, IDP-03). Nothing runs automatically.
 9. No timeout on the one-shot CLI path (LLM-05).
-10. `MainActivity.kt` is still 1,779 lines (limit 400) and is excluded from ktlint and detekt. Splitting out the process start, HTTP calls and extraction flow is held until the phone checks can prove the move.
+10. `MainActivity.kt` is still 1,781 lines (limit 400) and is excluded from ktlint and detekt. Splitting out the process start, HTTP calls and extraction flow is held until the phone checks can prove the move.
 11. The native libraries are not 16 KB page-aligned (an Android 16 and Play compatibility warning). The usual remedy, a flexible-page-size build flag or a newer NDK, is untested.
 12. Signing for release (the standards do not describe Android signing).
 
-Note: the counts in [STANDARDS_COMPLIANCE.md](STANDARDS_COMPLIANCE.md) are from earlier in the day (226 tests, `MainActivity.kt` about 2,000 lines); the current numbers are 227 tests and 1,779 lines.
+The counts in [STANDARDS_COMPLIANCE.md](STANDARDS_COMPLIANCE.md) and [TL_BRIEF.md](TL_BRIEF.md) were updated on 2026-10-23 to the current numbers: 231 tests, `MainActivity.kt` 1,781 lines.
 
 ## 7. Working agreements for this branch
 

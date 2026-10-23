@@ -23,6 +23,9 @@ object ExtractionPlan {
      * whether the document's JSON schema goes in. [validationDocumentType] is added to the answer
      * before the checks when the grammar leaves the `document_type` key out; null means the answer
      * is checked as it is. [isCrop] selects the single-field crop check instead of the full one.
+     * [maxEdge] is the longest image edge, in pixels, for [ImagePrep.LFM2]; 0 for every other plan.
+     * [compact] means the short prompt and small grammar are used and only the fields of the
+     * compact profile come back, so the checks grade only those.
      */
     data class Plan(
         val imagePrep: ImagePrep,
@@ -35,7 +38,9 @@ object ExtractionPlan {
         val maxTokens: Int,
         val grammarAsset: String?,
         val validationDocumentType: String?,
-        val isCrop: Boolean
+        val isCrop: Boolean,
+        val maxEdge: Int = 0,
+        val compact: Boolean = false
     ) {
         val useCanvas: Boolean get() = imagePrep == ImagePrep.CANVAS
     }
@@ -78,21 +83,31 @@ object ExtractionPlan {
         val lfm2Pan = ModelProfiles.useLfm2PanProfile(docType, modelFileName)
         val qwenPan = ModelProfiles.useQwenPanProfile(docType, modelFileName)
         val qwenAadhaar = ModelProfiles.useQwenAadhaarProfile(docType, modelFileName)
+        val lfm2Docs = ModelProfiles.useLfm2DocumentResize(docType, modelFileName)
+        val compact = ModelProfiles.useCompactDocument(docType, modelFileName)
         return Plan(
-            imagePrep = imagePrepFor(docType, modelFileName, lfm2Pan, qwenPan, useFieldCanvas),
+            imagePrep = imagePrepFor(docType, modelFileName, lfm2Pan || lfm2Docs, qwenPan, useFieldCanvas),
             tokenCap = tokenCapFor(docType, sets, panFullHighCap, lfm2Pan, qwenPan),
-            promptAsset = promptAssetFor(docType, lfm2Pan, qwenAadhaar),
+            promptAsset = promptAssetFor(docType, lfm2Pan, qwenAadhaar, compact),
             // trim(): the validated BUL2 runs fed the prompt through shell $(cat ...), which
             // drops the file's trailing newline.
             trimPrompt = lfm2Pan,
             sendsSchema = !skipJsonContract,
             useGrammar = !skipJsonContract,
-            useSystemPrompt = !skipJsonContract && !sets.skipSystemPromptOnly.contains(docType),
+            useSystemPrompt = !skipJsonContract && !sets.skipSystemPromptOnly.contains(docType) && !compact,
             maxTokens = maxTokensFor(docType, isStage1, isCrop),
-            grammarAsset = grammarAssetFor(lfm2Pan, qwenPan, qwenAadhaar),
-            validationDocumentType = validationDocumentTypeFor(lfm2Pan || qwenPan, qwenAadhaar),
-            isCrop = isCrop
+            grammarAsset = grammarAssetFor(docType, lfm2Pan, qwenPan, qwenAadhaar, compact),
+            validationDocumentType = validationDocumentTypeFor(docType, lfm2Pan || qwenPan, qwenAadhaar, compact),
+            isCrop = isCrop,
+            maxEdge = lfm2MaxEdgeFor(lfm2Pan, lfm2Docs),
+            compact = compact
         )
+    }
+
+    private fun lfm2MaxEdgeFor(lfm2Pan: Boolean, lfm2Docs: Boolean): Int = when {
+        lfm2Pan -> ModelProfiles.LFM2_PAN_MAX_EDGE
+        lfm2Docs -> ModelProfiles.LFM2_DOCUMENT_MAX_EDGE
+        else -> 0
     }
 
     private fun tokenCapFor(
@@ -107,20 +122,35 @@ object ExtractionPlan {
         else -> ModelProfiles.imageTokenCapFor(docType, sets.singleFieldCrop, panFullHighCap)
     }
 
-    private fun promptAssetFor(docType: String, lfm2Pan: Boolean, qwenAadhaar: Boolean): String = when {
-        lfm2Pan -> PromptFile.userAsset("pan_full_lfm2")
-        qwenAadhaar -> PromptFile.userAsset("aadhaar_qwen")
-        else -> PromptFile.userAsset(docType)
-    }
+    private fun promptAssetFor(docType: String, lfm2Pan: Boolean, qwenAadhaar: Boolean, compact: Boolean): String =
+        when {
+            lfm2Pan -> PromptFile.userAsset("pan_full_lfm2")
+            compact -> PromptFile.userAsset("${docType}_compact")
+            qwenAadhaar -> PromptFile.userAsset("aadhaar_qwen")
+            else -> PromptFile.userAsset(docType)
+        }
 
-    private fun grammarAssetFor(lfm2Pan: Boolean, qwenPan: Boolean, qwenAadhaar: Boolean): String? = when {
+    private fun grammarAssetFor(
+        docType: String,
+        lfm2Pan: Boolean,
+        qwenPan: Boolean,
+        qwenAadhaar: Boolean,
+        compact: Boolean
+    ): String? = when {
+        compact -> "grammars/${docType}_compact.gbnf"
         lfm2Pan -> "grammars/pan_full_lfm2.gbnf"
         qwenPan -> "grammars/pan_full_qwen.gbnf"
         qwenAadhaar -> "grammars/aadhaar_qwen.gbnf"
         else -> null
     }
 
-    private fun validationDocumentTypeFor(isPanProfile: Boolean, qwenAadhaar: Boolean): String? = when {
+    private fun validationDocumentTypeFor(
+        docType: String,
+        isPanProfile: Boolean,
+        qwenAadhaar: Boolean,
+        compact: Boolean
+    ): String? = when {
+        compact -> docType
         isPanProfile -> "pan"
         qwenAadhaar -> AADHAAR
         else -> null
@@ -129,13 +159,13 @@ object ExtractionPlan {
     private fun imagePrepFor(
         docType: String,
         modelFileName: String,
-        lfm2Pan: Boolean,
+        lfm2Resize: Boolean,
         qwenPan: Boolean,
         useFieldCanvas: Boolean
     ): ImagePrep = when {
         useFieldCanvas && docType == PAN_FULL && ModelProfiles.isMiniCpm(modelFileName) -> ImagePrep.CANVAS
         ModelProfiles.isMiniCpm(modelFileName) -> ImagePrep.MINICPM
-        lfm2Pan -> ImagePrep.LFM2
+        lfm2Resize -> ImagePrep.LFM2
         qwenPan -> ImagePrep.QWEN_PAN
         ModelProfiles.isQwen(modelFileName) -> ImagePrep.QWEN
         else -> ImagePrep.NONE

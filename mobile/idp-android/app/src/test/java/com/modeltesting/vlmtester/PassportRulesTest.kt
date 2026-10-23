@@ -80,4 +80,36 @@ class PassportRulesTest {
         assertTrue(report.contains("dob year 2030 implausible"))
         assertTrue(report.contains("issue_date year 2030 implausible"))
     }
+
+    // --- compact profile -----------------------------------------------------------
+
+    private fun compactPassport() = json(
+        "document_type" to "passport",
+        "passport_number" to "K1234567",
+        "name" to "ASHA RAO",
+        "dob" to "01/01/1990",
+        "gender" to "F",
+        "place_of_birth" to "PUNE",
+        "issue_date" to "10/05/2019",
+        "expiry_date" to "09/05/2029"
+    )
+
+    @Test
+    fun `validatePassport in compact mode grades the seven compact fields HIGH`() {
+        val report = PassportRules.validate(compactPassport(), year, compact = true)
+        assertTrue(report, report.startsWith("Passport check: HIGH - 7/7 fields read"))
+        assertFalse(report.contains("  - "))
+    }
+
+    @Test
+    fun `validatePassport without compact still expects the nine fields`() {
+        val report = PassportRules.validate(compactPassport(), year)
+        assertTrue(report, report.startsWith("Passport check: LOW - 7/9 fields read"))
+    }
+
+    @Test
+    fun `validatePassport in compact mode still checks the passport number shape`() {
+        val report = PassportRules.validate(compactPassport().put("passport_number", "12345678"), year, compact = true)
+        assertTrue(report, report.contains("passport_number '12345678' is not 1 letter + 7 digits"))
+    }
 }
