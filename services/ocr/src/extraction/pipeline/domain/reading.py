@@ -12,6 +12,8 @@ from extraction.rule import normalize_value, similarity
 from idp_ocr_engines.model import Box, OcrWord
 
 _ANCHOR_MARGIN = 0.1  # page fraction searched around an anchor
+_FRAGMENT_MAX_CHARS = 3  # a piece this short and this narrow (width over height, in pixels) is a fragment
+_FRAGMENT_WIDTH_TO_HEIGHT = 1.5
 _SIDEWAYS_RATIO = 1.5  # a piece this many times taller than wide, in pixels, is sideways text
 _COLUMN_GAP = 0.04  # page fraction of empty space that separates two columns on one row
 _LINE_TOLERANCE = 0.6  # pieces whose centres are this many text heights apart or less share a line
@@ -73,7 +75,7 @@ def read_field(
     """
     inside = [w for w in words if _inside(w.box, box) and not any(_inside(w.box, hidden) for hidden in skip)]
     if definition.starts_at is not None:
-        upright = [w for w in inside if not _is_sideways(w.box, page_aspect)]
+        upright = [w for w in inside if not (_is_sideways(w.box, page_aspect) or _is_fragment(w, page_aspect))]
         inside = _from_caption(definition.starts_at, upright)
     if definition.starts_at is not None or definition.above is not None:  # follow where each piece sits
         lines = _visual_lines(inside)
@@ -97,6 +99,12 @@ def read_field(
 def _is_sideways(box: Box, page_aspect: float) -> bool:
     """Text set at 90 degrees is much taller than wide in pixels (box sides are page fractions, so scale by aspect)."""
     return box.height / box.width / page_aspect > _SIDEWAYS_RATIO
+
+
+def _is_fragment(word: OcrWord, page_aspect: float) -> bool:
+    """A piece of one to three characters that is barely wider than tall: a bit of sideways text, not a word."""
+    narrow = word.box.width / word.box.height * page_aspect < _FRAGMENT_WIDTH_TO_HEIGHT
+    return len(word.text.strip()) <= _FRAGMENT_MAX_CHARS and narrow
 
 
 def _visual_lines(words: list[OcrWord]) -> list[list[OcrWord]]:

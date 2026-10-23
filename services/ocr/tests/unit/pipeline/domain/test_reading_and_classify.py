@@ -195,3 +195,26 @@ def test_a_short_caption_is_not_taken_for_sideways_text_but_a_tall_narrow_piece_
     reading = read_field(address, [caption, body], address.box, today=TODAY, page_aspect=3.0)
     assert reading is not None
     assert reading.text.endswith("845106")
+
+
+def test_tiny_fragments_of_sideways_text_beside_an_address_are_dropped_but_short_real_words_are_kept() -> None:
+    english = next(f for f in AADHAAR_CARD.fields if f.key == "address")
+
+    def piece(text: str, y: float, width: float, height: float, line: int) -> OcrWord:
+        return OcrWord(
+            text=text, box=Box(x=0.55, y=y, width=width, height=height), confidence=0.5, line_id=line, block_id=0
+        )
+
+    words = [
+        word("Address:", 0.55, 0.10, 0),
+        word("W/O: Ajit Kumar Bajaj, Ward No 01, Seujpur,", 0.55, 0.20, 1),
+        piece("1M", 0.26, 0.008, 0.026, 2),  # square-ish bits of the "Download Date" text along the edge
+        piece("9", 0.30, 0.009, 0.027, 3),
+        piece("No", 0.34, 0.040, 0.026, 4),  # a short real word is wider than tall and stays
+        word("Assam - 786001", 0.55, 0.40, 5),
+    ]
+    reading = read_field(english, words, english.box, today=TODAY, page_aspect=3.0)
+    assert reading is not None
+    assert "1M" not in reading.text
+    assert " 9 " not in reading.text
+    assert "No" in reading.text
