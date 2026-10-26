@@ -11,7 +11,7 @@ Everything the team has built for IDP (Intelligent Document Processing): on-devi
 | `services/conversion-service/` | **The IDP conversion-service, being built to the Python Engineering Standard** (IDP-03 ch. 3). Progress and explanations: [build log](docs/conversion-service/build-log.md) | new |
 | `services/conversions/` | Conversion scripts (`python_scripts/`), their HTTP API (`api/`), a local web app (`web/`), tests and docs | idox `testing` + `testing2` (Sumukh, Karunya) |
 | `services/conversions/idocx_ai/` | iDocx AI features: workflow, forms, compare, translation, redaction, cleanup, accessibility. Kept inside `conversions/` for now, because the conversion tests read sample PDFs from it | idox (Prakyath) |
-| `services/ocr/` | OCR test app (`ocr_test_app/`) and the Aadhaar/PAN test images it reads | `easyocr` (Sumukh) |
+| `services/extraction-service/` | **The IDP extraction-service** (IDP-03 ch. 2): PAN and Aadhaar extraction with PP-OCR, built to the Python Engineering Standard. The old prototype is in `ocr_test_app/`; card images and ground truth are local only, never in git | `ocrtest` (Sumukh) |
 | `research/inference-engines/` | Inference engine experiments (llama.cpp, Hugging Face, vLLM) | `qwen4bmodel` |
 | `research/stage1-contract/` | Prompt and output-contract experiments for extraction | `qwen4bmodel` |
 | `research/benchmarks/` | Benchmark results, run logs and the `terminal_report.py` report script | `qwen4bmodel` |
@@ -35,7 +35,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m unittest discover -s tests
 
 # OCR test app: model inference skipped
-cd services/ocr/ocr_test_app
+cd services/extraction-service/ocr_test_app
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pypdfium2
 OCR_SKIP_INFERENCE=1 .venv/bin/python -m unittest discover -s tests
 ```
