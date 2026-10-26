@@ -129,7 +129,7 @@ Java builds its side against the same contract, so neither team has to wait for 
 |---|---|
 | Message contracts | **Decided:** build against IDP-00 §7.6 v1 as written. Changes go through `idp-contracts` (IDP-00 §9) |
 | Shared library `idp-py-platform` | **Decided for now:** it doesn't exist yet, so shared plumbing (settings, logging, envelope) starts inside this service's `core/`, and moves into the shared library when a second service needs it |
-| Database for the outbox | **Open:** IDP-00 §3.1 says conversion-service has no database, but IDP-03 §3.2 gives it an outbox relay, which needs a table (`OBX-01`). Needs an answer before step 4 |
+| Database for the outbox | **Decided 2026-10-22: yes, a small PostgreSQL `conversion_db`** with three tables: inbox (`MSG-02`), outbox (`OBX-01`) and item status (`CEL-03`). IDP-00 §3.1 said "no database", but IDP-03 §3.2 plans an outbox relay, and the Java backend asked for a "this request is already consumed" table. IDP-00's service table needs updating. Java identifies a request by an AMQP header **`eventId`**; the standard's envelope calls it `messageId` in the body. **Open:** whether these are the same value, and whether a deliberate retry gets a new `eventId` (see Entry 8) |
 | Where the service lives | **Decided:** `services/conversion-service/` in this repo. The existing scripts in `services/conversions/` are the source of the conversion logic |
 
 ---
@@ -770,3 +770,112 @@ uv run pytest tests/unit/conversion/infrastructure/converters/test_pdf_to_model.
 | Multi-column pages | Read top to bottom across columns, so two columns interleave. Acceptable for fidelity A; column detection is a later improvement |
 | Images in PDF → DOCX | Not carried over (same image-block question as PowerPoint) |
 | Hyphenated line ends | Kept as written ("inter- national"). Joining them risks breaking real hyphenated words |
+
+## Entry 8: RabbitMQ, MinIO, Celery and the outbox (step 4a–4d, 2026-10-26)
+
+**Goal:** the service runs for real. Java's `ConversionRequested` arrives over RabbitMQ, a Celery worker converts files from MinIO, and `JobProgressed` / `ConversionCompleted` / `WorkFailed` go back on `idp.events`. Until now the converters only worked on local files.
+
+**One PR for step 4:** the Python lead chose to review 4a–4d together, from `feat/conversion-service-storage`. That's about 2,350 lines of source and 1,600 of tests, far above the ~400-line guide (ch. 25). The parts below split it for review.
+
+### What we did
+
+```
+core/            db.py (engine, DB-02 timeouts), inbox.py, outbox.py (table + relay), clock.py, ids.py (UUIDv7)
+                 config.py: DB__, RABBIT__, CELERY__, STORAGE__, OUTBOX__ groups; error_codes.py: 2 new codes
+domain/          models.py (ConversionItem and its rules), events.py, values.py, policies.py (which worker pool)
+application/     accept_conversion.py (intake), process_conversion.py (worker: download, convert, package, upload)
+infrastructure/  persistence/ (SQLAlchemy), messaging/ (FastStream consumer, publisher, wire models),
+                 storage.py (MinIO via boto3), inspection.py (scanned-PDF check), tasks.py (Celery)
+consumers.py, worker.py, outbox_relay.py      the three processes
+migrations/      Alembic; 0001_baseline: inbox_message, outbox_event, conversion_item
+Dockerfile       three targets: health, service (intake, relay, migrations), worker (LibreOffice + Noto fonts)
+compose.yaml     the whole stack locally (`make up`)
+sonar-project.properties, Makefile (lint, check-unit, migrate, up, down; coverage.xml for SonarQube)
+```
+
+**New libraries** (all permissive unless noted): SQLAlchemy (MIT), **psycopg 3 (LGPL-3.0)**, Alembic (MIT), uuid-utils (BSD), Celery (BSD), FastStream (Apache-2.0) with aio-pika (Apache-2.0), typer and watchfiles (MIT), boto3 (Apache-2.0). Dev only: testcontainers (Apache-2.0), boto3-stubs and celery-types (MIT).
+
+psycopg is LGPL: we use it unmodified as a library, which LGPL allows without opening our code, and the standard names it as the PostgreSQL driver. If the project wants permissive-only with no exceptions, `pg8000` (BSD) is a drop-in swap. **That's the lead's call.**
+
+### How a request flows
+
+```
+Java ─ConversionRequested─▶ idp.commands ─▶ intake ─▶ conversion_db: inbox row + item (one transaction)
+                                              └─▶ Celery queue: office | pdf | data | ocr
+worker ─▶ MinIO download ─▶ convert ─▶ MinIO upload ─▶ conversion_db: item + outbox rows (one transaction)
+relay  ─▶ idp.events (publisher confirm, eventId header) ─▶ Java
+```
+
+| A request arrives and the item is… | We… |
+|---|---|
+| new | record it and queue it |
+| already QUEUED | queue it again (repairs a task lost on the way) |
+| RUNNING, recently touched | do nothing: a worker has it |
+| RUNNING, untouched past the time limit + 2 min | take it over (its worker died) |
+| COMPLETED | send the stored `ConversionCompleted` again; no reconversion |
+| FAILED | queue it again (Java decided to retry) |
+
+The same `eventId` twice is recorded once in `inbox_message`, so a duplicate never creates a second item.
+
+| Message | Outcome |
+|---|---|
+| not JSON, no envelope | dead-letter queue (`<queue>.dlq`), for a person to look at |
+| readable but unusable (job type, inputs, prefix) | `WorkFailed` `CNV-422-REQUEST-001`, so Java's item doesn't hang |
+| the database or the task queue is down | waits in `.retry.10s`, then `.1m`, then `.10m`; after that, dead-letter queue |
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| Outbox, not "publish after commit" | `OBX-01` | "Item COMPLETED" and "tell Java" can't come apart: a crash between them would leave Java waiting forever |
+| Inbox keyed on `eventId` | `MSG-02` | RabbitMQ delivers at least once; the Java dev asked for exactly this table |
+| Item state checked before any work | `CEL-03` | A task delivered twice converts once |
+| Publisher confirms + `mandatory` | Java standard ch. 27.4 | A message RabbitMQ didn't accept, or had nowhere to route, is retried, never marked sent |
+| One message in flight per item | `OBX-01`, ordering | Java never sees "completed" before "progress 80" |
+| Retry queues with TTL, no requeue | `MSG-03` | A broken message can't spin in a hot loop |
+| Quorum queues, delivery limit, DLQ | `MSG-04` | Survives a broker node loss; poison messages stop after 5 tries |
+| Soft time limit → `CNV-504-TIMEOUT-001` | `CEL-06` | The item fails cleanly before the hard kill |
+| Image only for each process | `DPL-05` | The intake image has no LibreOffice (548 MB vs 1.77 GB) |
+
+### Fixes to the Java standard's outbox claim query
+
+Both are in our query; **tell the Java team**, since their relay uses the same one:
+
+1. A `RETRYING` row blocks itself (`NOT EXISTS … status IN ('CLAIMED','RETRYING')` matches the row itself), so once a publish fails, that item's messages are stuck forever. Fix: `AND b.id <> o.id`.
+2. `UPDATE … RETURNING` returns rows in **no particular order**, even with `ORDER BY` in the subquery. Two messages of one item can go out reversed. Fix: wrap it in a CTE and `ORDER BY created_at` outside.
+
+### New error codes for Java
+
+| Code | Retryable | Meaning |
+|---|---|---|
+| `CNV-422-REQUEST-001` | no | The request can't be used: unknown job type, missing input file, unsafe output prefix |
+| `CNV-500-INTERNAL-001` | yes | Something failed inside the service after its retries; Java may dispatch again |
+
+### Try it
+
+```bash
+cd services/conversion-service
+make check        # 376 tests (23 against real PostgreSQL, RabbitMQ and MinIO), 97 % coverage. Needs Docker
+make check-unit   # the same without Docker
+make up           # the whole stack; RabbitMQ UI on :15672 (guest/guest), MinIO console on :9001
+make down
+```
+
+### Lessons
+
+- **Integration tests find what unit tests can't.** The real-Postgres tests showed the `RETURNING` order bug, and the end-to-end test showed that an unrouted `JobProgressed` correctly holds back `ConversionCompleted`. That's the right behaviour, but it means **Java must bind queues for every event we send**, or our messages wait and then go `DEAD`.
+- **Run the images, not just the tests.** `make check` passed, but the containers failed three ways: a type-stub package (`mypy_boto3_s3`) imported at runtime, which isn't in the image; the missing `faststream[cli]` extra; and Celery's delayed retries, which need topic exchanges and every pool queue declared, or they block the worker. All three are fixed. A new import rule keeps dev-only packages out of runtime code.
+- **The image MinIO no longer publishes.** Its official images are gone; tests and `compose.yaml` use the frozen `bitnamilegacy/minio`. That's fine for tests. Java's team runs the real server.
+- **A slip:** during this step a stray `git stash` moved all uncommitted edits aside for a moment; `git stash pop` restored them. Nothing was lost. Commit in small steps, so there is less to lose.
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| Retries from Java | **Assumed:** a deliberate retry (after a retryable `WorkFailed`, or Java's 15-minute reaper) gets a **new** `eventId`. A redelivery keeps the same one. **Confirm with the Java dev** |
+| `eventId` vs `messageId` | We use the `eventId` header, falling back to the envelope's `messageId`. We send both, with the same value |
+| Event queues on Java's side | **Java must bind** `job.progressed`, `conversion.completed` and `work.failed` on `idp.events`, or our relay retries and then marks rows `DEAD` |
+| `mode` job option | Accepted and ignored (IDP-02 §3.6 doesn't define its effect yet) |
+| psycopg (LGPL) | Kept, as the standard names it. **Open:** swap to pg8000 if strictly permissive-only |
+| OCR pool | Queue exists; requests needing OCR fail with `CNV-422-ROUTE-001` until the OCR decision D-1 |
+| Stuck `DEAD` outbox rows | Logged as errors. **Open:** an alert on `outbox_event_dead`, and a runbook for replaying them |
