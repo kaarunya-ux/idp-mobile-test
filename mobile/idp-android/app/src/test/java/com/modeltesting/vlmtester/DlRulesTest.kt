@@ -157,7 +157,7 @@ class DlRulesTest {
         val labelled = listOf(
             "DL NO KL21 2019002",
             "DL NO MH03 200800 ",
-            "dl no MH03 20080022135",
+            "dl no MH03 20089000001",
             "DL.NO KL21 2019002"
         )
         for (bad in labelled) {
@@ -169,7 +169,7 @@ class DlRulesTest {
 
     @Test
     fun `validateDl accepts real licence numbers including the Delhi format with a dash`() {
-        for (good in listOf("DL-0420110149646", "KL21 20190023531", "MH02 20120037319", "OD15 19800170087")) {
+        for (good in listOf("DL-0420110149646", "KL21 20199000002", "MH02 20120037319", "OD15 19800170087")) {
             val report = DlRules.validate(validDl().put("license_number", good), year)
             assertFalse(report, report.contains("starts with the label"))
         }

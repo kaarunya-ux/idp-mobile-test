@@ -8,7 +8,7 @@ import org.junit.Test
 class ValidationReportsTest {
     private val year = 2026
     private val dl =
-        """{"document_type": "dl", "license_number": "KL21 20190023531", "name": "AKHIL A B", "dob": "17-06-1998", """ +
+        """{"document_type": "dl", "license_number": "KL21 20199000002", "name": "AKHIL A B", "dob": "17-06-1998", """ +
             """"issue_date": "30-12-2019", "validity_nt": "16-06-2038"}"""
 
     private fun assertRoute(docType: String, text: String, start: String, compact: Boolean = false) {
