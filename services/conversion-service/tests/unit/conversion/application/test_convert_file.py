@@ -3,17 +3,19 @@
 from collections.abc import Callable
 from pathlib import Path
 
+import docx
+import openpyxl
 import pytest
 from PIL import Image
 
-from conversion.bootstrap import build_convert_file_service
+from conversion.bootstrap import build_convert_file_service, build_converter_registry
 from conversion.conversion.application.commands import ConvertFileCommand
 from conversion.conversion.application.services.convert_file import ConvertFileService
 from conversion.conversion.domain.exceptions import RouteNotFoundError
 from conversion.conversion.domain.formats import Format, Representation
 from conversion.conversion.domain.options import ConversionOptions, PageRange
 from conversion.conversion.domain.ports import StepRequest, StepResult
-from conversion.conversion.domain.route import Converter, Fidelity, Route, Step
+from conversion.conversion.domain.route import OCR_CONVERTERS, Converter, Fidelity, Route, Step
 from conversion.conversion.domain.route_planner import RoutePlanner, RouteVariant
 from conversion.conversion.infrastructure.registry import ConverterNotRegisteredError, ConverterRegistry
 from conversion.core.config import Settings
@@ -127,3 +129,34 @@ def test_uses_a_route_the_planner_was_given_when_the_table_is_custom(make_image:
     )
 
     assert recorder.seen[0].step is step
+
+
+def test_this_build_can_run_every_route_that_needs_no_ocr() -> None:
+    registry = build_converter_registry(Settings(_env_file=None))
+    routes = [route for route in RoutePlanner().list_routes() if not set(route.converters) & OCR_CONVERTERS]
+
+    missing = [f"{route.source} -> {route.target}" for route in routes if not registry.can_run(route)]
+
+    assert len(routes) > 30
+    assert missing == []
+
+
+def test_turns_word_tables_into_sheets_when_converting_docx_to_xlsx(
+    service: ConvertFileService, tmp_path: Path
+) -> None:
+    document = docx.Document()
+    document.add_paragraph("Intro text is dropped: XLSX is data only")
+    grid = document.add_table(rows=2, cols=2)
+    for column, (head, value) in enumerate([("item", "Paper"), ("qty", "10")]):
+        grid.cell(0, column).paragraphs[0].add_run(head).bold = True
+        grid.cell(1, column).text = value
+    source = tmp_path / "report.docx"
+    document.save(str(source))
+
+    result = service.convert(
+        ConvertFileCommand(source=Format.DOCX, target=Format.XLSX, inputs=(source,), output_dir=tmp_path / "out")
+    )
+
+    sheet = openpyxl.load_workbook(result.outputs[0])["Table 1"]
+    assert [[c.value for c in row] for row in sheet.iter_rows()] == [["item", "qty"], ["Paper", 10]]
+    assert result.route.converters == (Converter.DOCX_TO_MODEL, Converter.MODEL_TO_XLSX)

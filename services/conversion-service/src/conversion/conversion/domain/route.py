@@ -20,9 +20,8 @@ class Converter(StrEnum):
     IMAGES_TO_PDF = "images_to_pdf"  # lossless, no OCR
     IMAGE_FORMATS = "image_formats"  # PNG <-> JPEG
     SEARCHABLE_PDF = "searchable_pdf"  # OCR: image -> PDF with an invisible text layer
-    PDF_TO_DOCX = "pdf_to_docx"  # digital PDF -> DOCX, layout rebuilt
     PPTX_FROM_IMAGES = "pptx_from_images"  # one slide per image
-    PDF_TABLES = "pdf_tables"  # digital PDF tables -> document model
+    PDF_TO_MODEL = "pdf_to_model"  # digital PDF text and tables (IDP-03: pdf_tables, and pdf_to_docx without pdf2docx)
     OCR_TO_MODEL = "ocr_to_model"  # scanned PDF or image -> document model
     DOCX_TO_MODEL = "docx_to_model"
     SHEET_TO_MODEL = "sheet_to_model"  # XLSX or CSV

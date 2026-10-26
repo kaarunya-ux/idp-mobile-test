@@ -21,6 +21,10 @@ class InvalidRouteError(ValueError):
     """A route whose steps don't chain together. A bug in the route table, never a user error; tests catch it."""
 
 
+class InvalidDocumentModelError(ValueError):
+    """A reader built an impossible document model (a ragged table, empty text). A bug, never a user error."""
+
+
 class InvalidOptionError(DomainError):
     """A conversion option is outside its allowed values. Reported as ``CNV-422-OPTIONS-001``."""
 
@@ -98,6 +102,48 @@ class ConversionTimeoutError(DomainError):
 
     code = ErrorCode.CONVERSION_TIMEOUT
     title = "Conversion took too long"
+    retryable = True  # the machine may only have been busy
 
     def __init__(self, seconds: float) -> None:
         super().__init__(f"The conversion took longer than {seconds:g} seconds and was stopped.")
+
+
+class NoTableFoundError(DomainError):
+    """A CSV export was asked of a document with no table. Reported as ``CNV-422-TABLE-001``."""
+
+    code = ErrorCode.NO_TABLE
+    title = "No table found"
+
+    def __init__(self) -> None:
+        super().__init__("The document has no table to export.")
+
+
+class InvalidRequestError(DomainError):
+    """A ``ConversionRequested`` this service can't act on: an unknown job type, input type or target, or several
+    inputs where only one is allowed. Reported as ``CNV-422-REQUEST-001``."""
+
+    code = ErrorCode.INVALID_REQUEST
+    title = "Request can't be processed"
+
+
+class OcrNotAvailableError(DomainError):
+    """The route needs OCR (a scanned PDF to Word, Excel or CSV), which this build doesn't have yet (decision D-1).
+    Reported as ``CNV-422-ROUTE-001``."""
+
+    code = ErrorCode.ROUTE_NOT_SUPPORTED
+    title = "Conversion not supported"
+
+    def __init__(self) -> None:
+        super().__init__("This document is scanned; converting it needs text recognition, which isn't available yet.")
+
+
+class UnexpectedFailureError(DomainError):
+    """Something outside the user's file went wrong (a bug, or a dependency down after every retry). Reported as
+    ``CNV-500-INTERNAL-001``; Java may try again."""
+
+    code = ErrorCode.INTERNAL_ERROR
+    title = "Conversion failed"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("The conversion failed for a reason unrelated to the file. Please try again.")

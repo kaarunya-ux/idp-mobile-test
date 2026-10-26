@@ -19,8 +19,48 @@ class Format(StrEnum):
     def is_image(self) -> bool:
         return self in IMAGE_FORMATS
 
+    @property
+    def content_type(self) -> str:
+        """The MIME type stored with an output in MinIO and reported to Java."""
+        return _CONTENT_TYPES[self]
+
+    @property
+    def suffix(self) -> str:
+        return _SUFFIXES[self]
+
+    @classmethod
+    def from_content_type(cls, content_type: str) -> Self | None:
+        """The format of an input, from the type document-service detected on upload (IDP-02 ch. 3.3)."""
+        bare = content_type.split(";", 1)[0].strip().lower()  # "text/csv; charset=utf-8" -> "text/csv"
+        for member, known in _CONTENT_TYPES.items():
+            if known == bare:
+                return cls(member)
+        alias = _CONTENT_TYPE_ALIASES.get(bare)
+        return cls(alias) if alias is not None else None
+
 
 IMAGE_FORMATS: frozenset[Format] = frozenset({Format.PNG, Format.JPEG})
+ZIP_CONTENT_TYPE = "application/zip"
+_OFFICE = "application/vnd.openxmlformats-officedocument"
+_CONTENT_TYPES = {
+    Format.PDF: "application/pdf",
+    Format.DOCX: f"{_OFFICE}.wordprocessingml.document",
+    Format.XLSX: f"{_OFFICE}.spreadsheetml.sheet",
+    Format.CSV: "text/csv",
+    Format.PPTX: f"{_OFFICE}.presentationml.presentation",
+    Format.PNG: "image/png",
+    Format.JPEG: "image/jpeg",
+}
+_CONTENT_TYPE_ALIASES = {"image/jpg": Format.JPEG, "application/csv": Format.CSV}  # seen from older clients
+_SUFFIXES = {
+    Format.PDF: ".pdf",
+    Format.DOCX: ".docx",
+    Format.XLSX: ".xlsx",
+    Format.CSV: ".csv",
+    Format.PPTX: ".pptx",
+    Format.PNG: ".png",
+    Format.JPEG: ".jpg",
+}
 
 
 class Representation(StrEnum):
