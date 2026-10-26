@@ -10,6 +10,10 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "structlog>=24.4",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.13",
+    "uuid-utils>=0.9",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +24,12 @@ workers = [
     "pypdfium2>=4.30",
     "img2pdf>=0.5",
     "openpyxl>=3.1",
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "pdfplumber>=0.11",
+    "celery>=5.4",
+    "boto3>=1.35",
+    "faststream[rabbit,cli]>=0.5",  # cli: the `faststream run` command the intake image starts with
 ]
 
 [dependency-groups]
@@ -34,9 +44,9 @@ dev = [
     "hypothesis>=6.100",
     "pikepdf>=9.0",
     "types-openpyxl>=3.1",
-    # build Word and PowerPoint files for tests; they become worker libraries in step 3c
-    "python-docx>=1.1",
-    "python-pptx>=1.0",
+    "testcontainers[minio,postgres,rabbitmq]>=4.8",
+    "boto3-stubs[s3]>=1.35",
+    "celery-types>=0.22",
 ]
 
 [build-system]
@@ -57,8 +67,9 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "S", "C4", "SIM", "PL", "RUF", "AS
 
 [tool.ruff.lint.per-file-ignores]
 # pytest checks results with plain assert statements (S101), tests compare against literal expected values on
-# purpose (PLR2004), and they build locked PDFs with throwaway passwords (S106).
-"tests/**" = ["S101", "PLR2004", "S106"]
+# purpose (PLR2004), they build locked PDFs with throwaway passwords (S106), and pytest passes fixtures as
+# arguments, so a test's argument count is its setup, not a design smell (PLR0913, PLR0917).
+"tests/**" = ["S101", "PLR2004", "S106", "PLR0913", "PLR0917"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -102,6 +113,7 @@ markers = [
 [tool.importlinter]
 root_package = "conversion"
 include_external_packages = true
+exclude_type_checking_imports = true  # imports under TYPE_CHECKING never run
 
 [[tool.importlinter.contracts]]
 name = "core does not depend on features or entry points"
@@ -116,7 +128,8 @@ source_modules = ["conversion.conversion.domain"]
 forbidden_modules = [
     "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "httpx", "celery", "faststream", "redis",
     "boto3", "structlog", "uvicorn", "conversion.core.config", "conversion.core.logging",
-    "PIL", "pypdfium2", "img2pdf", "openpyxl", "conversion.conversion.infrastructure",
+    "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber", "conversion.conversion.infrastructure",
+    "botocore", "aio_pika", "psycopg", "alembic", "conversion.core.db", "conversion.core.outbox",
 ]
 
 [[tool.importlinter.contracts]]
@@ -129,10 +142,22 @@ layers = ["application", "domain"]
 name = "Application depends on ports, not adapters"
 type = "forbidden"
 source_modules = ["conversion.conversion.application"]
-forbidden_modules = ["conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf", "openpyxl"]
+forbidden_modules = [
+    "conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber",
+    "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3", "botocore",
+]
 
 [[tool.importlinter.contracts]]
 name = "Health server stays slim (no converter libraries in its image)"
 type = "forbidden"
 source_modules = ["conversion.health"]
-forbidden_modules = ["conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf", "openpyxl"]
+forbidden_modules = [
+    "conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx",
+    "pdfplumber", "celery", "faststream", "boto3",
+]
+
+[[tool.importlinter.contracts]]
+name = "Runtime code imports no dev-only packages (type stubs are for TYPE_CHECKING blocks)"
+type = "forbidden"
+source_modules = ["conversion"]
+forbidden_modules = ["mypy_boto3_s3", "testcontainers", "pytest", "hypothesis"]

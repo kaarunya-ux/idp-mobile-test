@@ -1,7 +1,7 @@
 """The base class for business errors (ERR-02).
 
-Every business exception derives from ``DomainError`` and declares its ``ErrorCode`` and a short title, so the
-message consumer (step 4) can turn any of them into a ``WorkFailed`` message without knowing the specific type.
+Every business exception derives from ``DomainError`` and declares its ``ErrorCode``, a short title and whether
+trying again could help, so any of them becomes a ``WorkFailed`` message without knowing the specific type.
 """
 
 from typing import ClassVar
@@ -14,6 +14,7 @@ class DomainError(Exception):
 
     code: ClassVar[ErrorCode]
     title: ClassVar[str]
+    retryable: ClassVar[bool] = False  # WorkFailed.error.retryable: Java re-dispatches up to 3 times when true
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)

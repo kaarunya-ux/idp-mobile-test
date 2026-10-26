@@ -113,10 +113,10 @@ def _via_model(source: Format, target: Format, fidelity: Fidelity, reader: Conve
 
 def _from_pdf() -> Iterator[_Entry]:
     pdf = Format.PDF
-    yield _STANDARD, _route(pdf, Format.DOCX, _A, (_C.PDF_TO_DOCX, _R.DOCX))
+    yield _STANDARD, _via_model(pdf, Format.DOCX, _A, _C.PDF_TO_MODEL)
     yield _SCANNED, _via_model(pdf, Format.DOCX, _A, _C.OCR_TO_MODEL)
     for table_target in (Format.XLSX, Format.CSV):
-        yield _STANDARD, _via_model(pdf, table_target, _D, _C.PDF_TABLES)
+        yield _STANDARD, _via_model(pdf, table_target, _D, _C.PDF_TO_MODEL)
         yield _SCANNED, _via_model(pdf, table_target, _D, _C.OCR_TO_MODEL)
     yield _STANDARD, _route(pdf, Format.PPTX, _A, (_C.PDF_TO_IMAGES, _R.PNG), (_C.PPTX_FROM_IMAGES, _R.PPTX))
     for image in _IMAGES:
