@@ -1,12 +1,12 @@
 # Context for an AI assistant picking up the mobile extraction work
 
-Written 2026-10-26 for another AI coding assistant (or a new engineer) that starts a session on this branch with no memory of the earlier ones. Read this first, then `/CLAUDE.md` (the rules), then the documents named under "Where things are written down". Everything here was checked on 2026-10-26; where something is a guess it says so.
+Written 2026-10-26 for another AI coding assistant (or a new engineer) that starts a session on this branch with no memory of the earlier ones. Read this first, then `/CLAUDE.md` and `mobile/idp-android/CLAUDE.md` (the rules), then the documents named under "Where things are written down". Everything here was checked on 2026-10-26; where something is a guess it says so.
 
 ## 1. What this project is
 
 An Android app (`mobile/idp-android/`, Kotlin, package `com.modeltesting.vlmtester`) that reads Indian identity documents (Aadhaar, driving licence, passport, PAN) **on the phone, offline**, with a small vision-language model running through llama.cpp on the CPU. The user picks a photo, the app shrinks it, sends it with a short prompt to a local model process, checks the JSON answer with rules, and shows the fields. The Trinidad and Tobago validators are kept but have no real test cards.
 
-Branch `mobile_standards`. The job on this branch is to **standardize the existing mobile extraction to the IDP standards** (`standards_docs/`, git-ignored) and to make it fast and accurate enough to demonstrate. No new product features, no backend work, and do **not touch** `services/conversion-service/`, `services/conversions/`, `services/ocr/`, `mobile/idox-mobile/` (other people's work). `research/` is read-only.
+Merged into `feat/idp-consolidation` on 2026-10-26 (PR #9; rules now in `mobile/idp-android/CLAUDE.md`). The job was to **standardize the existing mobile extraction to the IDP standards** (`standards_docs/`, git-ignored) and to make it fast and accurate enough to demonstrate. No new product features, no backend work, and do **not touch** `services/conversion-service/`, `services/conversions/`, `services/extraction-service/`, `mobile/idox-mobile/` (other people's work). `research/` is read-only.
 
 Hard rules from the owner (also in `/CLAUDE.md`):
 - **Do not commit, push, open PRs or merge until the owner says so.** As of this writing about 25 files are changed or new and uncommitted (the last commits are `d3a8721` and `5cb6f57`, made by the owner).
@@ -60,14 +60,14 @@ Code (`mobile/idp-android/app/src/main/java/com/modeltesting/vlmtester/`, module
 - Assets: `assets/prompts/*.md` (versioned, SHA-256 pinned in `PromptFileTest`), `assets/grammars/*.gbnf`, `assets/models.yaml` (model registry).
 - Tests: `app/src/test/java/...` — about 278 JVM tests; helper `json(...)` in `TestJson.kt`.
 
-Documents (`docs/mobile-extraction/`, `docs/adr/`):
+Documents (`docs/mobile-extraction/`, `mobile/idp-android/docs/adr/`):
 - `TL_BRIEF.md` — decisions needed from the team lead plus the future-work list. **Start here for status.**
 - `STANDARDIZATION_HANDOFF.md` — what changed, measured results, how to rebuild and test.
 - `STANDARDS_COMPLIANCE.md` — rule-by-rule status (Met / Partly / Not met).
 - `ON_DEVICE_LATENCY_AND_ACCURACY_FINDINGS.md` — the speed and accuracy measurements.
 - ADRs 0001-0009 (all "Proposed", none approved yet). Older material (`HANDOVER*.md`, `*_FINDINGS.md`, PDFs) is history from before the standards work; do not rewrite it.
 
-Test data (not in git): `data/india_docs/{aadhaar,dl,passport,pan}/` with images and `truth.md` (values read from the images by an AI on 2026-10-23, **owner still to confirm**; PAN has no truth file, `card_a` = OMRPS9699G / ROSHAN SAHANI / RAMESH SAHANI / 27/02/2002, `card_b` = QFVPS0764H / SAMAD / MOHD SAJID / 03/02/2004). On the phone: `/sdcard/Download/idp_india_docs/` (dl_1-5, pp_1-5, aa_1-6) and `/sdcard/Download/pan_tests/` (card_a..e_front.jpg).
+Test data (not in git): `data/india_docs/{aadhaar,dl,passport,pan}/` with images and `truth.md` (values read from the images by an AI on 2026-10-23, **owner still to confirm**; PAN has no truth file; its expected values stay with the images, never in git). On the phone: `/sdcard/Download/idp_india_docs/` (dl_1-5, pp_1-5, aa_1-6) and `/sdcard/Download/pan_tests/` (card_a..e_front.jpg).
 
 ## 6. How to build, test and look at results
 

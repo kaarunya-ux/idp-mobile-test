@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Android app that extracts structured fields from ID documents on the phone, using a small vision-language model run by llama.cpp (CPU, ARMv8.2 dot-product build) and ML Kit text recognition for the OCR-first path. Owner: mobile extraction (IDP). It is a test harness today; the target architecture is IDP-04 Ch. 3 (see [ADR 0002](../../docs/adr/0002-mobile-extraction-deviations-kept-for-now.md)).
+Android app that extracts structured fields from ID documents on the phone, using a small vision-language model run by llama.cpp (CPU, ARMv8.2 dot-product build) and ML Kit text recognition for the OCR-first path. Owner: mobile extraction (IDP). It is a test harness today; the target architecture is IDP-04 Ch. 3 (see [ADR 0002](docs/adr/0002-mobile-extraction-deviations-kept-for-now.md)).
 
 ## Run locally
 

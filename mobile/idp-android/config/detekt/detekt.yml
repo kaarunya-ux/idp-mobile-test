@@ -1,6 +1,6 @@
 # Limits mirror the Python Engineering Standard (Ch. 19 and 27.2), which the Kotlin
 # standard does not define: complexity 10, 50 lines per function, 7 parameters,
-# 400 lines per file. See docs/adr/0003-kotlin-lint-and-format-gates.md.
+# 400 lines per file. See mobile/idp-android/docs/adr/0003-kotlin-lint-and-format-gates.md.
 complexity:
   CyclomaticComplexMethod:
     active: true

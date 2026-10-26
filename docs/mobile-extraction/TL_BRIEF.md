@@ -1,6 +1,6 @@
 # Mobile extraction: decisions needed from the team lead
 
-One page. Status of the standardization of `mobile/idp-android` (the on-device Aadhaar/PAN extraction app) and the decisions only the team lead can make. Details: `STANDARDS_COMPLIANCE.md`, `docs/adr/`.
+One page. Status of the standardization of `mobile/idp-android` (the on-device Aadhaar/PAN extraction app) and the decisions only the team lead can make. Details: `STANDARDS_COMPLIANCE.md`, `mobile/idp-android/docs/adr/`.
 
 ## Where we are
 - The existing app was tidied to the IDP standards without adding features and without touching the servers or other teams' folders.

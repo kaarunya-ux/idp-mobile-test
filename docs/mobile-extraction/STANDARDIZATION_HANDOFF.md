@@ -10,8 +10,8 @@ This page is the entry point. It says what was done, how to check it, what is st
 
 Standardize the existing on-device document extraction (`mobile/idp-android`, Aadhaar and PAN, Kotlin and llama.cpp) to the IDP standards in `standards_docs/`.
 
-- In scope: `mobile/idp-android/`, `docs/mobile-extraction/`, `docs/adr/`. `research/` is read-only context.
-- Out of scope: new features, backend work, RAM-tier model selection (front-end team), the Compose/Hilt/Room stack (the team lead has not agreed it), and the other teams' folders (`services/conversion-service`, `services/conversions`, `services/ocr`, `mobile/idox-mobile`).
+- In scope: `mobile/idp-android/`, `docs/mobile-extraction/`, `mobile/idp-android/docs/adr/`. `research/` is read-only context.
+- Out of scope: new features, backend work, RAM-tier model selection (front-end team), the Compose/Hilt/Room stack (the team lead has not agreed it), and the other teams' folders (`services/conversion-service`, `services/conversions`, `services/extraction-service`, `mobile/idox-mobile`).
 - PaddleOCR-VL support was removed at the owner's request. Its findings docs and logs stay as history.
 - Behavior and measured values were moved, not changed. Rule-by-rule status: [STANDARDS_COMPLIANCE.md](STANDARDS_COMPLIANCE.md).
 
@@ -36,7 +36,7 @@ Standardize the existing on-device document extraction (`mobile/idp-android`, Aa
 | One model in memory | Turning server mode off, or starting a one-shot scan, stops the warm server so two copies of the model are never loaded (`MainActivity`; proven only by the logs so far, not on a phone) | ML-03 |
 | Decisions and docs | ADRs 0001 to 0009 (all Proposed, none approved), compliance matrix, architecture note, phone checklist, toolchain versions, a repo-root `CLAUDE.md` | Java Std 33.6, 34.1 |
 
-Files and folders: `mobile/idp-android/app/src/main/java/com/modeltesting/vlmtester/` (the new files and `README.md`), `app/src/test/`, `app/src/main/assets/prompts/` and `models.yaml`, `scripts/check.sh`, `config/detekt/`, `.editorconfig`, `native/build_llama_dotprod.sh`, `docs/adr/`, `docs/mobile-extraction/`.
+Files and folders: `mobile/idp-android/app/src/main/java/com/modeltesting/vlmtester/` (the new files and `README.md`), `app/src/test/`, `app/src/main/assets/prompts/` and `models.yaml`, `scripts/check.sh`, `config/detekt/`, `.editorconfig`, `native/build_llama_dotprod.sh`, `mobile/idp-android/docs/adr/`, `docs/mobile-extraction/`.
 
 ## 3. How to check it
 
@@ -119,11 +119,11 @@ Recommended size if B is chosen: 500 px longest edge. The old library read card 
 |---|---|---|---|---|
 | Qwen3-VL 2B, 480 px resize | 25 | 5/5 | 19 to 20 s | none |
 | LFM2-VL 3B, 500 px resize | 24 | 4/5 | 26 to 29 s | card e relation `mother` (card says Father's Name) |
-| MiniCPM-V 4.6, field canvas | 22 | 2/5 | 17 to 18 s | card c PAN `FCLPM0017F`, card d PAN `AJTPI4244M`, card e name `SAROJIN M` |
+| MiniCPM-V 4.6, field canvas | 22 | 2/5 | 17 to 18 s | card c and card d: PAN misread; card e: name misread |
 
 Limits: five cards, one run each, command line only (not the app), the app's resize and canvas code rebuilt outside the app (sips and a small Java program). No camera photos were tested.
 
-**Change made on 2026-10-23 (option B, in the working tree, not committed).** The app now shrinks the image before LFM2 reads it: PAN to 500 px, Aadhaar, DL and passport to 560 px. Before the change the app capped LFM2 at 1,280 px, which left an 860 px PAN card unshrunk (the old code comment assumed the model shrinks the image itself, which was true of the old libraries and is not true of the new `libmtmd`). Code: `ModelProfiles.LFM2_PAN_MAX_EDGE`, `LFM2_DOCUMENT_MAX_EDGE`, `useLfm2DocumentResize`; `ExtractionPlan.Plan.maxEdge`; `MainActivity.downscaleForLfm2(imageFile, longestEdge)`. Tests: 231 pass, and three planted bugs (wrong set, wrong edge, ignored resize) each fail the new tests. Decision record: [ADR 0007](../adr/0007-shrink-lfm2-input-images.md). **Not done:** the app's own resize has not been run on a phone (the numbers above came from images resized with `sips` and a command-line run), and the accuracy cost for LFM2 against full size is not measured. Qwen3-VL and MiniCPM-V are unchanged.
+**Change made on 2026-10-23 (option B, in the working tree, not committed).** The app now shrinks the image before LFM2 reads it: PAN to 500 px, Aadhaar, DL and passport to 560 px. Before the change the app capped LFM2 at 1,280 px, which left an 860 px PAN card unshrunk (the old code comment assumed the model shrinks the image itself, which was true of the old libraries and is not true of the new `libmtmd`). Code: `ModelProfiles.LFM2_PAN_MAX_EDGE`, `LFM2_DOCUMENT_MAX_EDGE`, `useLfm2DocumentResize`; `ExtractionPlan.Plan.maxEdge`; `MainActivity.downscaleForLfm2(imageFile, longestEdge)`. Tests: 231 pass, and three planted bugs (wrong set, wrong edge, ignored resize) each fail the new tests. Decision record: [ADR 0007](../../mobile/idp-android/docs/adr/0007-shrink-lfm2-input-images.md). **Not done:** the app's own resize has not been run on a phone (the numbers above came from images resized with `sips` and a command-line run), and the accuracy cost for LFM2 against full size is not measured. Qwen3-VL and MiniCPM-V are unchanged.
 
 **Consequence.** The pinned build script does not reproduce the old app's LFM2 speed unless the input is resized (B, now in the code) or the old `libmtmd` is used (C). Until the team lead decides, do not call the dot-product build from that script "the build". It belongs in the build ADR (0001) and in the compliance matrix (BLD-02).
 
@@ -174,3 +174,16 @@ The counts in [STANDARDS_COMPLIANCE.md](STANDARDS_COMPLIANCE.md) and [TL_BRIEF.m
 - Phone: a scratchpad build with the new Kotlin code and the old APK's native libraries is installed (not the repo's pinned build); the six models are in its app folder, with a backup in `/sdcard/Download/idp_backup_2026-10-22/models`. My test files in `/data/local/tmp` were deleted.
 - Laptop: the old APK, its run log and the unpacked libraries are kept outside the repo in the session scratchpad. They are not in git and are not needed to build the app.
 - Working tree: the ignored `app/src/main/jniLibs/arm64-v8a/libomp.so` holds the old APK's copy from an early test; the original `dist_dot` copy is saved in the session scratchpad. Nothing under `jniLibs` is tracked by git.
+
+## Cleanup after the merge (2026-10-26, `feat/mobile-standards-cleanup`)
+
+Done by the Python lead after PR #9, without changing app behaviour:
+
+| Change | Why |
+|---|---|
+| ADRs moved from `docs/adr/` to `mobile/idp-android/docs/adr/`; every link updated | Each part of the repo keeps its own ADRs (extraction-service has its own 0001-0003), so numbers don't clash |
+| Root `CLAUDE.md` keeps the repo-wide rules; the branch rules moved to `mobile/idp-android/CLAUDE.md` | They applied to the whole repo once merged ("don't touch `services/ocr`", "merge to `dev`") |
+| Card values removed from `AI_CONTEXT.md` and this file; real DL serial numbers in `DlRulesTest.kt` and `ValidationReportsTest.kt` replaced with made-up ones (state, office and year kept) | No personal data in git |
+| Licence notes added to `assets/models.yaml` as comments | The registry had none. A real `licence` field needs a `ModelRegistry.kt` change plus tests, run with `scripts/check.sh` |
+
+**Not run here:** `scripts/check.sh` (no Android SDK on the lead's machine). The test edits change only digits inside string values used consistently within each test, and the YAML change is comment lines, which the parser skips. **Run `scripts/check.sh` once on the Mac to confirm.**
