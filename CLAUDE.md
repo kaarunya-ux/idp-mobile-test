@@ -44,4 +44,6 @@ Target architecture (IDP-04 Ch. 3): Kotlin 2.x, Compose + Material 3, min SDK 26
 - The standards ask for `feat/<TICKET>-<slug>` branches, Conventional Commits, PRs of about 400 changed lines with what/why/tests/risk, and an ADR for deviations and new dependencies. For this branch there are no PRs until the end, and nothing is committed or pushed until the owner says so (see "Working rules for this branch").
 
 ## Known gaps
+New session on the mobile extraction? Read `docs/mobile-extraction/AI_CONTEXT.md` first (status, open problems, how to build and test on the phone, traps).
+
 The existing code predates these standards. Rule-by-rule status: `docs/mobile-extraction/STANDARDS_COMPLIANCE.md`. Decisions waiting on the team lead: `docs/mobile-extraction/TL_BRIEF.md`. Deviations kept on purpose: `docs/adr/`. `services/conversion-service/` is the reference implementation of the Python standard.

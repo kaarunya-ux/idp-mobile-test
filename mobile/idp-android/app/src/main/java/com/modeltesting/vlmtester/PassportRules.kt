@@ -29,6 +29,13 @@ object PassportRules {
         checkDateShape(problems, notes, obj, "issue_date", 1990, currentYear)
         checkDateShape(problems, notes, obj, "expiry_date", 1990, currentYear + 20)
 
+        // Found in the app 2026-10-26: expiry 27/10/2014 read next to issue 23/06/2023 (the old passport's date).
+        val issue = ExtractionRules.toIso(str(obj, "issue_date"))
+        val expiry = ExtractionRules.toIso(str(obj, "expiry_date"))
+        if (issue != null && expiry != null && expiry <= issue) {
+            problems += "expiry_date $expiry is not after issue_date $issue"
+        }
+
         val pp = str(obj, "passport_number")
         if (pp != null && !Regex("^[A-Z][0-9]{7}$").matches(pp)) {
             problems += "passport_number '$pp' is not 1 letter + 7 digits"

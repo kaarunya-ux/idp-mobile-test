@@ -1,10 +1,10 @@
 # Standards compliance: mobile extraction (`mobile/idp-android`)
 
-Where the app stands against the IDP standards, rule by rule. Status as of 2026-10-22, on the `mobile_standards` branch, uncommitted.
+Where the app stands against the IDP standards, rule by rule. Status updated 2026-10-26 (first written 2026-10-22), on the `mobile_standards` branch, uncommitted.
 
 **How to read it.** *Met* has evidence you can run. *Partly* says what is missing. *Not met* has a plan or an ADR. *Held* waits on a decision from the team lead (the on-device model direction). *N/A today* means the rule is about something this app does not have yet (accounts, a database, a server connection). Nothing here has run on a phone; "Met" means built, linted and unit-tested on a Mac.
 
-Evidence command: `mobile/idp-android/scripts/check.sh` (231 unit tests, ktlint, detekt, Android Lint, debug and release builds, no forbidden files tracked).
+Evidence command: `mobile/idp-android/scripts/check.sh` (278 unit tests, ktlint, detekt, Android Lint, debug and release builds, no forbidden files tracked).
 
 Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules apply to any code that calls a model; the style and size limits are applied to Kotlin by analogy, see ADR 0003), the Java Standard Ch. 33–34 (git, ADRs, documentation, which the Python Standard adopts).
 
@@ -18,7 +18,7 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 | IDP-04 3.1 | Kotlin 2.x | Not met | Kotlin 1.9.24 |
 | IDP-04 3.1 | min SDK 26 | Not met | 28, because the native libraries are built for android-28. ADR 0002 row 2 |
 | PKG-01 | No `utils` / `helpers` / `common` files | Met | None exist |
-| PY-11 / Ch. 27.2 | Files ≤ 400 lines | Partly | All 19 extracted files are under 400. `MainActivity.kt` is 1,781 |
+| PY-11 / Ch. 27.2 | Files ≤ 400 lines | Partly | All 26 extracted files are under 400 (ResultDisplay, RunInfoDisplay, TtRules, ValidationReports, ProcessMonitor and ImagePreparation were added 2026-10-26; the Trinidad and Tobago checks and the choice of check per document type moved out of `MainActivity.kt`, proved by 6,000 random comparisons against the old code and planted-bug checks; the live-stats monitor and the image resizing moved out too, proved on the phone, with the resized files byte-identical to the old build's. `ImagePreparation` needs Android's Bitmap classes, so unit tests cannot cover it). `MainActivity.kt` is 1,322 |
 | PY-11 / Ch. 27.2 | Functions ≤ 50 lines, complexity ≤ 10, ≤ 7 parameters | Partly | Enforced by detekt on the 19 extracted files. `MainActivity.kt` is not checked yet |
 | DOM-01 | Domain code has no framework or I/O imports | Met | The `*Rules`, `ModelProfiles`, `ImageSizing`, `ModelFiles`, `ProcessStats`, `OutputParser` files import only `org.json` (the platform JSON) and the Kotlin library |
 | DOM-05 | Time and randomness injected, never read inside the domain | Met | The calendar year is a parameter in every rule; `RunLog` takes the date as an argument |
@@ -43,7 +43,7 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 | Rule | Asks for | Status | Evidence / plan |
 |---|---|---|---|
 | LLM-01 | Call models only through an adapter, not from business code | Partly | The launch arguments, environment, request and reply JSON and output parsing are in `LlamaLaunch`, `LlamaRequest`, `OutputParser` (pure, 50 tests). The process start and HTTP calls are still in `MainActivity.kt`; moving them needs the phone check |
-| LLM-02 | Prompts as versioned files, version recorded on the output | Met | All 15 prompts are `<name>.v1.md` with front matter (model, temperature, schema); the run-log header records `promptVersion`; a test pins the SHA-256 of every body. The evaluation that must accompany a new version (ML-12) is not automated. ADR 0005 |
+| LLM-02 | Prompts as versioned files, version recorded on the output | Met | All 18 prompts (15 original, 3 compact: DL, passport, Aadhaar) are `<name>.v1.md` with front matter (model, temperature, schema); the run-log header records `promptVersion`; a test pins the SHA-256 of every body. The evaluation that must accompany a new version (ML-12) is not automated. ADR 0005 |
 | LLM-03 | Structured output, validated | Met | Grammar and JSON schema constrain the output; `PanRules`, `AadhaarRules`, `DlRules`, `PassportRules`, `Stage1Rules` validate it |
 | LLM-04 | Document text is data; model output never triggers actions unchecked | Met | `OutputParser` rejects output copied from our own prompts; 16 tests |
 | LLM-05 | Timeouts, bounded retries, concurrency limits | Partly | Audited 2026-10-22. Server path: connect 10 s, read 300 s, a 30 s readiness poll, one warm-up retry after 10 s (all bounded); Qwen and LFM2 run one slot; the Run button is disabled during a run. **Gap:** the one-shot (CLI) path has no inference timeout; it ends when the model finishes or the user presses Stop (also ML-06). Fixing it changes the process handling, which waits for the phone check |
@@ -63,9 +63,11 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 
 | Rule | Asks for | Status | Evidence / plan |
 |---|---|---|---|
-| 3.9 | Unit tests for rules | Met | 231 tests; planted-bug checks on each new group |
+| 3.9 | Unit tests for rules | Met | 278 tests; planted-bug checks on each new group |
+| 3.9 / ML-10 | Rule checks catch impossible values | Partly | Added 2026-10-26: real calendar dates, a licence number starting with `DL NO`, licence issue year from 1950, passport expiry must be after issue (`ExtractionRules`, `DlRules`, `PassportRules`, with tests). The label HIGH still means "all fields filled", not "correct": wrong values were HIGH in Runs 21, 31, 33, 34, 38, 48 and 50. TL_BRIEF future work item 2 |
+| IDP-04 / OBS-04 | Result screen shows fields only; run details in their own card | Met | `ResultDisplay` and `RunInfoDisplay` (pure, 5 tests); the saved run log is unchanged. Seen on a phone 2026-10-26. No document content added to logs |
 | TST-10 | No `sleep` in tests | Met | |
-| 21.2, 27.2 | Coverage ≥ 85% of lines on domain code, ≥ 70% of branches | Met | JaCoCo (ADR 0006): 99.7% of lines and 90.3% of branches of the extracted logic; `check.sh` fails below the floors. `MainActivity.kt` is not measured (needs a phone) |
+| 21.2, 27.2 | Coverage ≥ 85% of lines on domain code, ≥ 70% of branches | Met | JaCoCo (ADR 0006): 91.7% of lines and 86.6% of branches of the extracted logic; `check.sh` fails below the floors. `MainActivity.kt` is not measured (needs a phone) |
 | 3.9 | View-model, repository, Room, WorkManager, Compose tests | N/A today | Those layers do not exist |
 | 3.9 | Quality-gate tests with golden images | N/A today | No quality gate |
 | 3.9 | Macrobenchmark for startup and scrolling | Not met | |
@@ -79,7 +81,7 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 | 27.1 gate 2 | Types and architecture checks | Met / Not met | The compiler checks types. There is no architecture-rule tool for the layers |
 | 27.1 gate 4 | Dependency, secret and image scans | Partly | gitleaks (ADR 0006) found nothing in the app folder, the docs, this branch's commits or the whole repository history, and finds a planted fake key. `check.sh` runs it when installed and says so when skipped. No dependency or image scan yet |
 | 27.1 | CI | Not met | Checks run locally with `scripts/check.sh` |
-| IDP-04 3.7 | Android Lint | Partly | 0 errors, 72 warnings. Fixed: the 30 hard-coded texts moved to `strings.xml`, descriptions added to the 2 images, backup rules added. Left: 54 "text built in code" notes, 5 library-update notes, 2 button-style notes, 1 missing app icon |
+| IDP-04 3.7 | Android Lint | Partly | 0 errors, 70 warnings. Fixed: the 30 hard-coded texts moved to `strings.xml`, descriptions added to the 2 images, backup rules added. Left: 54 "text built in code" notes, 5 library-update notes, 2 button-style notes, 1 missing app icon |
 
 ## 6. Performance targets (IDP-04 3.7)
 
@@ -93,7 +95,7 @@ Sources: IDP-04 (mobile), the Python Engineering Standard (the `[ML]` rules appl
 
 | Rule | Asks for | Status | Evidence / plan |
 |---|---|---|---|
-| Java Std 33.6 | An ADR for each deviation from a MUST and each new dependency | Partly | ADRs 0001–0006 written and marked Proposed; not yet approved. ADR 0006 covers JaCoCo and gitleaks; ADR 0005 covers prompt versioning and the model registry; ADR 0004 covers the removal of PaddleOCR-VL and the test-only dependencies (JUnit, `org.json`); ADR 0003 covers ktlint and detekt |
+| Java Std 33.6 | An ADR for each deviation from a MUST and each new dependency | Partly | ADRs 0001–0009 written and marked Proposed; not yet approved. ADR 0009 covers the Qwen input resize, ADR 0008 the compact prompts, ADR 0007 the LFM2 input resize. ADR 0006 covers JaCoCo and gitleaks; ADR 0005 covers prompt versioning and the model registry; ADR 0004 covers the removal of PaddleOCR-VL and the test-only dependencies (JUnit, `org.json`); ADR 0003 covers ktlint and detekt |
 | Java Std 33.2 | Conventional Commits with ticket | Partly | Conventional Commits used; no ticket ids |
 | Java Std 33.1 | `feat/<TICKET>-<slug>` branches | Not met | Branch `mobile_standards`, by choice |
 | Java Std 33.3 | PRs of about 400 lines | Deferred | No PRs until the end, by decision. Nothing is pushed |

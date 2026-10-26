@@ -28,6 +28,7 @@
     <string name="ui_ram_mb">"RAM: -- MB"</string>
     <string name="ui_cpu" formatted="false">"CPU: -- %"</string>
     <string name="ui_gpu" formatted="false">"GPU: -- %"</string>
+    <string name="ui_run_details">"RUN DETAILS"</string>
     <string name="ui_output">"Output"</string>
     <string name="ui_nothing_run_yet">"Nothing run yet."</string>
     <string name="preview_back_image">"Preview of the picked back-side image"</string>

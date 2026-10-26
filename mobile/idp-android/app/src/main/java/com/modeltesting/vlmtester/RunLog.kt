@@ -21,3 +21,12 @@ class RunLog(private val file: File) {
         file.appendText("=== $statusPrefix | $date ===\n$summary\n\n")
     }
 }
+
+/** The "Run 1, Run 2, ..." counter. It survives app restarts, so run numbers stay meaningful across a day's testing. */
+class RunCounter(private val read: () -> Int, private val write: (Int) -> Unit) {
+    fun next(): Int {
+        val next = read() + 1
+        write(next)
+        return next
+    }
+}

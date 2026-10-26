@@ -78,6 +78,23 @@ class ModelProfilesTest {
     }
 
     @Test
+    fun `shrinks the Qwen image only for dl, passport and aadhaar with a Qwen model`() {
+        for (model in listOf("qwen3vl-2b-instruct-q4_k_m.gguf", "Qwen3-VL-4B-Instruct-Q4_K_M.gguf")) {
+            assertTrue(model, ModelProfiles.useQwenDocumentResize("dl", model))
+            assertTrue(model, ModelProfiles.useQwenDocumentResize("passport", model))
+            assertTrue(model, ModelProfiles.useQwenDocumentResize("aadhaar", model))
+            for (docType in listOf("pan", "pan_full", "tt_dl", "pan_crop", "aadhaar_stage1")) {
+                assertFalse("$model $docType", ModelProfiles.useQwenDocumentResize(docType, model))
+            }
+        }
+        for (model in listOf("LFM2-VL-3B-Q4_K_M.gguf", "minicpm-v-4.6-q4_k_m.gguf", "VisionPsy-Nano-Q5_K_M.gguf")) {
+            assertFalse(model, ModelProfiles.useQwenDocumentResize("dl", model))
+            assertFalse(model, ModelProfiles.useQwenDocumentResize("passport", model))
+            assertFalse(model, ModelProfiles.useQwenDocumentResize("aadhaar", model))
+        }
+    }
+
+    @Test
     fun `shrinks the LFM2 image only for aadhaar, dl and passport with an LFM2 model`() {
         for (docType in listOf("aadhaar", "dl", "passport")) {
             assertTrue(docType, ModelProfiles.useLfm2DocumentResize(docType, "LFM2-VL-3B-Q4_K_M.gguf"))
@@ -120,6 +137,7 @@ class ModelProfilesTest {
         assertEquals(128, ModelProfiles.LFM2_PAN_IMAGE_TOKEN_CAP)
         assertEquals(500, ModelProfiles.LFM2_PAN_MAX_EDGE)
         assertEquals(560, ModelProfiles.LFM2_DOCUMENT_MAX_EDGE)
+        assertEquals(560, ModelProfiles.QWEN_DOCUMENT_MAX_EDGE)
         assertEquals(256, ModelProfiles.QWEN_PAN_IMAGE_TOKEN_CAP)
         assertEquals(480, ModelProfiles.QWEN_PAN_CARD_EDGE)
         assertEquals(1000, ModelProfiles.QWEN_PAN_CROP_MAX_EDGE)

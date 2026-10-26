@@ -81,6 +81,14 @@ class PassportRulesTest {
         assertTrue(report.contains("issue_date year 2030 implausible"))
     }
 
+    @Test
+    fun `validatePassport flags an expiry date that is not after the issue date`() {
+        val obj = validPassport().put("issue_date", "23/06/2023").put("expiry_date", "27/10/2014")
+        val report = PassportRules.validate(obj, year)
+        assertTrue(report, report.contains("expiry_date 2014-10-27 is not after issue_date 2023-06-23"))
+        assertFalse(PassportRules.validate(validPassport(), year).contains("is not after"))
+    }
+
     // --- compact profile -----------------------------------------------------------
 
     private fun compactPassport() = json(

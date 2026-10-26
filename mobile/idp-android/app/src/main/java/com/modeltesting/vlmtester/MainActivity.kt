@@ -7,8 +7,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Bundle
@@ -30,13 +28,12 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.modeltesting.vlmtester.databinding.ActivityMainBinding
 import java.io.File
 import java.io.FileOutputStream
-import java.io.RandomAccessFile
-import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val ui = Handler(Looper.getMainLooper())
+    private val images by lazy { ImagePreparation(cacheDir, filesDir) }
 
     private var pickedImageFile: File? = null
     private var pickedBackImageFile: File? = null
@@ -386,9 +383,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun nextRunNumber(): Int {
         val prefs = getSharedPreferences("vlm_tester", Context.MODE_PRIVATE)
-        val next = prefs.getInt("run_counter", 0) + 1
-        prefs.edit().putInt("run_counter", next).apply()
-        return next
+        return RunCounter(
+            read = { prefs.getInt("run_counter", 0) },
+            write = { prefs.edit().putInt("run_counter", it).apply() }
+        ).next()
     }
 
     // Private storage, not the external folder: the log holds extracted document fields.
@@ -516,142 +514,8 @@ class MainActivity : AppCompatActivity() {
     private fun warmKey(useSystem: Boolean, promptText: String): Int =
         (if (useSystem) systemPrompt else "").hashCode() * 31 + promptText.hashCode()
 
-    /** Resize for the Qwen pan_full profile - see useQwenPanProfile(). */
-    private fun downscaleForQwenPan(imageFile: File, tokenCap: Int): File {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
-        val edge = ImageSizing.qwenPanTargetEdge(bounds.outWidth, bounds.outHeight, tokenCap) ?: return imageFile
-        return downscaleForMiniCpm(imageFile, edge, "qwen_resized.jpg")
-    }
-
     private fun withDocumentType(text: String, type: String): String =
         ExtractionRules.withDocumentType(text, type)
-
-    /** MiniCPM-V only: its adaptive slicer (mtmd_image_preprocessor_llava_uhd, the
-     *  minicpmv-specific branch) splits the image into roughly ceil(width*height / 448^2)
-     *  tiles (hardcoded max 9, see mtmd-image.cpp), each costing ~12-13s through the
-     *  CPU-only vision encoder - confirmed on-device 2026-09-29: a 7-tile photo spent
-     *  92.7s of a 102.2s total run purely on vision encoding. Capping the longest edge
-     *  before sending cuts tile count directly (unlike the app's image-token-cap toggle,
-     *  which is a confirmed no-op for this model - see imageTokenCapFor). 896px (2x the
-     *  448 tile size) was tried first: consistent ~4 tiles, ~60s total, not aggressive
-     *  enough. 560px (1.25x tile size) targets 1-2 tiles instead - NOT yet validated for
-     *  whether it costs legibility on small print (the PAN number) at typical
-     *  camera-capture resolution; needs on-device accuracy re-verification, same caution
-     *  as every other untested cap value in this file.
-     *  Writes to a separate cache file rather than overwriting imageFile, since other
-     *  models keep using the original, full-resolution photo. */
-    private fun downscaleForMiniCpm(
-        imageFile: File, longestEdge: Int = 560, outName: String = "minicpm_resized.jpg"
-    ): File {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
-        val plan = ImageSizing.resizePlan(bounds.outWidth, bounds.outHeight, longestEdge) ?: return imageFile
-        val decoded = BitmapFactory.decodeFile(
-            imageFile.absolutePath,
-            BitmapFactory.Options().apply { this.inSampleSize = plan.inSampleSize }
-        ) ?: return imageFile
-        val scaled = Bitmap.createScaledBitmap(decoded, plan.targetWidth, plan.targetHeight, true)
-        if (scaled !== decoded) decoded.recycle()
-
-        val outFile = File(cacheDir, outName)
-        FileOutputStream(outFile).use { out -> scaled.compress(Bitmap.CompressFormat.JPEG, 92, out) }
-        scaled.recycle()
-        return outFile
-    }
-
-    /** LFM2-VL: the longest edge comes from the plan (ModelProfiles.LFM2_PAN_MAX_EDGE for pan_full,
-     *  LFM2_DOCUMENT_MAX_EDGE for aadhaar, dl and passport). It used to be 1280 on the assumption
-     *  that the model shrinks the image itself; the libraries built from llama.cpp 000bee5 tile a
-     *  large image instead, which made LFM2 about 3x slower (see the comments on those constants
-     *  and docs/mobile-extraction/ON_DEVICE_LATENCY_AND_ACCURACY_FINDINGS.md). */
-    private fun downscaleForLfm2(imageFile: File, longestEdge: Int): File =
-        downscaleForMiniCpm(imageFile, longestEdge, "lfm2_resized.jpg")
-
-    /** Qwen3-VL: the model resizes every image to its own pixel budget (tokenCap x 32x32 px,
-     *  since patch 16 x 2x2 merge) however large it arrives, so a camera photo only adds JPEG
-     *  decode and resize time before the encoder starts. Measured on the 4B 2026-10-06: image
-     *  encoding began at 8.4s for a 4000x2502 photo against 3.5s for an 860x538 card, with
-     *  the same 240 image tokens either way (about 5s). Only images holding more than TWICE
-     *  the budget are shrunk, and only down to twice the budget, so the model still resamples
-     *  from more pixels than it keeps and never sees less than it would have. Do NOT push this
-     *  toward the budget itself: sending the card at 448px (about 120 tokens) was 22s faster
-     *  but misread a PAN number on the smallest test card (2 of its 10 characters, still a
-     *  valid PAN format). The 860x538 test cards are below the threshold and pass through
-     *  untouched. Not validated end-to-end on real camera photos. */
-    private fun downscaleForQwen(
-        imageFile: File, tokenCap: Int, outName: String = "qwen_resized.jpg", headroom: Double = 2.0
-    ): File {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
-        val edge = ImageSizing.qwenTargetEdge(bounds.outWidth, bounds.outHeight, tokenCap, headroom)
-            ?: return imageFile
-        return downscaleForMiniCpm(imageFile, edge, outName)
-    }
-
-    /** A field region as fractions of the FRONT of the card (0..1), so it holds for any
-     *  card size. Bands are deliberately generous: a first version with tight boxes clipped
-     *  the PAN number on one test card and the DOB / father's name on another, and the
-     *  model then returned null or INVENTED a value instead of failing. */
-    private data class Band(val x0: Float, val y0: Float, val x1: Float, val y1: Float)
-
-    private val panFrontBands = listOf(
-        Band(0.20f, 0.30f, 0.72f, 0.52f),  // "Permanent Account Number Card" + PAN number
-        Band(0.00f, 0.52f, 0.50f, 0.68f),  // name
-        Band(0.00f, 0.66f, 0.50f, 0.82f),  // father's name
-        Band(0.00f, 1.00f - 0.20f, 0.50f, 1.00f)  // date of birth
-    )
-
-    /** pan_full + MiniCPM-V only. MiniCPM-V's slicer always makes >= 3 tiles for any image
-     *  over 448px on a side (~7s each), but a single 448x448 image is exactly one tile.
-     *  So instead of shrinking the whole photo and letting the slicer cut it (two
-     *  resamples, and tiles spent on the QR code / background / back of the card), cut the
-     *  field regions from the ORIGINAL pixels, stack them into one 448x448 canvas (one
-     *  resample, about 1.0-1.35x) and send that.
-     *  Measured in the adb test harness 2026-09-30 on 5 clean front-card crops, 25 runs:
-     *  avg 22.4s vs ~41s, 92% of fields / 60% of documents correct (see
-     *  MINICPM_LATENCY_FINDINGS.md). NOT validated on real camera photos.
-     *  ASSUMES [imageFile] is the front of the card and nothing else - the bands are
-     *  fractions of the whole picture, so a photo with the card small in the frame, or
-     *  both sides in one image, puts them on the wrong text. Returns the file to send. */
-    private fun buildFieldCanvasFile(imageFile: File, size: Int = 448): File {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
-        var sample = 1
-        // Keep the decode small enough for memory but never below ~1600px on the long edge:
-        // the bands are cut from real pixels, that is the whole point.
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1600) sample *= 2
-        val card = BitmapFactory.decodeFile(
-            imageFile.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample }
-        ) ?: return imageFile
-
-        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out).apply { drawColor(Color.WHITE) }
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        var y = 0f
-        for (b in panFrontBands) {
-            val x0 = (b.x0 * card.width).roundToInt().coerceIn(0, card.width - 1)
-            val y0 = (b.y0 * card.height).roundToInt().coerceIn(0, card.height - 1)
-            val x1 = (b.x1 * card.width).roundToInt().coerceIn(x0 + 1, card.width)
-            val y1 = (b.y1 * card.height).roundToInt().coerceIn(y0 + 1, card.height)
-            val crop = Bitmap.createBitmap(card, x0, y0, x1 - x0, y1 - y0)
-            val scale = minOf(size.toFloat() / crop.width, 1.35f)
-            val dw = crop.width * scale
-            val dh = crop.height * scale
-            canvas.drawBitmap(crop, null, RectF(0f, y, dw, y + dh), paint)
-            y += dh + 3f
-            crop.recycle()
-        }
-        card.recycle()
-
-        val outFile = File(cacheDir, "field_canvas.jpg")
-        FileOutputStream(outFile).use { o -> out.compress(Bitmap.CompressFormat.JPEG, 95, o) }
-        out.recycle()
-        // Kept next to run_log.txt (private storage) so a bad crop can be inspected after the fact.
-        try { outFile.copyTo(File(filesDir, "last_canvas.jpg"), overwrite = true) }
-        catch (_: Exception) {}
-        return outFile
-    }
 
     /** Crop doc types: 256 tokens is verified — tested warm (0.87s) and cold (21.2s),
      * exact match on samad_crop_clean.jpg. At 1024 it degrades (per Qwen's upstream crop
@@ -763,7 +627,7 @@ class MainActivity : AppCompatActivity() {
         val startNanos = System.nanoTime()
         val process = pb.start()
         currentProcess = process
-        val pid = getPid(process) ?: waitForPid("libllama-mtmd-cli.so")
+        val pid = ProcessIds.of(process) ?: ProcessIds.waitFor("libllama-mtmd-cli.so")
 
         if (pid == null) {
             ui.post {
@@ -785,7 +649,7 @@ class MainActivity : AppCompatActivity() {
         // killed run could render partial/garbage JSON as if valid.
         return PassResult(
             if (userStopped) null else rawOutput, elapsedSec,
-            "img=${imageDims(imageFile)} ${cliDiag(rawOutput)}"
+            "img=${images.imageDims(imageFile)} ${cliDiag(rawOutput)}"
         )
     }
 
@@ -848,18 +712,6 @@ class MainActivity : AppCompatActivity() {
      *  coldStartSec is the time actually spent inside the /health readiness poll
      *  above, i.e. spawn + model load + backend init. */
     private class ServerHandle(val port: Int, val coldStart: Boolean, val coldStartSec: Double)
-
-    /** Reports the pixel dimensions of an image file without decoding its full
-     *  contents, for the run log. Cheap (bounds-only decode) and the single most
-     *  useful number for reasoning about MiniCPM-V's vision cost: its slicer picks
-     *  tile count purely from width*height vs 448^2 (mtmd-image.cpp:684-687), so
-     *  seeing the actual dimensions makes the tile count derivable from the log
-     *  instead of guessed at. */
-    private fun imageDims(f: File): String {
-        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(f.absolutePath, o)
-        return if (o.outWidth > 0) "${o.outWidth}x${o.outHeight}" else "unknown"
-    }
 
     /** Starts llama-server if it isn't already running with this exact model/mmproj/
      *  threads/GPU combination - those became server-startup-time settings under this
@@ -928,7 +780,7 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) { }
             }.start()
 
-            val pid = getPid(process) ?: waitForPid("libllama-server.so")
+            val pid = ProcessIds.of(process) ?: ProcessIds.waitFor("libllama-server.so")
 
             // Kept even after the cleartext-traffic fix (see AndroidManifest.xml) -
             // this is what actually surfaced that bug in the first place, since the
@@ -1197,7 +1049,7 @@ class MainActivity : AppCompatActivity() {
         else
             "server=WARM(reused, no model load)"
         val totalSec = (System.nanoTime() - totalStartNanos) / 1_000_000_000.0
-        val diag = "img=${imageDims(imageFile)} $serverDesc $usageSummary total_wall=%.1fs".format(totalSec)
+        val diag = "img=${images.imageDims(imageFile)} $serverDesc $usageSummary total_wall=%.1fs".format(totalSec)
         return PassResult(if (userStopped) null else rawOutput, elapsedSec, diag)
     }
 
@@ -1229,6 +1081,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnStop.isEnabled = true
         binding.progressBar.visibility = View.VISIBLE
         binding.statsCard.visibility = View.VISIBLE
+        binding.runInfoCard.visibility = View.GONE
         binding.tvOutput.text = "Running..."
         // A warm-up still in flight holds the server's single slot; this scan queues behind it.
         if (warmingUpCount.get() > 0)
@@ -1296,11 +1149,13 @@ class MainActivity : AppCompatActivity() {
                     val useCanvas = plan.useCanvas
                     val prepStart = System.nanoTime()
                     val passImageFile = when (plan.imagePrep) {
-                        ExtractionPlan.ImagePrep.CANVAS -> buildFieldCanvasFile(imageFile)
-                        ExtractionPlan.ImagePrep.MINICPM -> downscaleForMiniCpm(imageFile)
-                        ExtractionPlan.ImagePrep.LFM2 -> downscaleForLfm2(imageFile, plan.maxEdge)
-                        ExtractionPlan.ImagePrep.QWEN_PAN -> downscaleForQwenPan(imageFile, cap)
-                        ExtractionPlan.ImagePrep.QWEN -> downscaleForQwen(imageFile, cap)
+                        ExtractionPlan.ImagePrep.CANVAS -> images.buildFieldCanvasFile(imageFile)
+                        ExtractionPlan.ImagePrep.MINICPM -> images.downscaleForMiniCpm(imageFile)
+                        ExtractionPlan.ImagePrep.LFM2 -> images.downscaleForLfm2(imageFile, plan.maxEdge)
+                        ExtractionPlan.ImagePrep.QWEN_DOC ->
+                            images.downscaleForMiniCpm(imageFile, plan.maxEdge, "qwen_doc_resized.jpg")
+                        ExtractionPlan.ImagePrep.QWEN_PAN -> images.downscaleForQwenPan(imageFile, cap)
+                        ExtractionPlan.ImagePrep.QWEN -> images.downscaleForQwen(imageFile, cap)
                         ExtractionPlan.ImagePrep.NONE -> imageFile
                     }
                     val prepSec = (System.nanoTime() - prepStart) / 1_000_000_000.0
@@ -1326,8 +1181,8 @@ class MainActivity : AppCompatActivity() {
                         return@Thread
                     }
                     val cleaned = extractAnswer(outcome.rawOutput)
-                    val report = if (plan.isCrop) validateCropField(docType, cleaned)
-                        else validateExtraction(docType,
+                    val report = if (plan.isCrop) ValidationReports.forCrop(docType, cleaned)
+                        else ValidationReports.forDocument(docType,
                             plan.validationDocumentType?.let { withDocumentType(cleaned, it) } ?: cleaned,
                             plan.compact)
                     val runNumber = nextRunNumber()
@@ -1353,7 +1208,10 @@ class MainActivity : AppCompatActivity() {
                         binding.progressBar.visibility = View.GONE
                         binding.btnRun.isEnabled = true
                         binding.btnStop.isEnabled = false
-                        binding.tvOutput.text = "Run $runNumber\n\n$fullOutput"
+                        binding.tvOutput.text =
+                            ResultDisplay.format(runNumber, docType, outcome.elapsedSec, cleaned, report)
+                        binding.tvRunInfo.text = RunInfoDisplay.format(header, "${outcome.diag} $prepDiag")
+                        binding.runInfoCard.visibility = View.VISIBLE
                         refreshDeviceInfo()
                     }
                     return@Thread
@@ -1370,13 +1228,13 @@ class MainActivity : AppCompatActivity() {
                 // single-pass branch called this at all.
                 val sideCap = imageTokenCapFor(docType)
                 val frontImg: File = when {
-                    isMiniCpmModel(modelPath) -> downscaleForMiniCpm(imageFile)
-                    isQwenModel(modelPath) -> downscaleForQwen(imageFile, sideCap, "qwen_resized_front.jpg")
+                    isMiniCpmModel(modelPath) -> images.downscaleForMiniCpm(imageFile)
+                    isQwenModel(modelPath) -> images.downscaleForQwen(imageFile, sideCap, "qwen_resized_front.jpg")
                     else -> imageFile
                 }
                 val backImg: File = when {
-                    isMiniCpmModel(modelPath) -> downscaleForMiniCpm(backImageFile!!)
-                    isQwenModel(modelPath) -> downscaleForQwen(backImageFile!!, sideCap, "qwen_resized_back.jpg")
+                    isMiniCpmModel(modelPath) -> images.downscaleForMiniCpm(backImageFile!!)
+                    isQwenModel(modelPath) -> images.downscaleForQwen(backImageFile!!, sideCap, "qwen_resized_back.jpg")
                     else -> backImageFile!!
                 }
                 ui.post { binding.tvOutput.text = "Running front side (1/2)..." }
@@ -1420,7 +1278,7 @@ class MainActivity : AppCompatActivity() {
 
                 val frontCleaned = extractAnswer(frontOutcome.rawOutput)
                 val backCleaned = extractAnswer(backOutcome.rawOutput)
-                val report = validateTwoSidedExtraction(docType, frontCleaned, backCleaned)
+                val report = ValidationReports.forTwoSided(docType, frontCleaned, backCleaned)
                 val totalElapsed = frontOutcome.elapsedSec + backOutcome.elapsedSec
                 val runNumber = nextRunNumber()
                 val fullOutput =
@@ -1450,341 +1308,14 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    // --- Derived confidence ---------------------------------------------
-    // The model's own self-reported confidence proved anti-correlated with
-    // correctness, so confidence is computed here from format checks instead.
+    private fun startMonitoring(pid: Long, startNanos: Long): MonitorHandle =
+        ProcessMonitor(clkTck) { stats -> ui.post { showLiveStats(stats) } }.start(pid, startNanos)
 
-    private fun str(obj: org.json.JSONObject, k: String): String? = ExtractionRules.str(obj, k)
-
-    /** Date normaliser: see ExtractionRules.toIso. */
-    private fun toIso(raw: String?): String? = ExtractionRules.toIso(raw)
-
-    // A hardcoded upper year bound goes stale the moment the calendar passes it - the
-    // dob check's "2025" cap was already in the past by the time this was tested live
-    // (found 2026-09-16), flagging every genuinely correct current-year extraction as
-    // "implausible". Compute it from the device clock instead so it never goes stale.
-    private fun currentYear(): Int = java.time.Year.now().value
-
-    private fun checkDateShape(
-        problems: MutableList<String>, notes: MutableList<String>,
-        obj: org.json.JSONObject, key: String, minYear: Int, maxYear: Int
-    ) = ExtractionRules.checkDateShape(problems, notes, obj, key, minYear, maxYear)
-
-    // Aadhaar checksum: see ExtractionRules.verhoeffValid.
-    private fun verhoeffValid(number: String): Boolean = ExtractionRules.verhoeffValid(number)
-
-
-    private fun coverageReport(
-        label: String, obj: org.json.JSONObject, readableFields: List<String>,
-        problems: List<String>, notes: List<String>, oftenNullFields: List<String> = emptyList()
-    ): String = ExtractionRules.coverageReport(label, obj, readableFields, problems, notes, oftenNullFields)
-
-    private fun parseSide(label: String, text: String): Pair<org.json.JSONObject?, String?> =
-        OutputParser.parseSide(label, text)
-
-    private fun validateCropField(docType: String, text: String): String = PanRules.validateCrop(docType, text)
-
-    private fun validateExtraction(docType: String, text: String, compact: Boolean = false): String {
-        val (obj, err) = parseSide(docType.uppercase(), text)
-        if (err != null) return err
-
-        return when (docType) {
-            "pan" -> validatePan(obj!!)
-            "pan_full" -> validatePan(obj!!)
-            "aadhaar" -> validateAadhaar(obj!!, compact)
-            "passport" -> validatePassport(obj!!, compact)
-            "dl" -> validateDl(obj!!, compact)
-            "tt_passport" -> validateTtPassport(obj!!)
-            "tt_dl" -> validateTtDl(obj!!)
-            "pan_stage1" -> validateStage1Pan(obj!!)
-            "aadhaar_stage1" -> validateStage1Aadhaar(obj!!)
-            else -> "Unknown document type: $docType"
-        }
-    }
-
-    /** Same shape as validateExtraction, but for a document whose data is split
-     *  across two separate images (front + back) - currently only tt_id. Parses each
-     *  side independently (own leak-check each), then hands both objects to a
-     *  type-specific validator that merges and cross-checks them. */
-    private fun validateTwoSidedExtraction(docType: String, frontText: String, backText: String): String {
-        val (frontObj, frontErr) = parseSide("${docType.uppercase()} FRONT", frontText)
-        if (frontErr != null) return frontErr
-        val (backObj, backErr) = parseSide("${docType.uppercase()} BACK", backText)
-        if (backErr != null) return backErr
-
-        return when (docType) {
-            "tt_id" -> validateTtId(frontObj!!, backObj!!)
-            else -> "Unknown two-sided document type: $docType"
-        }
-    }
-
-    private fun validatePan(obj: org.json.JSONObject): String =
-        PanRules.validate(obj, currentYear())
-
-    private fun validateAadhaar(obj: org.json.JSONObject, compact: Boolean = false): String =
-        AadhaarRules.validate(obj, currentYear(), compact)
-
-    private fun validateStage1Pan(obj: org.json.JSONObject): String = Stage1Rules.validatePan(obj, currentYear())
-
-    private fun validateStage1Aadhaar(obj: org.json.JSONObject): String =
-        Stage1Rules.validateAadhaar(obj, currentYear())
-
-    private fun validatePassport(obj: org.json.JSONObject, compact: Boolean = false): String =
-        PassportRules.validate(obj, currentYear(), compact)
-
-    private fun validateTtPassport(obj: org.json.JSONObject): String {
-        // Trinidad & Tobago passport. Field list corrected 2026-09-16 to match what is
-        // actually printed on the biodata page: type, country_code, passport_number,
-        // surname, given_names (split, not one combined "name"), nationality, gender,
-        // dob, place_of_birth, issue_date, issuing_authority, expiry_date. Still
-        // completely unverified against a real sample - no image exists in this
-        // workspace, and the exact passport_number format hasn't been confirmed, so no
-        // structural regex is enforced on it (schema only bounds its length).
-        val fields = listOf("type", "country_code", "passport_number", "surname",
-            "given_names", "nationality", "gender", "dob", "place_of_birth",
-            "issue_date", "issuing_authority", "expiry_date")
-        val problems = mutableListOf<String>()
-        val notes = mutableListOf<String>()
-
-        if (str(obj, "document_type") != "tt_passport") {
-            problems += "document_type is not 'tt_passport'"
-        }
-
-        checkDateShape(problems, notes, obj, "dob", 1900, currentYear())
-        checkDateShape(problems, notes, obj, "issue_date", 1990, currentYear())
-        checkDateShape(problems, notes, obj, "expiry_date", 1990, currentYear() + 20)
-
-        val surname = str(obj, "surname")
-        val given = str(obj, "given_names")
-        if (surname != null && given != null && surname.equals(given, ignoreCase = true)) {
-            problems += "surname and given_names are identical"
-        }
-
-        val cc = str(obj, "country_code")
-        if (cc != null && !Regex("^[A-Z]{3}$").matches(cc)) {
-            problems += "country_code '$cc' is not a 3-letter code"
-        }
-
-        notes += "passport_number format unverified for this country - no structural check applied"
-
-        return coverageReport("TT Passport", obj, fields, problems, notes)
-    }
-
-    private fun validateTtDl(obj: org.json.JSONObject): String {
-        // Trinidad & Tobago driving permit, added 2026-09-16. Field set given directly
-        // by the user - permit_number, name, dob, gender ("SEX"), address, issue_date,
-        // expiry_date, payment_date, transaction_code ("TR"), class ("CLASS"). name and
-        // address are printed on the card with NO label at all, confirmed by the user.
-        // Completely unverified against a real sample.
-        val fields = listOf("permit_number", "name", "dob", "gender", "address",
-            "issue_date", "expiry_date", "payment_date", "transaction_code", "class")
-        val problems = mutableListOf<String>()
-        val notes = mutableListOf<String>()
-
-        if (str(obj, "document_type") != "tt_dl") problems += "document_type is not 'tt_dl'"
-
-        checkDateShape(problems, notes, obj, "dob", 1900, currentYear())
-        checkDateShape(problems, notes, obj, "issue_date", 1990, currentYear())
-        checkDateShape(problems, notes, obj, "expiry_date", 1990, currentYear() + 20)
-        checkDateShape(problems, notes, obj, "payment_date", 1990, currentYear())
-
-        // Same duplication artifact confirmed live on the Indian DL (issue_date and
-        // expiry_date coming back byte-identical) - applied here proactively since the
-        // date layout is the same shape.
-        val issueRaw = str(obj, "issue_date")
-        val expiryRaw = str(obj, "expiry_date")
-        if (issueRaw != null && expiryRaw != null && issueRaw == expiryRaw) {
-            problems += "issue_date and expiry_date are identical ('$issueRaw') - " +
-                "likely one was duplicated rather than genuinely read"
-        }
-
-        // Same address-fabrication pattern confirmed live on Aadhaar and applied
-        // proactively to the Indian DL - a genuine address never legitimately contains
-        // the holder's own name/dob/permit_number.
-        val addr = str(obj, "address")
-        val name = str(obj, "name")
-        val dobRaw = str(obj, "dob")
-        val permit = str(obj, "permit_number")
-        val fabricated = addr != null && (
-            (name != null && addr.contains(name, ignoreCase = true)) ||
-            (dobRaw != null && addr.contains(dobRaw)) ||
-            (permit != null && addr.replace(" ", "").replace("-", "")
-                .contains(permit.replace(" ", "").replace("-", "")))
-        )
-        if (fabricated) {
-            problems += "address reuses this record's own name/dob/permit_number - " +
-                "almost certainly fabricated, not a real address"
-        }
-
-        notes += "permit_number format unverified for this document - no structural check applied"
-
-        return coverageReport("TT Driving Permit", obj, fields, problems, notes)
-    }
-
-    private fun validateTtId(front: org.json.JSONObject, back: org.json.JSONObject): String {
-        // Trinidad & Tobago National Identification Card, added 2026-09-16. The ONLY
-        // two-sided document type: front carries just name, back carries everything
-        // else, both confirmed by the user. name is printed (unlabelled) on both
-        // sides, so cross-checking the two reads catches a misread neither side alone
-        // could. social_assistance_number, blood_group and national_insurance_number
-        // are commonly blank on real cards (confirmed by the user) - kept out of the
-        // grading ratio via oftenNullFields so a genuinely correct read isn't dragged
-        // down just because those three are null. Completely unverified against a
-        // real sample.
-        if (str(front, "document_type") != "tt_id_front") {
-            return "TT_ID check: FAILED - front image's document_type is not 'tt_id_front'"
-        }
-        if (str(back, "document_type") != "tt_id_back") {
-            return "TT_ID check: FAILED - back image's document_type is not 'tt_id_back'"
-        }
-
-        val backFields = listOf("dob", "issue_date", "expiry_date", "registration_number",
-            "citizenship_status", "place_of_birth", "gender", "eye_colour", "height_cm",
-            "social_assistance_number", "skin_colour", "blood_group",
-            "national_insurance_number")
-        val merged = org.json.JSONObject()
-        merged.put("document_type", "tt_id")
-        merged.put("name", front.opt("name") ?: org.json.JSONObject.NULL)
-        for (k in backFields) merged.put(k, back.opt(k) ?: org.json.JSONObject.NULL)
-
-        val coreFields = listOf("name", "dob", "issue_date", "expiry_date",
-            "registration_number", "citizenship_status", "place_of_birth", "gender",
-            "eye_colour", "height_cm", "skin_colour")
-        val oftenNullFields = listOf(
-            "social_assistance_number", "blood_group", "national_insurance_number")
-        val problems = mutableListOf<String>()
-        val notes = mutableListOf<String>()
-
-        checkDateShape(problems, notes, merged, "dob", 1900, currentYear())
-        checkDateShape(problems, notes, merged, "issue_date", 1990, currentYear())
-        checkDateShape(problems, notes, merged, "expiry_date", 1990, currentYear() + 20)
-
-        // Same duplication artifact confirmed live on the Indian DL - applied here
-        // proactively since the date layout is the same shape.
-        val issueRaw = str(merged, "issue_date")
-        val expiryRaw = str(merged, "expiry_date")
-        if (issueRaw != null && expiryRaw != null && issueRaw == expiryRaw) {
-            problems += "issue_date and expiry_date are identical ('$issueRaw') - " +
-                "likely one was duplicated rather than genuinely read"
-        }
-
-        // name is printed on both sides of the same physical card. Corrected
-        // 2026-09-16: a real card showed "Lynette Herbert" on front vs "Herbert
-        // Lynette" on back - same two words, given-name/surname order swapped between
-        // the sides. So compare word SETS, not literal string equality - only a real
-        // wording difference (not just order) is a genuine misread signal. Same
-        // reasoning as PAN's surname-initial check, which also had to stop assuming
-        // one fixed word order.
-        val frontName = str(front, "name")
-        val backName = str(back, "name")
-        if (frontName != null && backName != null) {
-            val frontWords = frontName.trim().split(Regex("\\s+")).map { it.lowercase() }.toSet()
-            val backWords = backName.trim().split(Regex("\\s+")).map { it.lowercase() }.toSet()
-            if (frontWords != backWords) {
-                problems += "front name '$frontName' does not match back name '$backName'"
-            } else if (frontName != backName) {
-                notes += "front name '$frontName' and back name '$backName' use the same " +
-                    "words in a different order - likely a display convention, not a misread"
-            }
-        }
-
-        // social_assistance_number, blood_group and national_insurance_number are
-        // known-high-risk for fabrication when genuinely absent (confirmed live
-        // 2026-09-16: blood_group came back "B+" on a card with no blood group
-        // printed anywhere). There's no internal-consistency signal to catch this the
-        // way the address checks elsewhere in this file do, so it can only be flagged
-        // for manual verification, not caught automatically.
-        for (k in oftenNullFields) {
-            val v = str(merged, k)
-            if (v != null) {
-                notes += "note: $k = '$v' - this field is known to sometimes be " +
-                    "fabricated when genuinely absent from the card; verify against " +
-                    "the physical document"
-            }
-        }
-
-        return coverageReport("TT National ID", merged, coreFields, problems, notes, oftenNullFields)
-    }
-
-    private fun validateDl(obj: org.json.JSONObject, compact: Boolean = false): String =
-        DlRules.validate(obj, currentYear(), compact)
-
-    private class MonitorHandle { @Volatile var stop = false }
-
-    /** java.lang.Process.pid() isn't exposed by this compileSdk's Android stub. Android's
-     *  ProcessBuilder implementation still stores the child's pid in a "pid" field on the
-     *  returned Process object, so pull it via reflection (the standard pre-API-26 trick). */
-    private fun getPid(process: Process): Long? = try {
-        val field = process.javaClass.getDeclaredField("pid")
-        field.isAccessible = true
-        field.getInt(process).toLong()
-    } catch (e: Exception) {
-        null
-    }
-
-    /** Fallback if reflection ever fails on some OEM build: resolve via `pidof`. */
-    private fun waitForPid(processName: String): Long? {
-        repeat(20) {
-            try {
-                val p = ProcessBuilder("/system/bin/sh", "-c", "pidof $processName").start()
-                val out = p.inputStream.bufferedReader().readText().trim()
-                p.waitFor()
-                val pid = out.split(Regex("\\s+")).firstOrNull()?.toLongOrNull()
-                if (pid != null) return pid
-            } catch (e: Exception) {
-                // fall through to retry
-            }
-            Thread.sleep(50)
-        }
-        return null
-    }
-
-    private fun startMonitoring(pid: Long, startNanos: Long): MonitorHandle {
-        val handle = MonitorHandle()
-        var lastCpuTicks = -1L
-        var lastWallNanos = startNanos
-
-        Thread {
-            while (!handle.stop) {
-                val elapsedS = (System.nanoTime() - startNanos) / 1e9
-                val ramMb = readVmRssMb(pid)
-                val (cpuPct, newLastTicks, newLastWall) = readCpuPercent(pid, lastCpuTicks, lastWallNanos)
-                lastCpuTicks = newLastTicks
-                lastWallNanos = newLastWall
-                val gpuBusy = readFile("/sys/kernel/gpu/gpu_busy")?.trim()
-                val gpuClock = readFile("/sys/kernel/gpu/gpu_clock")?.trim()
-
-                ui.post {
-                    binding.tvElapsed.text = "Elapsed: %.1fs".format(elapsedS)
-                    binding.tvRam.text = if (ramMb != null) "RAM: %.0f MB".format(ramMb) else "RAM: --"
-                    binding.tvCpu.text = if (cpuPct != null) "CPU: %.0f%%".format(cpuPct) else "CPU: --"
-                    binding.tvGpu.text = "GPU: ${gpuBusy ?: "--"}  (clock ${gpuClock ?: "--"})"
-                }
-                Thread.sleep(300)
-            }
-        }.start()
-        return handle
-    }
-
-    private fun readFile(path: String): String? = try {
-        File(path).readText()
-    } catch (e: Exception) {
-        null
-    }
-
-    private fun readVmRssMb(pid: Long): Double? =
-        readFile("/proc/$pid/status")?.let { ProcessStats.parseVmRssMb(it) }
-
-    /** Returns (cpuPercentSinceLastSample, thisSampleTicks, thisSampleWallNanos). */
-    private fun readCpuPercent(pid: Long, lastTicks: Long, lastWallNanos: Long): Triple<Double?, Long, Long> {
-        val nowWallNanos = System.nanoTime()
-        val stat = try {
-            RandomAccessFile("/proc/$pid/stat", "r").use { it.readLine() }
-        } catch (e: Exception) {
-            null
-        }
-        val sample = ProcessStats.cpuSample(stat, lastTicks, lastWallNanos, nowWallNanos, clkTck)
-        return Triple(sample.percent, sample.ticks, sample.wallNanos)
+    private fun showLiveStats(stats: ProcessMonitor.Stats) {
+        binding.tvElapsed.text = "Elapsed: %.1fs".format(stats.elapsedS)
+        binding.tvRam.text = if (stats.ramMb != null) "RAM: %.0f MB".format(stats.ramMb) else "RAM: --"
+        binding.tvCpu.text = if (stats.cpuPct != null) "CPU: %.0f%%".format(stats.cpuPct) else "CPU: --"
+        binding.tvGpu.text = "GPU: ${stats.gpuBusy ?: "--"}  (clock ${stats.gpuClock ?: "--"})"
     }
 
     private fun extractAnswer(raw: String): String = OutputParser.extractAnswer(raw)

@@ -349,6 +349,35 @@
                 android:text="@string/ui_gpu" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/runInfoCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="#FFFFFF"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/ui_run_details"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#8A887D" />
+
+            <TextView
+                android:id="@+id/tvRunInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textSize="13sp"
+                android:fontFamily="monospace"
+                android:textIsSelectable="true"
+                android:textColor="#17160F" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

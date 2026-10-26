@@ -9,7 +9,7 @@ package com.modeltesting.vlmtester
  */
 object ExtractionPlan {
     /** How the picked image is prepared before it is sent to the model. */
-    enum class ImagePrep { CANVAS, MINICPM, LFM2, QWEN_PAN, QWEN, NONE }
+    enum class ImagePrep { CANVAS, MINICPM, LFM2, QWEN_DOC, QWEN_PAN, QWEN, NONE }
 
     /** The document-type groups that change how a scan is run. They are defined by the activity. */
     data class DocTypeSets(
@@ -23,7 +23,8 @@ object ExtractionPlan {
      * whether the document's JSON schema goes in. [validationDocumentType] is added to the answer
      * before the checks when the grammar leaves the `document_type` key out; null means the answer
      * is checked as it is. [isCrop] selects the single-field crop check instead of the full one.
-     * [maxEdge] is the longest image edge, in pixels, for [ImagePrep.LFM2]; 0 for every other plan.
+     * [maxEdge] is the longest image edge, in pixels, for [ImagePrep.LFM2] and [ImagePrep.QWEN_DOC]; 0 for
+     * every other plan.
      * [compact] means the short prompt and small grammar are used and only the fields of the
      * compact profile come back, so the checks grade only those.
      */
@@ -85,8 +86,9 @@ object ExtractionPlan {
         val qwenAadhaar = ModelProfiles.useQwenAadhaarProfile(docType, modelFileName)
         val lfm2Docs = ModelProfiles.useLfm2DocumentResize(docType, modelFileName)
         val compact = ModelProfiles.useCompactDocument(docType, modelFileName)
+        val qwenDoc = ModelProfiles.useQwenDocumentResize(docType, modelFileName)
         return Plan(
-            imagePrep = imagePrepFor(docType, modelFileName, lfm2Pan || lfm2Docs, qwenPan, useFieldCanvas),
+            imagePrep = imagePrepFor(docType, modelFileName, lfm2Pan || lfm2Docs, qwenDoc, qwenPan, useFieldCanvas),
             tokenCap = tokenCapFor(docType, sets, panFullHighCap, lfm2Pan, qwenPan),
             promptAsset = promptAssetFor(docType, lfm2Pan, qwenAadhaar, compact),
             // trim(): the validated BUL2 runs fed the prompt through shell $(cat ...), which
@@ -99,14 +101,15 @@ object ExtractionPlan {
             grammarAsset = grammarAssetFor(docType, lfm2Pan, qwenPan, qwenAadhaar, compact),
             validationDocumentType = validationDocumentTypeFor(docType, lfm2Pan || qwenPan, qwenAadhaar, compact),
             isCrop = isCrop,
-            maxEdge = lfm2MaxEdgeFor(lfm2Pan, lfm2Docs),
+            maxEdge = maxEdgeFor(lfm2Pan, lfm2Docs, qwenDoc),
             compact = compact
         )
     }
 
-    private fun lfm2MaxEdgeFor(lfm2Pan: Boolean, lfm2Docs: Boolean): Int = when {
+    private fun maxEdgeFor(lfm2Pan: Boolean, lfm2Docs: Boolean, qwenDoc: Boolean): Int = when {
         lfm2Pan -> ModelProfiles.LFM2_PAN_MAX_EDGE
         lfm2Docs -> ModelProfiles.LFM2_DOCUMENT_MAX_EDGE
+        qwenDoc -> ModelProfiles.QWEN_DOCUMENT_MAX_EDGE
         else -> 0
     }
 
@@ -160,12 +163,14 @@ object ExtractionPlan {
         docType: String,
         modelFileName: String,
         lfm2Resize: Boolean,
+        qwenDoc: Boolean,
         qwenPan: Boolean,
         useFieldCanvas: Boolean
     ): ImagePrep = when {
         useFieldCanvas && docType == PAN_FULL && ModelProfiles.isMiniCpm(modelFileName) -> ImagePrep.CANVAS
         ModelProfiles.isMiniCpm(modelFileName) -> ImagePrep.MINICPM
         lfm2Resize -> ImagePrep.LFM2
+        qwenDoc -> ImagePrep.QWEN_DOC
         qwenPan -> ImagePrep.QWEN_PAN
         ModelProfiles.isQwen(modelFileName) -> ImagePrep.QWEN
         else -> ImagePrep.NONE

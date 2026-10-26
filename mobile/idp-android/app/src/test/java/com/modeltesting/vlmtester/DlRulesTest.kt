@@ -154,7 +154,12 @@ class DlRulesTest {
 
     @Test
     fun `validateDl flags a licence number that starts with the DL No label`() {
-        val labelled = listOf("DL NO KL21 2019002", "DL NO MH03 200800 ", "dl no MH03 20080022135", "DL.NO KL21 2019002")
+        val labelled = listOf(
+            "DL NO KL21 2019002",
+            "DL NO MH03 200800 ",
+            "dl no MH03 20080022135",
+            "DL.NO KL21 2019002"
+        )
         for (bad in labelled) {
             val report = DlRules.validate(validDl().put("license_number", bad), year)
             assertTrue(report, report.contains("starts with the label 'DL No'"))

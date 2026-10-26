@@ -64,7 +64,7 @@ echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties   # git-ignored
 export JAVA_HOME=<path to a JDK 17>
 ./gradlew :app:testDebugUnitTest      # 226 tests
 ./gradlew :app:assembleRelease        # minified, unsigned release APK
-./gradlew :app:lintDebug              # Android Lint: 0 errors, 72 warnings
+./gradlew :app:lintDebug              # Android Lint: 0 errors, 70 warnings
 ./gradlew :app:assembleDebug          # builds app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:ktlintCheck :app:detekt   # style and size gates (ADR 0003)
 ./gradlew :app:createDebugUnitTestCoverageReport   # coverage; report in app/build/reports/coverage (ADR 0006)

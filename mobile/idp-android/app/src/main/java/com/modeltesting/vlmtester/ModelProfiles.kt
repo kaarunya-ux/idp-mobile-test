@@ -74,6 +74,25 @@ object ModelProfiles {
      *  Qwen on passport it was 33/34 to 28/34), and small print may blur. */
     const val LFM2_DOCUMENT_MAX_EDGE = 560
 
+    /** Qwen3-VL on dl, passport or aadhaar: the image is shrunk to [QWEN_DOCUMENT_MAX_EDGE]. Qwen's Aadhaar
+     *  profile (useQwenAadhaarProfile, its own prompt and grammar) was validated at full size; aadhaar was
+     *  added on the owner's request on 2026-10-26 and is measured only with the compact prompt (19/24 at
+     *  560px against 22/24 at full size), not with that profile. */
+    fun useQwenDocumentResize(docType: String, fileName: String): Boolean =
+        isQwen(fileName) && (docType == "dl" || docType == "passport" || docType == "aadhaar")
+
+    /** Longest image edge sent to Qwen3-VL for dl, passport and aadhaar. Qwen used to get these at full size (only
+     *  images over 2.1 million pixels were shrunk), and reads about 12 tokens per second here: a
+     *  768x1024 passport was 847 prompt tokens and 62 s in the app, a 768x979 licence 804 tokens and
+     *  74.8 s. Measured 2026-10-26, Qwen3-VL 2B, warm server, compact prompts, 5 cards each, images not
+     *  enlarged: 560px gave DL 19/25 fields in 15 to 19 s and passport 28/34 in 22 to 24 s; 400px was
+     *  quicker by only 3 to 8 s and much worse (DL 14/25, passport 19/34), so it was dropped. Full size
+     *  gave DL 20/20 on the four cards it finished (29 to 75 s) and passport 33/34 (63 to 74 s). The
+     *  cost of 560px is mostly licence-number digits and swapped dates. Aadhaar (compact prompt): 560px
+     *  19/24 in 11 to 17 s, full size 22/24 in 21 to 87 s. A size between the two (about
+     *  700px) was not measured. See docs/mobile-extraction/ON_DEVICE_LATENCY_AND_ACCURACY_FINDINGS.md. */
+    const val QWEN_DOCUMENT_MAX_EDGE = 560
+
     private val compactDocuments = setOf("aadhaar", "dl", "passport")
 
     /** aadhaar, dl and passport with LFM2-VL, MiniCPM-V or Qwen3-VL: a short prompt, no system
