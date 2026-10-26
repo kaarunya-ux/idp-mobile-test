@@ -70,3 +70,12 @@ services/conversions/output/
 mobile/idox-mobile/results/
 mobile/vlmtester/
 mobile/llama_dotprod_libs/
+docs2/
+aadhaar_test_images/
+pan_test_images/
+input_trans/
+output_trans/
+
+
+model/
+trans_test/
