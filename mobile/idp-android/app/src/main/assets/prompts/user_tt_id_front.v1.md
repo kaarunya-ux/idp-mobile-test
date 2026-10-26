@@ -1,0 +1,20 @@
+---
+model: any
+temperature: 0
+schema: tt_id_front
+---
+This is the front side of a Trinidad and Tobago National Identification Card. Extract
+these fields as a single JSON object:
+
+{
+  "document_type": "tt_id_front",
+  "name": ""
+}
+
+Field guide:
+- name: printed on the card, no label.
+
+Copy the value exactly as printed. If unreadable or uncertain, use null instead of
+guessing.
+
+Output JSON only. No explanation. No markdown. No code fences.

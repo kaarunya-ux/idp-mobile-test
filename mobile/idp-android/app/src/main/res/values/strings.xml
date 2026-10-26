@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_vlm_tester">"VLM Tester"</string>
+    <string name="ui_visionpsy_nano_on_device_extraction">"VisionPsy-Nano on-device extraction, running fully on this phone"</string>
+    <string name="ui_device_right_now">"DEVICE, RIGHT NOW"</string>
+    <string name="ui_storage">"Storage: -- "</string>
+    <string name="ui_models_folder">"Models folder: -- "</string>
+    <string name="ui_ram_device">"RAM (device): -- "</string>
+    <string name="ui_model">"Model"</string>
+    <string name="ui_vision_projector_mmproj">"Vision projector (mmproj)"</string>
+    <string name="ui_document_type">"Document type"</string>
+    <string name="ui_use_gpu_vulkan_for_language">"Use GPU (Vulkan) for language model"</string>
+    <string name="ui_vision_encoder_mmproj_always_stays">"Vision encoder (mmproj) always stays on CPU. Off = current CPU-only baseline."</string>
+    <string name="ui_cpu_threads_4">"CPU threads: 4"</string>
+    <string name="ui_applies_to_both_t_and">"Applies to both -t and -tb. Default (4) matches this phone's fast cores; going higher pulls in the slow cores too and can be slower overall."</string>
+    <string name="ui_persistent_server_mode_experimental">"Persistent server mode (experimental)"</string>
+    <string name="ui_off_current_behaviour_reloads_the">"Off = current behaviour: reloads the full model every run. On = keeps the model resident across runs and applies the vision-tile latency fix (~14-16s/field vs ~50-90s), but the first run after changing model/threads/GPU pays one restart cost."</string>
+    <string name="ui_pan_full_256_image_tokens">"pan_full: 256 image tokens (off = 128)"</string>
+    <string name="ui_on_default_10_15s_slower">"On (default): ~10-15s slower per run, but fixes real misreads found at 128 on clean cards (dropped/transposed letters, a wrong digit). Off = faster, only use once 128 has been re-validated."</string>
+    <string name="ui_pan_full_minicpm_v_field">"pan_full + MiniCPM-V: field canvas (experimental)"</string>
+    <string name="ui_cuts_the_pan_number_name">"Cuts the PAN number / name / father / DOB regions out of the ORIGINAL photo and sends them as one 448x448 image (1 vision tile instead of 3). Expects a picture of the FRONT of the card only - crop it first. Saves the canvas as last_canvas.jpg next to run_log.txt."</string>
+    <string name="ui_pick_image_or_pdf">"Pick image or PDF"</string>
+    <string name="ui_pick_back_side_image">"Pick back-side image"</string>
+    <string name="ui_run_extraction">"Run extraction"</string>
+    <string name="ui_stop">"STOP"</string>
+    <string name="ui_live_on_device_stats">"LIVE ON-DEVICE STATS"</string>
+    <string name="ui_elapsed_0_0s">"Elapsed: 0.0s"</string>
+    <string name="ui_ram_mb">"RAM: -- MB"</string>
+    <string name="ui_cpu" formatted="false">"CPU: -- %"</string>
+    <string name="ui_gpu" formatted="false">"GPU: -- %"</string>
+    <string name="ui_run_details">"RUN DETAILS"</string>
+    <string name="ui_output">"Output"</string>
+    <string name="ui_nothing_run_yet">"Nothing run yet."</string>
+    <string name="preview_back_image">"Preview of the picked back-side image"</string>
+    <string name="preview_image">"Preview of the picked image"</string>
+</resources>
