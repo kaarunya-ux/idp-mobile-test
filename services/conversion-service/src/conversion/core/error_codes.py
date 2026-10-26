@@ -19,6 +19,8 @@ class ErrorCode(StrEnum):
     INVALID_OPTION = "CNV-422-OPTIONS-001"  # new, not in IDP-03 ch. 3.8: an option outside its allowed values
     CONVERSION_TIMEOUT = "CNV-504-TIMEOUT-001"
     NO_TABLE = "CNV-422-TABLE-001"  # new, not in IDP-03 ch. 3.8: a table export from a document without one
+    INVALID_REQUEST = "CNV-422-REQUEST-001"  # new: a ConversionRequested this service can't act on (type, inputs)
+    INTERNAL_ERROR = "CNV-500-INTERNAL-001"  # new: an unexpected failure or a dependency down; retryable
 
     @property
     def http_status(self) -> int:

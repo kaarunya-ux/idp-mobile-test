@@ -5,10 +5,15 @@ that a bad value becomes a clear ``CNV-422-OPTIONS-001`` instead of a crash.
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Self
 
 from conversion.conversion.domain.exceptions import InvalidOptionError, PageRangeOutsideDocumentError
+from conversion.conversion.domain.formats import Format
+from conversion.conversion.domain.route_planner import OcrMode
+from conversion.conversion.domain.values import OutputMode
 
 MIN_DPI, MAX_DPI, DEFAULT_DPI = 72, 600, 150
 MIN_JPEG_QUALITY, MAX_JPEG_QUALITY, DEFAULT_JPEG_QUALITY = 1, 95, 90
@@ -71,3 +76,74 @@ class ConversionOptions:
             raise InvalidOptionError("dpi", f"must be between {MIN_DPI} and {MAX_DPI}")
         if not MIN_JPEG_QUALITY <= self.jpeg_quality <= MAX_JPEG_QUALITY:
             raise InvalidOptionError("quality", f"must be between {MIN_JPEG_QUALITY} and {MAX_JPEG_QUALITY}")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class JobOptions:
+    """Everything a ``CONVERSION`` job's options say, typed (IDP-02 ch. 3.6)."""
+
+    conversion: ConversionOptions
+    ocr: OcrMode
+    output: OutputMode
+
+
+def parse_job_options(raw: Mapping[str, object]) -> JobOptions:
+    """Read the options JSON Java sends. Unknown keys are ignored (MSG-06); known ones must have the right type.
+
+    ``mode`` (EQUAL_COPY / EXTRACTED_COPY) only matters once OCR exists, so it is accepted and not used yet.
+    """
+    page_range = _text(raw, "pageRange")
+    dpi = _number(raw, "dpi")
+    quality = _number(raw, "quality")
+    return JobOptions(
+        conversion=ConversionOptions(
+            page_range=PageRange.parse(page_range) if page_range is not None else None,
+            dpi=dpi if dpi is not None else DEFAULT_DPI,
+            jpeg_quality=quality if quality is not None else DEFAULT_JPEG_QUALITY,
+            sheet=_text(raw, "sheet"),
+        ),
+        ocr=_choice(raw, "ocr", OcrMode, OcrMode.AUTO),
+        output=_choice(raw, "output", OutputMode, OutputMode.PER_PAGE),
+    )
+
+
+def resolve_target(target: str, image_format: object = None) -> Format:
+    """The format a job asks for. ``IMAGE`` plus the ``imageFormat`` option means PNG (the default) or JPEG."""
+    name = target.strip().upper()
+    if name == "IMAGE":
+        name = str(image_format or Format.PNG).upper()
+    if name == "JPG":
+        name = Format.JPEG
+    try:
+        return Format(name)
+    except ValueError:
+        raise InvalidOptionError("target", f"'{target}' is not a format this service writes") from None
+
+
+def _text(raw: Mapping[str, object], key: str) -> str | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidOptionError(key, "must be text")
+    return value
+
+
+def _number(raw: Mapping[str, object], key: str) -> int | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):  # JSON true is a bool, which is an int in Python
+        raise InvalidOptionError(key, "must be a whole number")
+    return value
+
+
+def _choice[E: StrEnum](raw: Mapping[str, object], key: str, kind: type[E], default: E) -> E:
+    value = raw.get(key)
+    if value is None:
+        return default
+    try:
+        return kind(str(value).upper())
+    except ValueError:
+        allowed = ", ".join(kind)
+        raise InvalidOptionError(key, f"must be one of {allowed}") from None

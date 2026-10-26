@@ -1,0 +1,76 @@
+# Local stack for trying the service end to end (`make up`). Not for production: Java's team runs RabbitMQ and
+# MinIO there, and secrets come from the platform, not from this file. MinIO's own images are no longer
+# published; the frozen Bitnami build is used for local runs only.
+name: conversion-service
+
+x-app-env: &app-env
+  ENVIRONMENT: local
+  LOGGING__FORMAT: console
+  DB__URL: postgresql+psycopg://conversion:conversion@postgres:5432/conversion_db
+  RABBIT__URL: amqp://guest:guest@rabbitmq:5672/
+  CELERY__BROKER_URL: amqp://guest:guest@rabbitmq:5672/
+  STORAGE__ENDPOINT: http://minio:9000
+  STORAGE__ACCESS_KEY: local-access-key
+  STORAGE__SECRET_KEY: local-secret-key
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: conversion
+      POSTGRES_PASSWORD: conversion
+      POSTGRES_DB: conversion_db
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conversion -d conversion_db"]
+      interval: 2s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    ports: ["5672:5672", "15672:15672"]  # 15672: management UI, guest/guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      retries: 30
+
+  minio:
+    image: bitnamilegacy/minio:2025.4.22
+    environment:
+      MINIO_ROOT_USER: local-access-key
+      MINIO_ROOT_PASSWORD: local-secret-key
+      MINIO_DEFAULT_BUCKETS: idp-originals,idp-outputs
+    ports: ["9000:9000", "9001:9001"]  # 9001: console
+
+  migrate:
+    build: {context: ., target: service}
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  intake:
+    build: {context: ., target: service}
+    environment: *app-env
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      rabbitmq: {condition: service_healthy}
+
+  relay:
+    build: {context: ., target: service}
+    command: ["python", "-m", "conversion.outbox_relay"]
+    environment: *app-env
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      rabbitmq: {condition: service_healthy}
+
+  worker:
+    build: {context: ., target: worker}
+    environment: *app-env
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      rabbitmq: {condition: service_healthy}
+
+  health:
+    build: {context: ., target: health}
+    ports: ["8001:8001"]
