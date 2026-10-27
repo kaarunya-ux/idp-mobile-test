@@ -37,6 +37,7 @@ from conversion.conversion.domain.exceptions import InvalidOptionError, InvalidP
 from conversion.conversion.domain.options import PageRange
 
 _ROTATIONS = frozenset({0, 90, 180, 270})
+_BOX_LENGTH, _POINT_LENGTH, _HEX_COLOUR_LENGTH = 4, 2, 7  # box: 4 numbers, point: 2, colour: 7 characters
 _EDGE = 1.000001  # a box may touch the page edge; this absorbs rounding in the editor's fractions
 
 
@@ -255,7 +256,7 @@ def _fraction(value: object) -> float:
 
 def _box(value: object) -> Box:
     items = _list(value, "box")
-    if len(items) != 4:  # noqa: PLR2004 - [x, y, width, height]
+    if len(items) != _BOX_LENGTH:
         raise InvalidPlanError("A box is [x, y, width, height].")
     x, y, width, height = (_fraction(v) for v in items)
     if width <= 0 or height <= 0 or x + width > _EDGE or y + height > _EDGE:
@@ -272,14 +273,14 @@ def _boxes(op: Mapping[str, Any]) -> tuple[Box, ...]:
 
 def _point(value: object) -> tuple[float, float]:
     items = _list(value, "point")
-    if len(items) != 2:  # noqa: PLR2004 - [x, y]
+    if len(items) != _POINT_LENGTH:
         raise InvalidPlanError("A point is [x, y].")
     return (_fraction(items[0]), _fraction(items[1]))
 
 
 def _color(op: Mapping[str, Any], default: str) -> Color:
     value = _text(op, "color", default)
-    if len(value) != 7 or not value.startswith("#"):  # noqa: PLR2004 - "#RRGGBB"
+    if len(value) != _HEX_COLOUR_LENGTH or not value.startswith("#"):
         raise InvalidPlanError("A colour is written #RRGGBB.")
     try:
         red, green, blue = (int(value[i : i + 2], 16) / 255 for i in (1, 3, 5))

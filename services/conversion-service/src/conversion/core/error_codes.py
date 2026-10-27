@@ -14,7 +14,8 @@ class ErrorCode(StrEnum):
     ROUTE_NOT_SUPPORTED = "CNV-422-ROUTE-001"
     PDF_ENCRYPTED = "CNV-422-PDF-001"  # a password is needed to open it
     PDF_CORRUPT = "CNV-422-PDF-002"
-    PDF_WRONG_PASSWORD = "CNV-422-PDF-003"  # noqa: S105 - an error code, not a password
+    # an error code, not a password
+    PDF_WRONG_PASSWORD = "CNV-422-PDF-003"  # noqa: S105
     INVALID_PLAN = "CNV-422-PLAN-001"  # an edit plan that can't be applied
     LIMIT_EXCEEDED = "CNV-422-LIMIT-001"
     FILE_UNREADABLE = "CNV-422-FILE-001"  # new, not in IDP-03 ch. 3.8: a damaged or unsupported file

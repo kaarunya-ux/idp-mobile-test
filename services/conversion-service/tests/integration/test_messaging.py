@@ -96,7 +96,8 @@ async def _send(broker: RabbitBroker, body: bytes, *, event_id: UUID | None = No
 
 async def _until[T](check: Callable[[], Awaitable[T | None]], *, seconds: float = 20) -> T:
     async with asyncio.timeout(seconds):
-        while (found := await check()) is None:  # noqa: ASYNC110 - RabbitMQ and the database can't signal us; poll them
+        # RabbitMQ and the database can't signal us; poll them
+        while (found := await check()) is None:  # noqa: ASYNC110
             await asyncio.sleep(0.2)
         return found
 

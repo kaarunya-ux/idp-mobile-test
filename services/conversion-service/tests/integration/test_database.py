@@ -13,7 +13,9 @@ from conversion.conversion.domain.events import ItemContext
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionItem, ConversionRequest, ItemStatus
 from conversion.conversion.domain.values import InputFile, JobType, ObjectRef, StoredOutput
-from conversion.conversion.infrastructure.persistence import orm  # noqa: F401 - registers the table
+
+# registers the table
+from conversion.conversion.infrastructure.persistence import orm  # noqa: F401
 from conversion.conversion.infrastructure.persistence.repository import SqlUnitOfWork
 from conversion.core.clock import SystemClock
 from conversion.core.db import Base

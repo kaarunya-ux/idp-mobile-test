@@ -115,8 +115,10 @@ def workbook(tmp_path: Path) -> Path:
     assert first is not None
     first.title = "Sales"
     first.append(["item", "qty", "price", "when", "paid"])
-    first.append(["Paper", 10, 0.1, datetime(2026, 10, 21), True])  # noqa: DTZ001 - a spreadsheet date has no zone
-    first.append(["Pens", 3.0, 1e-05, datetime(2026, 10, 21, 9, 30), False])  # noqa: DTZ001 - same
+    # a spreadsheet date has no zone
+    first.append(["Paper", 10, 0.1, datetime(2026, 10, 21), True])  # noqa: DTZ001
+    # a spreadsheet date has no zone
+    first.append(["Pens", 3.0, 1e-05, datetime(2026, 10, 21, 9, 30), False])  # noqa: DTZ001
     first["A6"] = "Ink"  # rows 4-5 stay empty: a gap in the middle is kept
     first["C6"] = time(9, 30)  # a time of day; B6 stays empty
     first["A9"].number_format = "0.00"  # a styled but empty cell: trailing empty rows are not exported

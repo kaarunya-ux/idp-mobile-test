@@ -3,8 +3,11 @@
 from alembic import context
 from sqlalchemy import create_engine
 
-from conversion.conversion.infrastructure.persistence import orm  # noqa: F401 - registers conversion_item
-from conversion.core import inbox, outbox  # noqa: F401 - registers inbox_message and outbox_event
+# registers conversion_item
+from conversion.conversion.infrastructure.persistence import orm  # noqa: F401
+
+# registers inbox_message and outbox_event
+from conversion.core import inbox, outbox  # noqa: F401
 from conversion.core.config import get_settings
 from conversion.core.db import Base
 

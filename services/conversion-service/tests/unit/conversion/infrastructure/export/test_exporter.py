@@ -112,7 +112,8 @@ def test_writes_a_readable_report_with_the_page_image_when_exporting_docx(tmp_pa
 def test_writes_an_element_per_field_in_the_idp_namespace_when_exporting_xml(tmp_path: Path) -> None:
     (path,) = exporter.export(RESULTS, Format.XML, _options(), tmp_path, {})
 
-    root = ET.parse(path).getroot()  # noqa: S314 - our own output
+    # our own output
+    root = ET.parse(path).getroot()  # noqa: S314
     fields = root.findall(f"{{{XML_NAMESPACE}}}document/{{{XML_NAMESPACE}}}field")
     assert root.tag == f"{{{XML_NAMESPACE}}}results"
     assert (fields[0].get("key"), fields[0].text, fields[0].get("masked")) == ("pan", "XXXXX1234F", "true")

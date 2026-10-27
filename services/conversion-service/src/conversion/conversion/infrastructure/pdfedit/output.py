@@ -13,6 +13,7 @@ from conversion.conversion.domain.exceptions import InvalidPlanError
 _DOCINFO = {"title": "/Title", "author": "/Author", "subject": "/Subject", "keywords": "/Keywords"}
 _JPEG_QUALITY = {CompressPreset.BALANCED: 75, CompressPreset.STRONG: 50}
 _STRONG_MAX_SIDE_PX, _SMALL_IMAGE_PX = 1600, 300
+_EIGHT_BIT = 8  # only 8-bit images are re-encoded
 
 
 def set_metadata(pdf: pikepdf.Pdf, changes: Mapping[str, str | None]) -> None:
@@ -40,7 +41,7 @@ def compress_images(pdf: pikepdf.Pdf, preset: CompressPreset) -> None:
 
 
 def _recompress(image: pikepdf.Stream, quality: int, *, shrink: bool) -> None:
-    if "/SMask" in image or image.get("/BitsPerComponent") != 8:  # noqa: PLR2004 - 8-bit images only
+    if "/SMask" in image or image.get("/BitsPerComponent") != _EIGHT_BIT:
         return
     if image.get("/ColorSpace") not in (pikepdf.Name.DeviceRGB, pikepdf.Name.DeviceGray):
         return
