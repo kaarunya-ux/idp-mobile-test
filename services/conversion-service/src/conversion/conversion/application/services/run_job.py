@@ -32,6 +32,7 @@ from conversion.conversion.domain.route_planner import OcrMode
 from conversion.conversion.domain.values import JobType, ThumbnailSpec
 
 MERGED_FILE_NAME = "merged.pdf"
+_KEY_SEGMENTS = 3  # <accountId>/<documentId>/<fileId>
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -146,4 +147,4 @@ class PreviewHandler:
 def document_id_of(key: str) -> str | None:
     """``<accountId>/<documentId>/<fileId>`` (IDP-00 ch. 7.7): the document an input or result belongs to."""
     parts = key.split("/")
-    return parts[1] if len(parts) >= 3 else None  # noqa: PLR2004 - three segments in the key pattern
+    return parts[1] if len(parts) >= _KEY_SEGMENTS else None

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import docx
 import openpyxl
+from docx.document import Document as DocxDocument
 from docx.shared import Cm
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -20,7 +21,8 @@ _THUMBNAIL_WIDTH = Cm(8)
 def xlsx(results: Sequence[ResultDocument], options: ExportOptions, path: Path) -> Path:
     workbook = openpyxl.Workbook()
     sheet = workbook.active
-    assert isinstance(sheet, Worksheet)  # noqa: S101 - a new workbook always has one sheet
+    if not isinstance(sheet, Worksheet):  # a new workbook always has one sheet
+        raise TypeError("openpyxl made a workbook without a worksheet")
     names: set[str] = set()
     if options.layout is ExportLayout.ONE_SHEET_PER_DOCUMENT:
         workbook.remove(sheet)
@@ -43,26 +45,38 @@ def docx_report(results: Sequence[ResultDocument], thumbnails: Mapping[str, Path
     for number, result in enumerate(results):
         if number:
             report.add_page_break()  # type: ignore[no-untyped-call]  # python-docx: no hints on this method
-        report.add_heading(f"{result.document_type or 'Document'}: {result.name}", level=1)
-        if result.name in thumbnails:
-            report.add_picture(str(thumbnails[result.name]), width=_THUMBNAIL_WIDTH)
-        fields = report.add_table(rows=1, cols=4)
-        fields.style = "Table Grid"
-        for cell, title in zip(fields.rows[0].cells, ("Field", "Value", "Confidence", "Source"), strict=True):
-            cell.text = title
-        for field in result.fields:
-            cells = fields.add_row().cells
-            cells[0].text, cells[1].text = field.label, field.value or ""
-            cells[2].text = f"{field.confidence:.0%}" if field.confidence is not None else ""
-            cells[3].text = field.source or ""
-        for table in result.tables:
-            _docx_table(report, table)
-        summary = f"Accepted: {result.accepted}   Needs review: {result.needs_review}"
-        if result.failed_rules:
-            summary += f"   Failed checks: {', '.join(result.failed_rules)}"
-        report.add_paragraph(summary)
+        _document_section(report, result, thumbnails.get(result.name))
     report.save(str(path))
     return path
+
+
+def _document_section(report: DocxDocument, result: ResultDocument, thumbnail: Path | None) -> None:
+    report.add_heading(f"{result.document_type or 'Document'}: {result.name}", level=1)
+    if thumbnail is not None:
+        report.add_picture(str(thumbnail), width=_THUMBNAIL_WIDTH)
+    _fields_table(report, result)
+    for table in result.tables:
+        _docx_table(report, table)
+    report.add_paragraph(_summary(result))
+
+
+def _fields_table(report: DocxDocument, result: ResultDocument) -> None:
+    fields = report.add_table(rows=1, cols=4)
+    fields.style = "Table Grid"
+    for cell, title in zip(fields.rows[0].cells, ("Field", "Value", "Confidence", "Source"), strict=True):
+        cell.text = title
+    for field in result.fields:
+        cells = fields.add_row().cells
+        cells[0].text, cells[1].text = field.label, field.value or ""
+        cells[2].text = f"{field.confidence:.0%}" if field.confidence is not None else ""
+        cells[3].text = field.source or ""
+
+
+def _summary(result: ResultDocument) -> str:
+    summary = f"Accepted: {result.accepted}   Needs review: {result.needs_review}"
+    if result.failed_rules:
+        summary += f"   Failed checks: {', '.join(result.failed_rules)}"
+    return summary
 
 
 def _document_sheet(sheet: Worksheet, result: ResultDocument, options: ExportOptions) -> None:
@@ -92,7 +106,7 @@ def _table_sheet(sheet: Worksheet, tables: Sequence[tuple[str, ResultTable]]) ->
             sheet.append([name, *(_text_cell(cell) for cell in row)])
 
 
-def _docx_table(report: docx.document.Document, table: ResultTable) -> None:
+def _docx_table(report: DocxDocument, table: ResultTable) -> None:
     report.add_heading(table.key, level=2)
     grid = report.add_table(rows=1, cols=max(len(table.columns), 1))
     grid.style = "Table Grid"
@@ -116,6 +130,6 @@ def _sheet_name(wanted: str, used: set[str]) -> str:
 
 def _text_cell(value: object) -> object:
     """Strings that look like formulas are stored as text, so opening the file runs nothing (CSV/XLSX injection)."""
-    if isinstance(value, str) and value[:1] == "=":
+    if isinstance(value, str) and value.startswith("="):  # openpyxl makes formulas only of "=..."
         return f"'{value}"
     return value

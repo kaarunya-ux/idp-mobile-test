@@ -81,7 +81,7 @@ def _csv(results: Sequence[ResultDocument], options: ExportOptions, path: Path) 
 
 def _safe_cell(value: object) -> object:
     """A value starting with = + - @ would run as a formula in Excel (CSV injection); a leading ' keeps it text."""
-    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
         return f"'{value}"
     return value
 
