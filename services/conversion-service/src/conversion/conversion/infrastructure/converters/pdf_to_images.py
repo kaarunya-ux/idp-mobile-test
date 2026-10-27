@@ -44,17 +44,20 @@ class PdfiumPageRenderer:
             options = request.options
             indexes = options.page_range.select(page_count) if options.page_range else range(page_count)
             for index in indexes:
-                image, dpi = self._render(document, index, options.dpi)
+                image, dpi = self._render(document, index, options.dpi, options.max_side_px)
                 output = request.output_dir / f"{source.stem}-page-{index + 1:04d}{_SUFFIX[request.step.target]}"
                 _save(image, output, request.step.target, dpi, options)
                 outputs.append(output)
         return StepResult(outputs=tuple(outputs), page_count=len(outputs))
 
-    def _render(self, document: pdfium.PdfDocument, index: int, dpi: int) -> tuple[Image.Image, int]:
+    def _render(
+        self, document: pdfium.PdfDocument, index: int, dpi: int, max_side_px: int | None
+    ) -> tuple[Image.Image, int]:
         page = document[index]
+        side = self._max_side_px if max_side_px is None else min(self._max_side_px, max_side_px)
         try:
             width_pt, height_pt = page.get_size()
-            scale = min(dpi / POINTS_PER_INCH, self._max_side_px / max(width_pt, height_pt))  # cap the longest side
+            scale = min(dpi / POINTS_PER_INCH, side / max(width_pt, height_pt))  # cap the longest side
             image: Image.Image = page.render(scale=scale).to_pil()  # untyped library -> typed value here
             return image, round(scale * POINTS_PER_INCH)
         finally:

@@ -12,6 +12,24 @@ _BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 _UNSAFE_KEY = re.compile(r"(^/)|(\.\.)|(\\)|[\x00-\x1f\x7f]")  # absolute, parent, backslash or control character
 
 
+class JobType(StrEnum):
+    """The ``type`` of a ``ConversionRequested`` job item (IDP-00 ch. 7.5)."""
+
+    CONVERSION = "CONVERSION"  # files to another format
+    PDF_EDIT = "PDF_EDIT"  # one PDF and an edit plan (IDP-03 ch. 3.5)
+    PDF_MERGE = "PDF_MERGE"  # several PDFs and images, in order, into one PDF
+    EXPORT = "EXPORT"  # extraction results into a file (IDP-03 ch. 3.6)
+    PREVIEW = "PREVIEW"  # page thumbnails, written to the derived bucket
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ThumbnailSpec:
+    """How big and how compressed a ``PREVIEW`` thumbnail is (from settings; IDP-00 F-DC-05)."""
+
+    max_side_px: int
+    jpeg_quality: int
+
+
 class Stage(StrEnum):
     """Conversion stages shown to users (IDP-00 ch. 7.5)."""
 

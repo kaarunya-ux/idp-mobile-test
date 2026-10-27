@@ -147,3 +147,20 @@ class UnexpectedFailureError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("The conversion failed for a reason unrelated to the file. Please try again.")
+
+
+class WrongPasswordError(DomainError):
+    """The edit plan's password doesn't open the PDF. Reported as ``CNV-422-PDF-003``."""
+
+    code = ErrorCode.PDF_WRONG_PASSWORD
+    title = "Wrong PDF password"
+
+    def __init__(self) -> None:
+        super().__init__("The password doesn't open this PDF.")
+
+
+class InvalidPlanError(DomainError):
+    """An edit plan that is malformed or can't be applied to this PDF. Reported as ``CNV-422-PLAN-001``."""
+
+    code = ErrorCode.INVALID_PLAN
+    title = "Edit plan can't be applied"

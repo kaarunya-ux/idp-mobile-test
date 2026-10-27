@@ -1,29 +1,31 @@
 """Use case: run one job item, PREPARE -> CONVERT -> PACKAGE (IDP-00 ch. 7.5; IDP-03 ch. 3.2, the workers).
 
-Runs in a Celery worker. Each stage commits its progress with a ``JobProgressed`` outbox row; the end commits
-the result with ``ConversionCompleted`` or ``WorkFailed``. Business errors (a damaged file, a bad option) end the
-item. Anything else is a dependency or a bug: the item goes back to ``QUEUED`` and the exception goes up, so the
-task can retry it (CEL-04) or, after the last retry, call ``fail``.
+Runs in a Celery worker, for every job type; ``JobRunner`` does the type-specific work. Each stage commits its
+progress with a ``JobProgressed`` outbox row; the end commits the result with ``ConversionCompleted`` or
+``WorkFailed``. Business errors (a damaged file, a bad option) end the item. Anything else is a dependency or a bug:
+the item goes back to ``QUEUED`` and the exception goes up, so the task can retry it (CEL-04) or, after the last
+retry, call ``fail``.
 """
 
 import tempfile
 import zipfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
 
 import structlog
 
-from conversion.conversion.application.commands import ConvertFileCommand, ProcessItemCommand
-from conversion.conversion.application.services.convert_file import ConvertFileService
+from conversion.conversion.application.commands import ProcessItemCommand
+from conversion.conversion.application.services.run_job import JobInput, JobRunner
 from conversion.conversion.domain.events import ConversionEvent
-from conversion.conversion.domain.exceptions import InvalidOptionError, OcrNotAvailableError
+from conversion.conversion.domain.exceptions import InvalidOptionError
 from conversion.conversion.domain.formats import ZIP_CONTENT_TYPE, Format
 from conversion.conversion.domain.models import ConversionItem, ConversionRequest
 from conversion.conversion.domain.options import JobOptions, parse_job_options
 from conversion.conversion.domain.ports import FileInspectorPort, ObjectStoragePort, UnitOfWorkFactory
-from conversion.conversion.domain.values import ObjectRef, OutputMode, Stage, StoredOutput
+from conversion.conversion.domain.values import JobType, ObjectRef, OutputMode, Stage, StoredOutput
 from conversion.core.clock import Clock
 from conversion.core.errors import DomainError
 
@@ -33,24 +35,35 @@ CONVERT_STARTS_AT, PACKAGE_STARTS_AT = 30, 80  # percent shown to the user
 _LOCAL_STEM = "document"  # inputs get a fixed local name; keys and user file names are never paths (FIL-06)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OutputBuckets:
+    """Where outputs go (IDP-00 ch. 7.7): converted, merged and edited files, or derived files such as previews."""
+
+    outputs: str
+    derived: str
+
+    def for_job(self, job_type: JobType) -> str:
+        return self.derived if job_type is JobType.PREVIEW else self.outputs
+
+
 class ProcessConversionService:
     def __init__(
         self,
         units: UnitOfWorkFactory,
         storage: ObjectStoragePort,
         inspector: FileInspectorPort,
-        converter: ConvertFileService,
+        runner: JobRunner,
         clock: Clock,
         *,
-        outputs_bucket: str,
+        buckets: OutputBuckets,
         stale_after: timedelta,
     ) -> None:
         self._units = units
         self._storage = storage
         self._inspector = inspector
-        self._converter = converter
+        self._runner = runner
         self._clock = clock
-        self._outputs_bucket = outputs_bucket
+        self._buckets = buckets
         self._stale_after = stale_after
 
     def process(self, command: ProcessItemCommand) -> None:
@@ -91,24 +104,24 @@ class ProcessConversionService:
         with tempfile.TemporaryDirectory(prefix="item-") as scratch:  # always removed (FIL-06)
             folder = Path(scratch)
             inputs = self._download(request, folder / "in")
-            scanned = request.source is Format.PDF and self._inspector.is_scanned_pdf(inputs[0])
+            scanned = (
+                request.job_type is JobType.CONVERSION
+                and request.source is Format.PDF
+                and self._inspector.is_scanned_pdf(inputs[0])
+            )
             self._progress(request, Stage.CONVERT, CONVERT_STARTS_AT)
-            try:
-                result = self._converter.convert(
-                    ConvertFileCommand(
-                        source=request.source,
-                        target=request.target,
-                        inputs=inputs,
-                        output_dir=folder / "out",
-                        options=options.conversion,
-                        pdf_is_scanned=scanned,
-                        ocr=options.ocr,
-                    )
+            result = self._runner.run(
+                JobInput(
+                    request=request,
+                    files=inputs,
+                    output_dir=folder / "out",
+                    work_dir=folder / "work",
+                    options=options,
+                    pdf_is_scanned=scanned,
                 )
-            except LookupError as exc:  # the route needs a converter this build doesn't have: OCR
-                raise OcrNotAvailableError from exc
+            )
             self._progress(request, Stage.PACKAGE, PACKAGE_STARTS_AT)
-            files = _package(result.outputs, options, folder / "zip")
+            files = _package(result.files, options, folder / "zip")
             outputs = tuple(self._upload(file, request) for file in files)
         return outputs, result.page_count
 
@@ -125,7 +138,7 @@ class ProcessConversionService:
     def _upload(self, file: Path, request: ConversionRequest) -> StoredOutput:
         file_format = _format_of(file)
         content_type = file_format.content_type if file_format else ZIP_CONTENT_TYPE
-        ref = ObjectRef(bucket=self._outputs_bucket, key=request.output_key(file.name))
+        ref = ObjectRef(bucket=self._buckets.for_job(request.job_type), key=request.output_key(file.name))
         uploaded = self._storage.upload(file, ref, content_type)
         pages = self._inspector.count_pages(file, file_format) if file_format else None
         return StoredOutput(

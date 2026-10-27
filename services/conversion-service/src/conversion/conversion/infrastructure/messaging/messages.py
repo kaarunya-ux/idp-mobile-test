@@ -57,8 +57,9 @@ class ConversionRequestedMessage(_Incoming):
     item_id: UUID
     type: str = Field(max_length=32)  # CONVERSION / PDF_EDIT / PDF_MERGE / EXPORT / PREVIEW
     inputs: list[InputFileMessage] = Field(min_length=1, max_length=500)
-    target: str = Field(max_length=32)
+    target: str | None = Field(default=None, max_length=32)  # PDF_MERGE always makes a PDF; PREVIEW makes JPEGs
     options: dict[str, Any] = Field(default_factory=dict)
+    edit_plan: dict[str, Any] | None = None  # PDF_EDIT: the plan here or in options.editPlan (IDP-00 ch. 7.6)
     output_prefix: str = Field(max_length=900)
 
 

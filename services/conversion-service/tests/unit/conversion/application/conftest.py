@@ -14,10 +14,11 @@ from uuid import UUID, uuid4
 import pytest
 
 from conversion.conversion.domain.events import ConversionEvent, ItemContext
+from conversion.conversion.domain.exceptions import InvalidRequestError
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionItem, ConversionRequest
 from conversion.conversion.domain.ports import UploadedObject
-from conversion.conversion.domain.values import InputFile, ObjectRef, WorkerPool
+from conversion.conversion.domain.values import InputFile, JobType, ObjectRef, WorkerPool
 
 START = datetime(2026, 10, 26, 9, 0, tzinfo=UTC)
 STALE_AFTER = timedelta(minutes=12)
@@ -117,7 +118,10 @@ class FolderStorage:
     def download(self, ref: ObjectRef, destination: Path) -> None:
         if self.fail_with is not None:
             raise self.fail_with
-        shutil.copyfile(self.root / ref.bucket / ref.key, destination)
+        source = self.root / ref.bucket / ref.key
+        if not source.is_file():  # as S3ObjectStorage reports a missing object
+            raise InvalidRequestError("An input file no longer exists in storage.")
+        shutil.copyfile(source, destination)
 
     def upload(self, source: Path, ref: ObjectRef, content_type: str) -> UploadedObject:
         self.put(ref, source)
@@ -172,7 +176,8 @@ def inspector() -> FakeInspector:
 
 @pytest.fixture
 def conversion_request() -> MakeRequestOf:
-    """``conversion_request(Format.PNG, Format.PDF, inputs=2, options={...})``: one item's request."""
+    """``conversion_request(Format.PNG, Format.PDF, inputs=2, options={...})``: one item's request. ``formats``
+    gives each input its own format (a merge of a PDF and an image, say)."""
 
     def make(
         source: Format = Format.PNG,
@@ -181,14 +186,21 @@ def conversion_request() -> MakeRequestOf:
         inputs: int = 1,
         options: dict[str, Any] | None = None,
         item_id: UUID | None = None,
+        job_type: JobType = JobType.CONVERSION,
+        formats: tuple[Format, ...] | None = None,
     ) -> ConversionRequest:
         context = ItemContext(tenant_id=uuid4(), correlation_id="corr-1", job_id=uuid4(), item_id=item_id or uuid4())
         files = tuple(
-            InputFile(ref=ObjectRef(bucket="idp-originals", key=f"acc/doc/file-{n}"), format=source)
-            for n in range(inputs)
+            InputFile(ref=ObjectRef(bucket="idp-originals", key=f"acc/doc/file-{n}"), format=file_format)
+            for n, file_format in enumerate(formats or (source,) * inputs)
         )
         return ConversionRequest(
-            context=context, inputs=files, target=target, options=options or {}, output_prefix="acc/job/item"
+            context=context,
+            inputs=files,
+            target=target,
+            options=options or {},
+            output_prefix="acc/job/item",
+            job_type=job_type,
         )
 
     return make

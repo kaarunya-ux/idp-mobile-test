@@ -58,6 +58,18 @@ def test_lowers_the_dpi_when_a_page_would_exceed_the_size_cap(make_pdf: MakePdf,
         assert max(image.size) == 800
 
 
+def test_draws_pages_to_fit_the_request_size_cap_when_one_is_given(
+    make_pdf: MakePdf, make_request: MakeRequest
+) -> None:
+    pdf = make_pdf("a4.pdf", sizes=[(595, 842)])
+    request = make_request(Converter.PDF_TO_IMAGES, R.PDF, R.JPEG, [pdf], ConversionOptions(dpi=600, max_side_px=400))
+
+    (output,) = renderer.convert(request).outputs
+
+    with Image.open(output) as image:
+        assert image.size == (283, 400)
+
+
 def test_counts_the_pages_it_rendered_when_done(make_pdf: MakePdf, make_request: MakeRequest) -> None:
     pdf = make_pdf("doc.pdf", sizes=[(100, 100)] * 3)
 

@@ -4,7 +4,15 @@ Converts documents between PDF, Word, Excel, CSV, PowerPoint and images. Also ap
 
 There is **no public API**. document-service (Java) sends `ConversionRequested` messages over RabbitMQ, and this service replies with `JobProgressed`, `ConversionCompleted` or `WorkFailed` (IDP-00 ch. 7.6). Files go in and out through MinIO; messages carry only their locations.
 
-**Status:** step 4 of the [build log](../../docs/conversion-service/build-log.md). It receives `ConversionRequested` from RabbitMQ, converts in Celery workers, reads and writes files in MinIO, and replies through an outbox in its own database (`conversion_db`). It runs every conversion in the IDP-00 matrix that needs no OCR (36 of 47 routes): PNG ↔ JPEG, images ↔ PDF, Office → PDF and images, CSV ↔ XLSX, images and PDF → PowerPoint, and the data routes through the document model. Scanned PDF and image → Word/Excel/CSV wait for OCR and fail with `CNV-422-ROUTE-001` until then.
+**Status:** step 5 of the [build log](../../docs/conversion-service/build-log.md): every job type in IDP-00 ch. 7.5 runs. It receives `ConversionRequested` from RabbitMQ, works in Celery workers, reads and writes files in MinIO, and replies through an outbox in its own database (`conversion_db`).
+
+| Job type | What it does |
+|---|---|
+| `CONVERSION` | 36 of the 47 routes in the IDP-00 matrix; the 11 that read scanned pages need OCR and fail with `CNV-422-ROUTE-001` for now |
+| `PDF_MERGE` | PDFs and images, in order, into one `merged.pdf` |
+| `PREVIEW` | a JPEG thumbnail per page, written to `idp-derived` |
+| `PDF_EDIT` | the IDP-03 ch. 3.5 edit plan: reorder, rotate, delete, blank and borrowed pages; text, highlight, ink, signature and image overlays; watermark, page numbers; true redaction; form filling; text replacement; metadata; password protection; compression; splitting |
+| `EXPORT` | extraction results as JSON, CSV, XLSX, DOCX, PDF or XML; masked fields stay masked |
 
 ## How a request flows
 
@@ -42,6 +50,8 @@ make run               # health server on http://127.0.0.1:8001/health/live
 make up                # the whole stack in Docker: PostgreSQL, RabbitMQ, MinIO, intake, relay, worker
 make migrate           # apply database migrations to DB__URL
 ```
+
+**Try any job by hand:** with `make up` running, `uv run python scripts/send_job.py report.docx --to PDF` plays Java: it uploads the file, sends the job, prints every event and saves the outputs. `--type PDF_MERGE | PREVIEW | PDF_EDIT --plan plan.json | EXPORT --to XLSX` for the other job types.
 
 Integration tests (`tests/integration/`) start PostgreSQL, RabbitMQ and MinIO in containers, so they need Docker. One of them runs the whole path: a message in, a real Celery worker converting a file from MinIO, and `ConversionCompleted` out on `idp.events`.
 
@@ -85,9 +95,15 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `STORAGE__ENDPOINT` | — (required by workers) | `http://minio:9000` | MinIO, run by the Java team |
 | `STORAGE__ACCESS_KEY` / `STORAGE__SECRET_KEY` | — (required by workers) | | This service's own MinIO keys |
 | `STORAGE__REGION` | `us-east-1` | | S3 region name MinIO answers to |
-| `STORAGE__BUCKET_OUTPUTS` | `idp-outputs` | a bucket name | Where converted files are written |
+| `STORAGE__BUCKET_OUTPUTS` | `idp-outputs` | a bucket name | Where converted and merged files are written |
+| `STORAGE__BUCKET_DERIVED` | `idp-derived` | a bucket name | Where `PREVIEW` thumbnails are written (IDP-00 ch. 7.7) |
 | `STORAGE__MAX_INPUT_SIZE` | `200MiB` | a size like `200MiB` or a byte count | Bigger inputs are refused before downloading (`CNV-422-LIMIT-001`) |
 | `STORAGE__TIMEOUT` | `30` (seconds) | 1 s – 5 min | Connect and read timeout for MinIO |
+| `EDIT__REDACTION_DPI` | `200` | 96–400 | How sharp a redacted page is when it is redrawn as a picture |
+| `EDIT__MAX_IMAGE_BYTES` | `5MiB` | a size | Largest signature or inserted image |
+| `CRYPTO__PRIVATE_KEY` | — (none) | RSA private key, PEM | Decrypts edit-plan passwords Java encrypted with our public key. Without it, plans with passwords fail with `CNV-422-PLAN-001` |
+| `PREVIEW__MAX_SIDE_PX` | `400` | 64–2000 | Longest side of a page thumbnail; an A4 page comes out 283 × 400 |
+| `PREVIEW__JPEG_QUALITY` | `75` | 30–95 | JPEG quality of thumbnails |
 | `OUTBOX__BATCH_SIZE` | `100` | 1–1000 | Rows the relay claims at once |
 | `OUTBOX__POLL_INTERVAL` | `1` (second) | 50 ms – 1 min | How long the relay waits when there is nothing to send |
 | `OUTBOX__LEASE` | `60` (seconds) | ≥ 5 s | A claim older than this (its relay died) is given back |

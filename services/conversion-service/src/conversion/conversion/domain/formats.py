@@ -14,6 +14,8 @@ class Format(StrEnum):
     PPTX = "PPTX"
     PNG = "PNG"
     JPEG = "JPEG"
+    JSON = "JSON"  # extraction results in, and EXPORT out; not part of the conversion matrix
+    XML = "XML"  # EXPORT out only
 
     @property
     def is_image(self) -> bool:
@@ -40,6 +42,10 @@ class Format(StrEnum):
 
 
 IMAGE_FORMATS: frozenset[Format] = frozenset({Format.PNG, Format.JPEG})
+MATRIX_FORMATS: frozenset[Format] = frozenset(Format) - {Format.JSON, Format.XML}  # IDP-00 ch. 5
+EXPORT_FORMATS: frozenset[Format] = frozenset(
+    {Format.JSON, Format.CSV, Format.XLSX, Format.DOCX, Format.PDF, Format.XML}
+)  # IDP-03 ch. 3.6
 ZIP_CONTENT_TYPE = "application/zip"
 _OFFICE = "application/vnd.openxmlformats-officedocument"
 _CONTENT_TYPES = {
@@ -50,6 +56,8 @@ _CONTENT_TYPES = {
     Format.PPTX: f"{_OFFICE}.presentationml.presentation",
     Format.PNG: "image/png",
     Format.JPEG: "image/jpeg",
+    Format.JSON: "application/json",
+    Format.XML: "application/xml",
 }
 _CONTENT_TYPE_ALIASES = {"image/jpg": Format.JPEG, "application/csv": Format.CSV}  # seen from older clients
 _SUFFIXES = {
@@ -60,6 +68,8 @@ _SUFFIXES = {
     Format.PPTX: ".pptx",
     Format.PNG: ".png",
     Format.JPEG: ".jpg",
+    Format.JSON: ".json",
+    Format.XML: ".xml",
 }
 
 

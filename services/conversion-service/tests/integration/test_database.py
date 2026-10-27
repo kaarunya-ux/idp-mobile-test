@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from conversion.conversion.domain.events import ItemContext
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionItem, ConversionRequest, ItemStatus
-from conversion.conversion.domain.values import InputFile, ObjectRef, StoredOutput
+from conversion.conversion.domain.values import InputFile, JobType, ObjectRef, StoredOutput
 from conversion.conversion.infrastructure.persistence import orm  # noqa: F401 - registers the table
 from conversion.conversion.infrastructure.persistence.repository import SqlUnitOfWork
 from conversion.core.clock import SystemClock
@@ -139,3 +139,32 @@ def test_refuses_use_outside_the_with_block(sessions) -> None:
 
     with pytest.raises(RuntimeError, match="outside"):
         unit.commit()
+
+
+def test_keeps_the_job_type_and_reads_older_rows_as_conversions(sessions) -> None:
+    merge = _item()
+    merge.request = ConversionRequest(
+        context=merge.request.context,
+        inputs=merge.request.inputs * 2,
+        target=Format.PDF,
+        options={},
+        output_prefix="a/job/item",
+        job_type=JobType.PDF_MERGE,
+    )
+    older = _item()
+    with _unit(sessions) as unit:
+        unit.items.add(merge)
+        unit.items.add(older)
+        unit.commit()
+    with sessions.begin() as session:  # a row written before job types existed
+        session.execute(
+            text("UPDATE conversion_item SET request = request - 'job_type' WHERE item_id = :id"), {"id": older.id}
+        )
+
+    with _unit(sessions) as unit:
+        loaded_merge, loaded_older = unit.items.get_for_update(merge.id), unit.items.get_for_update(older.id)
+
+    assert loaded_merge is not None
+    assert loaded_merge.request.job_type is JobType.PDF_MERGE
+    assert loaded_older is not None
+    assert loaded_older.request.job_type is JobType.CONVERSION

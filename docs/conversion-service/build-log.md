@@ -22,8 +22,8 @@ Each step is one branch and one reviewable pull request (about 400 changed lines
 | 3c-1 | Document model: Word and sheets | The document model; Word ↔ Excel/CSV, Excel/CSV → Word | done |
 | 3c-2 | PowerPoint routes | PowerPoint → Word/Excel/CSV, Excel/CSV → PowerPoint, images and PDF → PowerPoint | done |
 | 3c-3 | PDF data routes | PDF tables → Excel/CSV, PDF → Word, rebuilt on the document model (pdfplumber, no PyMuPDF) | done; 3c-1 to 3c-3 are one PR (`feat/conversion-service-document-model`) |
-| 4 | Messaging and storage | Receive `ConversionRequested`, run Celery tasks, MinIO in and out, send `JobProgressed` / `ConversionCompleted` / `WorkFailed` | |
-| 5 | The rest | PDF edit plans, exports, previews. AI-assisted routes once ai-gateway exists | |
+| 4 | Messaging and storage | Receive `ConversionRequested`, run Celery tasks, MinIO in and out, send `JobProgressed` / `ConversionCompleted` / `WorkFailed` || merged (PR #6) |
+| 5 | The other job types | `PDF_MERGE`, `PREVIEW`, `PDF_EDIT` (edit plans), `EXPORT`. AI-assisted routes once ai-gateway exists | in review (one PR) |
 
 ---
 
@@ -879,3 +879,153 @@ make down
 | psycopg (LGPL) | Kept, as the standard names it. **Open:** swap to pg8000 if strictly permissive-only |
 | OCR pool | Queue exists; requests needing OCR fail with `CNV-422-ROUTE-001` until the OCR decision D-1 |
 | Stuck `DEAD` outbox rows | Logged as errors. **Open:** an alert on `outbox_event_dead`, and a runbook for replaying them |
+
+## Entry 9: Merges, previews, edits and exports (step 5, 2026-10-27)
+
+**Goal:** every job type in IDP-00 ch. 7.5. **`PDF_MERGE`**: PDFs and images, in order, into one PDF. **`PREVIEW`**:
+page thumbnails, made on upload (F-DC-05). **`PDF_EDIT`**: the edit plan of IDP-03 ch. 3.5. **`EXPORT`**: extraction
+results into a file (IDP-03 ch. 3.6). Until now all four were refused with `CNV-422-REQUEST-001`.
+
+**One PR for step 5**, as the Python lead asked: about 2,450 lines of source and 1,350 of tests, far over the
+~400-line guide. The parts below (5a merge and preview, 5b-c edit, 5d export) split it for review.
+
+### What we did
+
+```
+domain/values.py             JobType (CONVERSION, PDF_MERGE, PREVIEW); ThumbnailSpec
+domain/models.py             the request carries its job type; rules per type (below)
+domain/options.py            max_side_px: an internal size cap for rendered pages (Java can't set it)
+domain/ports.py              PdfMergerPort, ImageThumbnailPort
+application/services/
+  run_job.py                 JobRunner: the type-specific middle of a job (convert, merge, render previews)
+  process_conversion.py      same download / progress / package / upload for every type; picks the bucket
+  accept_conversion.py       picks the worker pool by job type
+infrastructure/converters/
+  pdf_merge.py               PikepdfMerger (pikepdf, MPL-2.0, on the approved list)
+  thumbnails.py              PillowThumbnailer, for photos and scans
+  pdf_to_images.py           honours max_side_px
+infrastructure/messaging/    the job type sets the target; `target` is optional on the wire
+infrastructure/persistence/  job_type stored with the request; older rows read as CONVERSION (no migration)
+core/config.py               PREVIEW__MAX_SIDE_PX (400), PREVIEW__JPEG_QUALITY (75), STORAGE__BUCKET_DERIVED
+pyproject.toml               pikepdf moved from dev to the workers extra; import rules cover it
+tests/                       30 new tests (unit, plus real PostgreSQL and MinIO)
+```
+
+Then, for `PDF_EDIT` and `EXPORT`:
+
+```
+domain/edit_plan.py          the plan as checked values: pages, 13 operation kinds (SIGNATURE = INSERT_IMAGE), split
+domain/edit_plan_parser.py   JSON -> plan; anything malformed is CNV-422-PLAN-001
+domain/results.py            extraction results (IDP-00 ch. 7.8) and the export options
+domain/formats.py            JSON and XML (exports only; MATRIX_FORMATS keeps the conversion matrix as it was)
+application/services/
+  run_job.py                 a handler per job type; JobRunner only dispatches
+  edit_pdf.py                EditHandler: documents and images gathered, passwords decrypted, editor called
+  export_results.py          ExportHandler: results read, page images fetched, PDF reports via DOCX -> PDF
+infrastructure/pdfedit/      geometry (shown vs page coordinates), drawing (overlays), redaction, forms
+                             (fill, replace text), output (metadata, compression, split, save), editor
+infrastructure/export/       exporter (JSON, CSV, XML), office (XLSX, DOCX report), rows (shared row layout)
+infrastructure/secrets.py    RsaSecrets: RSA-OAEP SHA-256 (cryptography, Apache-2.0/BSD)
+core/error_codes.py          CNV-422-PLAN-001 (invalid plan), CNV-422-PDF-003 (wrong password), from IDP-03 ch. 3.8
+scripts/send_job.py          plays Java against `make up`: send any job, watch it, save the outputs
+tests/                       about 70 more tests
+```
+
+### How `PDF_EDIT` works
+
+1. Open the document (with the plan's password if given; a wrong one is `CNV-422-PDF-003`) and any documents it
+   borrows pages from. Those come as further inputs, matched by the document id in their key.
+2. Fill forms first: field values belong to the document, not to page positions, so they survive reordering.
+3. Assemble pages in the plan's order, each with its absolute rotation. Omitted pages are gone.
+4. Apply the operations in order. Overlays draw in the page as the user saw it (rotation applied).
+5. Check that no redacted term is left, split if asked, save, with a password if asked (AES-256).
+
+| Choice | Why it matters |
+|---|---|
+| **Redaction redraws the page as a picture**, boxes painted black | The text is really gone from the file, not hidden under a box. Checked: the finished file is searched for every redacted term; finding one fails the job. Cost: other text on that page can no longer be selected |
+| Text replacement edits the stored text, or fails | Drawing new text over old would leave the old text in the file. PDFs that store text as glyph numbers (most embedded fonts) get `CNV-422-PLAN-001` |
+| Passwords decrypted in the worker only | IDP-03 ch. 3.5: never logged, never stored. The plan keeps them encrypted in `conversion_db` |
+| Encrypted inputs without the plan's password refused | Editing would remove the owner's restrictions |
+| Overlays use the standard Helvetica font | Every viewer has it, no font file to ship. **Latin letters only**: Hindi text on a page fails clearly, it isn't drawn wrongly |
+
+### How `EXPORT` works
+
+| Format | Layout (option `layout`) |
+|---|---|
+| JSON | `ARRAY` (default): one file; `ONE_FILE_PER_DOCUMENT` |
+| CSV | a row per document; columns = every field key across documents; `includeConfidence` adds `<key>_confidence` |
+| XLSX | `ONE_ROW_PER_DOCUMENT` sheet + a sheet per table type (default), or `ONE_SHEET_PER_DOCUMENT` |
+| DOCX / PDF | a report: first page image, fields (label, value, confidence, source), tables, validation summary |
+| XML | an element per field in namespace `urn:idp:result:v1` |
+
+Values are taken as extraction-service stored them, so masked fields stay masked. A value starting with `=`, `+`,
+`-` or `@` is written as text in CSV and XLSX, so opening the file can't run a formula.
+
+### How each job type runs
+
+| Job type | Inputs | Work | Output | Pool |
+|---|---|---|---|---|
+| `CONVERSION` | as before | the planned route | `idp-outputs` | the route's scarcest step |
+| `PDF_MERGE` | 1–200 PDFs and images | each image -> PDF through the existing route; then pikepdf copies every page in order | `idp-outputs/<prefix>/merged.pdf` | `pdf` |
+| `PREVIEW` | exactly 1 document | PDFs and Office files: their route to JPEG, pages drawn to fit 400 px. Images: shrunk with Pillow (there is no JPEG -> JPEG conversion) | `idp-derived/<prefix>/document-page-0001.jpg` ... | `pdf`, or `office` for Office files |
+
+Rules checked when the request arrives: a merge takes only PDFs and images and always makes a PDF; a preview is of
+one document and makes images. Anything else is `CNV-422-REQUEST-001`.
+
+### Why it's built this way
+
+| Choice | Rule | Why it matters |
+|---|---|---|
+| One worker flow for every job type; only the middle differs | `DRY`, ch. 7 | Duplicate protection, progress, retries and the outbox behave the same for merges and previews, with no new code |
+| Pages copied, not re-rendered | IDP-03 ch. 3.2 (`worker-pdf`: pikepdf) | Text stays selectable, quality unchanged, and it's fast |
+| Encrypted inputs refused, even those that open without a password | `CNV-422-PDF-001` | Merging would silently drop the owner's print and copy restrictions |
+| A preview is a conversion to small JPEGs | reuse | Office previews come free from the Office -> PDF -> images route |
+| `job_type` defaults to `CONVERSION` in stored rows | `DB-04` (backward-compatible change) | Items stored before this change still load; no migration |
+
+### Deviations
+
+- **Package layout:** IDP-03 ch. 3.3 has `pdfedit/`, `export/` and `preview/` as separate features. Here they are
+  handlers inside the conversion feature (with `infrastructure/pdfedit/` and `infrastructure/export/` adapters),
+  because every job type shares one item, outbox and worker flow. Splitting them into features would duplicate
+  that flow; worth revisiting only if the job types grow apart.
+- **Thumbnail size and format** aren't in any spec: 400 px longest side, JPEG quality 75. **The lead's call**; both are
+  settings.
+
+### Try it
+
+```bash
+cd services/conversion-service
+make check   # 479 tests (25 against real PostgreSQL, RabbitMQ and MinIO), 96 % coverage
+make up
+uv run python scripts/send_job.py contract.pdf --type PDF_EDIT --plan plan.json
+uv run python scripts/send_job.py result1.json result2.json --type EXPORT --to XLSX
+make down
+```
+
+All six job types were run this way through the real stack (RabbitMQ -> intake -> Celery worker -> MinIO ->
+outbox -> `idp.events`): Word -> PDF, a merge of a PDF and a photo, a 3-page preview, an edit (reorder, rotate,
+watermark, redact, page numbers, metadata: the redacted PAN was gone from the file), and XLSX and PDF exports.
+
+### Lessons
+
+- **Tests found four real bugs before any user could:** a signature lost its transparency (the mask must be its
+  own PDF object), form flattening crashed (pikepdf already removes the form), a password-protected output couldn't
+  have its pages counted (the editor now reports them before encrypting), and the fake storage in tests didn't
+  fail like the real one for a missing file.
+- **A test can be wrong too.** One test read an image after closing its PDF and saw no keys; the editor was fine.
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| Edit plan location | Accepted in `options.editPlan` or as a top-level `editPlan`. **Tell the Java team** which they send |
+| Borrowed pages | Other documents come as extra `inputs[]`, matched by `<accountId>/<documentId>/...` in the key. **Confirm with Java** |
+| Encrypted passwords | Base64 of RSA-OAEP SHA-256 with our public key; key in `CRYPTO__PRIVATE_KEY`. **Agree the format with Java** and generate the key pair |
+| `imageKey` | `<bucket>/<key>`, as in the IDP-03 example (`idp-derived/.../sig.png`). Result page images are keys in `idp-derived` |
+| Redacted pages | Become pictures (see above). The lead's call if selectable text on redacted pages matters |
+| Text on pages | Latin letters only until a Unicode font is embedded (Hindi needs one) |
+| Export option names | `layout`, `includeConfidence`: not in any spec. **Agree with Java / the web team** |
+| Thumbnail size | 400 px, JPEG 75 (settings). **Open:** confirm with the web/mobile team, and whether they want WebP |
+| Merged file name | `merged.pdf`. **Open:** whether Java wants the user's chosen name in `options` |
+| Bookmarks and form fields | Not carried into a merge. Fine for now; revisit with `PDF_EDIT` |
+| Java contract | `target` may be left out for `PDF_MERGE` and `PREVIEW`. **Tell the Java team** which bucket previews land in (`idp-derived`) |

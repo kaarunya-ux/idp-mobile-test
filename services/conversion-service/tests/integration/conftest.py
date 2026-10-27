@@ -30,7 +30,7 @@ from conversion.core.db import SessionFactory, create_db_engine, create_session_
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 MINIO_USER, MINIO_PASSWORD = "test-access-key", "test-secret-key"
-BUCKETS = ("idp-originals", "idp-outputs")
+BUCKETS = ("idp-originals", "idp-outputs", "idp-derived")
 
 pytestmark = pytest.mark.integration
 

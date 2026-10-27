@@ -4,19 +4,21 @@ Infrastructure adapters implement these protocols; the application layer depends
 never imports Pillow, PDFium or LibreOffice code directly.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Protocol, Self
 from uuid import UUID
 
+from conversion.conversion.domain.edit_plan import EditPlan
 from conversion.conversion.domain.events import ConversionEvent
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionItem
 from conversion.conversion.domain.options import ConversionOptions
+from conversion.conversion.domain.results import ExportOptions, ResultDocument
 from conversion.conversion.domain.route import Converter, Step
-from conversion.conversion.domain.values import ObjectRef, WorkerPool
+from conversion.conversion.domain.values import ObjectRef, ThumbnailSpec, WorkerPool
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -83,6 +85,58 @@ class FileInspectorPort(Protocol):
 
     def count_pages(self, path: Path, file_format: Format) -> int | None:
         """Pages of a PDF, slides of a deck, 1 for an image; ``None`` for formats without fixed pages."""
+        ...
+
+
+class PdfMergerPort(Protocol):
+    def merge(self, pdfs: Sequence[Path], output: Path) -> int:
+        """Write every page of ``pdfs``, in order, to ``output`` and return the page count.
+
+        Raise ``PasswordRequiredError`` for an encrypted input, ``CorruptPdfError`` for a damaged one, and
+        ``LimitExceededError`` when the result would have more pages than allowed.
+        """
+        ...
+
+
+class ImageThumbnailPort(Protocol):
+    def thumbnail(self, source: Path, output: Path, spec: ThumbnailSpec) -> None:
+        """Write ``source`` (any supported image) upright, shrunk to fit ``spec``, as a JPEG at ``output``."""
+        ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EditJob:
+    """An edit plan ready to apply: secrets decrypted, every document and image downloaded."""
+
+    plan: EditPlan
+    documents: Mapping[str, Path]  # documentId -> PDF; "self" is the job's own input
+    images: Mapping[str, Path]  # imageKey -> image file
+
+
+class PdfEditorPort(Protocol):
+    def edit(self, job: EditJob, output_dir: Path) -> tuple[tuple[Path, ...], int]:
+        """Apply the plan; return the PDF (or several, when the plan splits it) and the page count. Raise
+        ``InvalidPlanError`` (``CNV-422-PLAN-001``) when the plan doesn't fit the document, and the usual PDF
+        errors."""
+        ...
+
+
+class SecretsPort(Protocol):
+    def decrypt(self, token: str) -> str:
+        """A password Java encrypted with this service's public key (IDP-03 ch. 3.7). Never logged."""
+        ...
+
+
+class ResultExporterPort(Protocol):
+    def export(
+        self,
+        results: Sequence[ResultDocument],
+        target: Format,
+        options: ExportOptions,
+        output_dir: Path,
+        thumbnails: Mapping[str, Path],
+    ) -> tuple[Path, ...]:
+        """Write the results as JSON, CSV, XLSX, DOCX or XML (PDF is the DOCX report, converted by the caller)."""
         ...
 
 

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from conversion.conversion.domain.events import ConversionCompleted, ItemContext
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionItem, ConversionRequest, ItemStatus
-from conversion.conversion.domain.values import InputFile, ObjectRef, StoredOutput
+from conversion.conversion.domain.values import InputFile, JobType, ObjectRef, StoredOutput
 from conversion.conversion.infrastructure.persistence.orm import ConversionItemOrm
 from conversion.core.error_codes import ErrorCode
 
@@ -27,6 +27,7 @@ class StoredRequest(_Stored):
     target: Format
     options: dict[str, Any]
     output_prefix: str
+    job_type: JobType = JobType.CONVERSION  # rows from before PDF_MERGE and PREVIEW have no job type
 
 
 class _StoredOutput(_Stored):
@@ -68,6 +69,7 @@ def update_orm(row: ConversionItemOrm, item: ConversionItem) -> None:
         target=request.target,
         options=dict(request.options),
         output_prefix=request.output_prefix,
+        job_type=request.job_type,
     ).model_dump(mode="json")
     row.completion = _completion_json(item.completion) if item.completion else None
     row.error_code = item.error_code
@@ -85,6 +87,7 @@ def to_domain(row: ConversionItemOrm) -> ConversionItem:
         target=stored.target,
         options=stored.options,
         output_prefix=stored.output_prefix,
+        job_type=stored.job_type,
     )
     return ConversionItem(
         request=request,
