@@ -12,12 +12,13 @@ import structlog
 
 from conversion.conversion.application.commands import AcceptConversionCommand, RejectConversionCommand
 from conversion.conversion.domain.events import WorkFailed
+from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionItem, ConversionRequest, IntakeAction, ItemStatus
 from conversion.conversion.domain.options import parse_job_options
 from conversion.conversion.domain.policies import worker_pool_for
 from conversion.conversion.domain.ports import TaskQueuePort, UnitOfWorkFactory, UnitOfWorkPort
-from conversion.conversion.domain.route_planner import RoutePlanner, RouteRequest
-from conversion.conversion.domain.values import WorkerPool
+from conversion.conversion.domain.route_planner import OcrMode, RoutePlanner, RouteRequest
+from conversion.conversion.domain.values import JobType, WorkerPool
 from conversion.core.clock import Clock
 from conversion.core.errors import DomainError
 
@@ -95,7 +96,17 @@ class AcceptConversionService:
             return None
 
     def _pool_for(self, request: ConversionRequest) -> WorkerPool:
-        """Routes are planned as if a PDF were digital; a worker that finds a scan re-plans (OCR is not here yet)."""
+        """Merges, edits, and previews of PDFs and images are PDF work; exports are document work. Anything else
+        goes where its route's scarcest step runs. Routes are planned as if a PDF were digital; a worker that
+        finds a scan re-plans."""
+        match request.job_type:
+            case JobType.PDF_MERGE | JobType.PDF_EDIT:
+                return WorkerPool.PDF
+            case JobType.EXPORT:
+                return WorkerPool.OFFICE if request.target is Format.PDF else WorkerPool.DATA  # PDF: DOCX -> PDF
+            case JobType.PREVIEW if request.source is Format.PDF or request.source.is_image:
+                return WorkerPool.PDF
         options = parse_job_options(request.options)
-        route = self._planner.get_route(RouteRequest(source=request.source, target=request.target, ocr=options.ocr))
+        ocr = options.ocr if request.job_type is JobType.CONVERSION else OcrMode.OFF
+        route = self._planner.get_route(RouteRequest(source=request.source, target=request.target, ocr=ocr))
         return worker_pool_for(route)

@@ -27,6 +27,8 @@ workers = [
     "python-docx>=1.1",
     "python-pptx>=1.0",
     "pdfplumber>=0.11",
+    "pikepdf>=9.0",  # MPL-2.0, on the approved list: PDF_MERGE and PDF_EDIT
+    "cryptography>=43",  # Apache-2.0/BSD: decrypts edit-plan passwords (IDP-03 ch. 3.7); pdfplumber already needs it
     "celery>=5.4",
     "boto3>=1.35",
     "faststream[rabbit,cli]>=0.5",  # cli: the `faststream run` command the intake image starts with
@@ -42,7 +44,6 @@ dev = [
     "ruff>=0.6",
     "import-linter>=2.1",
     "hypothesis>=6.100",
-    "pikepdf>=9.0",
     "types-openpyxl>=3.1",
     "testcontainers[minio,postgres,rabbitmq]>=4.8",
     "boto3-stubs[s3]>=1.35",
@@ -128,7 +129,8 @@ source_modules = ["conversion.conversion.domain"]
 forbidden_modules = [
     "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "httpx", "celery", "faststream", "redis",
     "boto3", "structlog", "uvicorn", "conversion.core.config", "conversion.core.logging",
-    "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber", "conversion.conversion.infrastructure",
+    "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber", "pikepdf", "conversion.conversion.infrastructure",
+    "cryptography", "pdfminer",
     "botocore", "aio_pika", "psycopg", "alembic", "conversion.core.db", "conversion.core.outbox",
 ]
 
@@ -143,8 +145,8 @@ name = "Application depends on ports, not adapters"
 type = "forbidden"
 source_modules = ["conversion.conversion.application"]
 forbidden_modules = [
-    "conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber",
-    "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3", "botocore",
+    "conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber", "pikepdf",
+    "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3", "botocore", "cryptography", "pdfminer",
 ]
 
 [[tool.importlinter.contracts]]
@@ -153,7 +155,7 @@ type = "forbidden"
 source_modules = ["conversion.health"]
 forbidden_modules = [
     "conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx",
-    "pdfplumber", "celery", "faststream", "boto3",
+    "pdfplumber", "pikepdf", "celery", "faststream", "boto3",
 ]
 
 [[tool.importlinter.contracts]]

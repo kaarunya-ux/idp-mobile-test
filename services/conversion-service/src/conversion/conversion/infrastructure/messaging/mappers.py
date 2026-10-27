@@ -17,7 +17,7 @@ from conversion.conversion.domain.exceptions import InvalidRequestError
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionRequest
 from conversion.conversion.domain.options import resolve_target
-from conversion.conversion.domain.values import InputFile, ObjectRef
+from conversion.conversion.domain.values import InputFile, JobType, ObjectRef
 from conversion.conversion.infrastructure.messaging.messages import (
     CONVERSION_REQUESTED,
     EVENT_ID_HEADER,
@@ -34,7 +34,6 @@ from conversion.conversion.infrastructure.messaging.messages import (
 from conversion.core.errors import DomainError
 from conversion.core.outbox import OutboxStatus
 
-SUPPORTED_JOB_TYPES = frozenset({"CONVERSION"})  # PDF_EDIT, PDF_MERGE, EXPORT and PREVIEW come in step 5
 _AGGREGATE_TYPE = "conversion_item"
 
 
@@ -62,8 +61,7 @@ def to_accept_command(
     envelope: EnvelopeMessage, payload: ConversionRequestedMessage, *, event_id: UUID
 ) -> AcceptConversionCommand:
     """Raise ``DomainError`` for a request this service can't act on; the caller turns it into ``WorkFailed``."""
-    if payload.type not in SUPPORTED_JOB_TYPES:
-        raise InvalidRequestError(f"Job type {payload.type} is not supported yet.")
+    job_type = _job_type(payload.type)
     inputs = []
     for file in payload.inputs:
         file_format = Format.from_content_type(file.content_type)
@@ -73,11 +71,40 @@ def to_accept_command(
     request = ConversionRequest(
         context=item_context(envelope, payload),
         inputs=tuple(inputs),
-        target=resolve_target(payload.target, payload.options.get("imageFormat")),
-        options=payload.options,
+        target=_target(job_type, payload),
+        options=_options(payload),
         output_prefix=payload.output_prefix,
+        job_type=job_type,
     )
     return AcceptConversionCommand(message_id=event_id, message_type=CONVERSION_REQUESTED, request=request)
+
+
+def _job_type(value: str) -> JobType:
+    try:
+        return JobType(value)
+    except ValueError:
+        raise InvalidRequestError(f"Job type {value} is not supported yet.") from None  # PDF_EDIT, EXPORT: later
+
+
+def _target(job_type: JobType, payload: ConversionRequestedMessage) -> Format:
+    """Merges and edits make a PDF and a preview makes JPEGs, whatever ``target`` says; conversions and exports
+    must name one."""
+    match job_type:
+        case JobType.PDF_MERGE | JobType.PDF_EDIT:
+            return Format.PDF
+        case JobType.PREVIEW:
+            return Format.JPEG
+        case JobType.CONVERSION | JobType.EXPORT if payload.target is None:
+            raise InvalidRequestError(f"A {job_type} job needs a target format.")
+        case _:
+            return resolve_target(str(payload.target), payload.options.get("imageFormat"))
+
+
+def _options(payload: ConversionRequestedMessage) -> dict[str, Any]:
+    """The options as stored with the item. A top-level ``editPlan`` joins them, so the plan is stored once."""
+    if payload.edit_plan is None:
+        return payload.options
+    return {**payload.options, "editPlan": payload.edit_plan}
 
 
 def to_reject_command(

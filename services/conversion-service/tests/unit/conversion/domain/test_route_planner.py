@@ -3,7 +3,7 @@
 import pytest
 
 from conversion.conversion.domain.exceptions import RouteNotFoundError
-from conversion.conversion.domain.formats import IMAGE_FORMATS, Format
+from conversion.conversion.domain.formats import IMAGE_FORMATS, MATRIX_FORMATS, Format
 from conversion.conversion.domain.route import Converter, Fidelity
 from conversion.conversion.domain.route_planner import OcrMode, RoutePlanner, RouteRequest
 
@@ -66,7 +66,7 @@ def test_never_uses_ocr_when_the_source_has_real_text(planner: RoutePlanner) -> 
     digital = [Format.PDF, Format.DOCX, Format.XLSX, Format.CSV, Format.PPTX]
 
     for source in digital:
-        for target in Format:
+        for target in MATRIX_FORMATS:
             if target is not source:
                 assert not planner.get_route(RouteRequest(source=source, target=target)).uses_ocr, f"{source}->{target}"
 

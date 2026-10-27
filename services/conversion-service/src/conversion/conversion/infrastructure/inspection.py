@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pptx
 
+from conversion.conversion.domain.exceptions import PasswordRequiredError
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.infrastructure.converters.pdf_to_images import open_pdf
 
@@ -28,8 +29,11 @@ class PdfiumFileInspector:
 
     def count_pages(self, path: Path, file_format: Format) -> int | None:
         if file_format is Format.PDF:
-            with open_pdf(path) as document:
-                return len(document)
+            try:
+                with open_pdf(path) as document:
+                    return len(document)
+            except PasswordRequiredError:  # an output the plan protected: Java gets no page count
+                return None
         if file_format is Format.PPTX:
             return len(pptx.Presentation(str(path)).slides)
         if file_format.is_image:

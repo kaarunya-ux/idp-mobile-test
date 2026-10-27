@@ -16,6 +16,7 @@ from conversion.conversion.domain.route_planner import OcrMode
 from conversion.conversion.domain.values import OutputMode
 
 MIN_DPI, MAX_DPI, DEFAULT_DPI = 72, 600, 150
+MIN_SIDE_PX, MAX_SIDE_PX = 32, 20_000
 MIN_JPEG_QUALITY, MAX_JPEG_QUALITY, DEFAULT_JPEG_QUALITY = 1, 95, 90
 MAX_PAGE_RANGE_LENGTH = 200  # characters; bounds the work a single option can ask for (SCH-01)
 MAX_SHEET_NAME_LENGTH = 31  # Excel's own limit
@@ -68,12 +69,15 @@ class ConversionOptions:
     dpi: int = DEFAULT_DPI
     jpeg_quality: int = DEFAULT_JPEG_QUALITY
     sheet: str | None = None  # which sheet to export from a workbook; the first sheet when not given
+    max_side_px: int | None = None  # set by PREVIEW, never by Java: rendered pages fit this square
 
     def __post_init__(self) -> None:
         if self.sheet is not None and not 1 <= len(self.sheet) <= MAX_SHEET_NAME_LENGTH:
             raise InvalidOptionError("sheet", f"must be 1 to {MAX_SHEET_NAME_LENGTH} characters")
         if not MIN_DPI <= self.dpi <= MAX_DPI:
             raise InvalidOptionError("dpi", f"must be between {MIN_DPI} and {MAX_DPI}")
+        if self.max_side_px is not None and not MIN_SIDE_PX <= self.max_side_px <= MAX_SIDE_PX:
+            raise InvalidOptionError("max_side_px", f"must be between {MIN_SIDE_PX} and {MAX_SIDE_PX}")
         if not MIN_JPEG_QUALITY <= self.jpeg_quality <= MAX_JPEG_QUALITY:
             raise InvalidOptionError("quality", f"must be between {MIN_JPEG_QUALITY} and {MAX_JPEG_QUALITY}")
 

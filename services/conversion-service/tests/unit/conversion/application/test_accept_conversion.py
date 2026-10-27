@@ -12,7 +12,7 @@ from conversion.conversion.domain.exceptions import InvalidRequestError
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionRequest, IntakeAction, ItemStatus
 from conversion.conversion.domain.route_planner import RoutePlanner
-from conversion.conversion.domain.values import ObjectRef, StoredOutput, WorkerPool
+from conversion.conversion.domain.values import JobType, ObjectRef, StoredOutput, WorkerPool
 
 STALE_AFTER = timedelta(minutes=12)
 
@@ -47,6 +47,28 @@ def test_records_a_new_item_and_queues_it_on_the_pool_its_route_needs(
     assert action is IntakeAction.ENQUEUE
     assert task_queue.sent == [(request.context.item_id, pool)]
     assert database.items[request.context.item_id].status is ItemStatus.QUEUED
+
+
+@pytest.mark.parametrize(
+    ("job_type", "formats", "target", "pool"),
+    [
+        (JobType.PDF_MERGE, (Format.PDF, Format.PNG), Format.PDF, WorkerPool.PDF),
+        (JobType.PREVIEW, (Format.PDF,), Format.JPEG, WorkerPool.PDF),
+        (JobType.PREVIEW, (Format.PNG,), Format.JPEG, WorkerPool.PDF),
+        (JobType.PREVIEW, (Format.DOCX,), Format.JPEG, WorkerPool.OFFICE),  # laid out by LibreOffice first
+        (JobType.PDF_EDIT, (Format.PDF,), Format.PDF, WorkerPool.PDF),
+        (JobType.EXPORT, (Format.JSON, Format.JSON), Format.CSV, WorkerPool.DATA),
+        (JobType.EXPORT, (Format.JSON,), Format.PDF, WorkerPool.OFFICE),  # the report goes DOCX -> PDF
+    ],
+)
+def test_queues_each_job_type_on_the_pool_its_work_needs(
+    service, task_queue, conversion_request, job_type, formats, target, pool
+) -> None:
+    request = conversion_request(target=target, job_type=job_type, formats=formats)
+
+    service.accept(_command(request))
+
+    assert task_queue.sent == [(request.context.item_id, pool)]
 
 
 def test_skips_a_redelivered_message_when_the_item_has_started(

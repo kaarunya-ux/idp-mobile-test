@@ -8,7 +8,7 @@ import pytest
 from conversion.conversion.domain.events import ConversionCompleted, ItemContext, JobProgressed, WorkFailed
 from conversion.conversion.domain.exceptions import InvalidOptionError, InvalidRequestError
 from conversion.conversion.domain.formats import Format
-from conversion.conversion.domain.values import ObjectRef, Stage, StoredOutput
+from conversion.conversion.domain.values import JobType, ObjectRef, Stage, StoredOutput
 from conversion.conversion.infrastructure.messaging.mappers import (
     event_id_of,
     to_accept_command,
@@ -68,9 +68,44 @@ def test_maps_a_conversion_requested_message_to_a_command() -> None:
 
 
 @pytest.mark.parametrize(
+    ("job_type", "target", "expected"),
+    [("PDF_MERGE", None, Format.PDF), ("PDF_MERGE", "PDF", Format.PDF), ("PREVIEW", None, Format.JPEG)],
+)
+def test_sets_the_target_from_the_job_type_when_the_job_is_a_merge_or_preview(
+    job_type: str, target: str | None, expected: Format
+) -> None:
+    inputs = [{"bucket": "idp-originals", "key": f"acc/doc/{n}", "contentType": "application/pdf"} for n in range(2)]
+    if job_type == "PREVIEW":
+        inputs = inputs[:1]
+
+    request = _command(_envelope(type=job_type, target=target, inputs=inputs, options={})).request
+
+    assert (request.job_type, request.target) == (JobType(job_type), expected)
+
+
+def test_stores_a_top_level_edit_plan_with_the_options_when_the_job_is_an_edit() -> None:
+    plan = {"schemaVersion": 1, "operations": []}
+
+    request = _command(_envelope(type="PDF_EDIT", target=None, editPlan=plan, options={"output": "SINGLE"})).request
+
+    assert (request.job_type, request.target) == (JobType.PDF_EDIT, Format.PDF)
+    assert request.options == {"output": "SINGLE", "editPlan": plan}
+
+
+def test_reads_the_export_format_from_the_target_when_the_job_is_an_export() -> None:
+    inputs = [{"bucket": "idp-derived", "key": "acc/doc/item/result.json", "contentType": "application/json"}]
+
+    request = _command(_envelope(type="EXPORT", target="xlsx", inputs=inputs, options={})).request
+
+    assert (request.job_type, request.target, request.source) == (JobType.EXPORT, Format.XLSX, Format.JSON)
+
+
+@pytest.mark.parametrize(
     ("change", "error"),
     [
-        ({"type": "PDF_MERGE"}, InvalidRequestError),
+        ({"type": "TRANSLATE"}, InvalidRequestError),  # not a job type
+        ({"type": "CONVERSION", "target": None}, InvalidRequestError),
+        ({"type": "EXPORT", "target": None}, InvalidRequestError),
         ({"inputs": [{"bucket": "idp-originals", "key": "k", "contentType": "text/html"}]}, InvalidRequestError),
         ({"target": "ODT"}, InvalidOptionError),
         ({"outputPrefix": "../other-tenant"}, InvalidRequestError),

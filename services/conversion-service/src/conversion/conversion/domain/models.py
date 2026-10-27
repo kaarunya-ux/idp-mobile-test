@@ -24,8 +24,8 @@ from uuid import UUID
 
 from conversion.conversion.domain.events import ConversionCompleted, ItemContext, JobProgressed, WorkFailed
 from conversion.conversion.domain.exceptions import InvalidRequestError
-from conversion.conversion.domain.formats import Format
-from conversion.conversion.domain.values import InputFile, Stage, StoredOutput
+from conversion.conversion.domain.formats import EXPORT_FORMATS, Format
+from conversion.conversion.domain.values import InputFile, JobType, Stage, StoredOutput
 from conversion.core.error_codes import ErrorCode
 
 MAX_INPUTS = 200  # images into one PDF or deck; IDP-02 caps batches below this
@@ -56,16 +56,37 @@ class ConversionRequest:
     inputs: tuple[InputFile, ...]
     target: Format
     options: Mapping[str, object]
-    output_prefix: str  # key prefix in the outputs bucket: <accountId>/<jobId>/<itemId> (IDP-00 ch. 7.7)
+    output_prefix: str  # key prefix: <accountId>/<jobId>/<itemId>, or <accountId>/<documentId>/<itemId> for PREVIEW
+    job_type: JobType = JobType.CONVERSION
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.inputs) <= MAX_INPUTS:
             raise InvalidRequestError(f"A job item needs 1 to {MAX_INPUTS} input files.")
-        if len(self.inputs) > 1 and not all(item.format.is_image for item in self.inputs):
-            raise InvalidRequestError("Only images can be combined; other files are converted one at a time.")
+        self._check_inputs_for_job_type()
         prefix = self.output_prefix.strip("/")
         if not prefix or prefix.startswith(_UNSAFE_PREFIX) or ".." in prefix or "\\" in prefix:
             raise InvalidRequestError("The output prefix is empty or not a safe relative path.")
+
+    def _check_inputs_for_job_type(self) -> None:
+        match self.job_type:
+            case JobType.CONVERSION if len(self.inputs) > 1 and not all(i.format.is_image for i in self.inputs):
+                raise InvalidRequestError("Only images can be combined; other files are converted one at a time.")
+            case JobType.PDF_MERGE if not all(i.format is Format.PDF or i.format.is_image for i in self.inputs):
+                raise InvalidRequestError("Only PDFs and images can be merged.")
+            case JobType.PDF_MERGE if self.target is not Format.PDF:
+                raise InvalidRequestError("A merge always makes a PDF.")
+            case JobType.PREVIEW if len(self.inputs) != 1:
+                raise InvalidRequestError("A preview is made for one document at a time.")
+            case JobType.PREVIEW if not self.target.is_image:
+                raise InvalidRequestError("Previews are images.")
+            case JobType.PDF_EDIT if not all(i.format is Format.PDF for i in self.inputs):
+                raise InvalidRequestError("An edit takes PDFs: the document, and any whose pages it inserts.")
+            case JobType.PDF_EDIT if self.target is not Format.PDF:
+                raise InvalidRequestError("An edit always makes a PDF.")
+            case JobType.EXPORT if not all(i.format is Format.JSON for i in self.inputs):
+                raise InvalidRequestError("An export takes extraction results (JSON).")
+            case JobType.EXPORT if self.target not in EXPORT_FORMATS:
+                raise InvalidRequestError(f"Results can't be exported as {self.target}.")
 
     @property
     def source(self) -> Format:

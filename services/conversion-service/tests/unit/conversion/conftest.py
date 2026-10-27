@@ -86,3 +86,49 @@ def make_request(tmp_path: Path) -> MakeRequest:
         )
 
     return make
+
+
+type MakeTextPdf = Callable[..., Path]
+
+
+@pytest.fixture
+def make_text_pdf(tmp_path: Path) -> MakeTextPdf:
+    """``make_text_pdf("doc.pdf", ["page one text", "page two text"], size=(300, 200), form_field="name")``:
+    one page per string, written in Helvetica so the text is real (searchable, replaceable). ``form_field`` adds
+    a text field of that name on the first page."""
+
+    def make(name: str, texts: list[str], *, size: tuple[int, int] = (300, 200), form_field: str | None = None) -> Path:
+        pdf = pikepdf.new()
+        font = pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica,
+            Encoding=pikepdf.Name.WinAnsiEncoding,
+        )
+        for text in texts:
+            page = pdf.add_blank_page(page_size=size)
+            page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+            page.Contents = pdf.make_stream(b"BT /F1 12 Tf 20 100 Td (" + text.encode("cp1252") + b") Tj ET")
+        if form_field is not None:
+            widget = pdf.make_indirect(
+                pikepdf.Dictionary(
+                    Type=pikepdf.Name.Annot,
+                    Subtype=pikepdf.Name.Widget,
+                    FT=pikepdf.Name.Tx,
+                    T=pikepdf.String(form_field),
+                    Rect=[20, 20, 200, 40],
+                    P=pdf.pages[0].obj,
+                    DA=pikepdf.String("/Helv 10 Tf 0 g"),
+                )
+            )
+            pdf.pages[0].Annots = pdf.make_indirect(pikepdf.Array([widget]))
+            pdf.Root.AcroForm = pikepdf.Dictionary(
+                Fields=pikepdf.Array([widget]),
+                DA=pikepdf.String("/Helv 10 Tf 0 g"),
+                DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(Helv=font)),
+            )
+        path = tmp_path / name
+        pdf.save(path)
+        return path
+
+    return make

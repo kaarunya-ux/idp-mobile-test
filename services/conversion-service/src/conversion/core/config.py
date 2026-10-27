@@ -28,6 +28,26 @@ class LimitsSettings(BaseModel):
     max_document_table_rows: int = Field(20_000, ge=100, le=1_000_000)  # tables written into Word or slides
 
 
+class PreviewSettings(BaseModel):
+    """Page thumbnails made on upload (``PREVIEW``, IDP-00 F-DC-05). The specs give no size: these are ours."""
+
+    max_side_px: int = Field(400, ge=64, le=2000)  # longest side; an A4 page comes out 283 x 400
+    jpeg_quality: int = Field(75, ge=30, le=95)
+
+
+class EditSettings(BaseModel):
+    """``PDF_EDIT`` (IDP-03 ch. 3.5)."""
+
+    redaction_dpi: int = Field(200, ge=96, le=400)  # how sharp a redacted page is when drawn again
+    max_image_bytes: ByteSize = ByteSize(5 * 1024 * 1024)  # SIGNATURE and INSERT_IMAGE files
+
+
+class CryptoSettings(BaseModel):
+    """The key Java encrypts edit-plan passwords with (IDP-03 ch. 3.7). Without it, plans with passwords fail."""
+
+    private_key: SecretStr | None = None  # PEM, RSA
+
+
 class OfficeSettings(BaseModel):
     """How LibreOffice is run for Office -> PDF (IDP-03 ch. 3.2 and 3.7)."""
 
@@ -71,6 +91,7 @@ class StorageSettings(BaseModel):
     secret_key: SecretStr
     region: str = Field("us-east-1", min_length=1, max_length=32)
     bucket_outputs: str = Field("idp-outputs", min_length=3, max_length=63)
+    bucket_derived: str = Field("idp-derived", min_length=3, max_length=63)  # previews (IDP-00 ch. 7.7)
     max_input_size: ByteSize = ByteSize(200 * 1024 * 1024)  # FIL-05: nothing bigger is downloaded
     timeout: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
 
@@ -99,6 +120,9 @@ class Settings(BaseSettings):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     limits: LimitsSettings = Field(default_factory=LimitsSettings)
     office: OfficeSettings = Field(default_factory=OfficeSettings)
+    preview: PreviewSettings = Field(default_factory=PreviewSettings)
+    edit: EditSettings = Field(default_factory=EditSettings)
+    crypto: CryptoSettings = Field(default_factory=CryptoSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     # No defaults: credentials never live in code (CFG-03). Only the processes that use a group require it, so the
     # health server and unit tests run without them; ``require_*`` stops a worker at startup instead.

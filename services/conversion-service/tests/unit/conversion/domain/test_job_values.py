@@ -12,7 +12,7 @@ from conversion.conversion.domain.models import ConversionItem, ConversionReques
 from conversion.conversion.domain.options import parse_job_options, resolve_target
 from conversion.conversion.domain.policies import worker_pool_for
 from conversion.conversion.domain.route_planner import OcrMode, RoutePlanner, RouteRequest
-from conversion.conversion.domain.values import InputFile, ObjectRef, OutputMode, WorkerPool
+from conversion.conversion.domain.values import InputFile, JobType, ObjectRef, OutputMode, WorkerPool
 
 NOW = datetime(2026, 10, 26, 9, 0, tzinfo=UTC)
 CONTEXT = ItemContext(tenant_id=uuid4(), correlation_id="c", job_id=uuid4(), item_id=uuid4())
@@ -53,6 +53,44 @@ def test_refuses_an_object_ref_when_the_bucket_or_key_is_unsafe(bucket: str, key
 def test_refuses_a_request_when_its_inputs_or_prefix_cannot_be_used(formats, prefix: str, message: str) -> None:
     with pytest.raises(InvalidRequestError, match=message):
         _request(*formats, prefix=prefix)
+
+
+@pytest.mark.parametrize(
+    ("job_type", "formats", "target", "message"),
+    [
+        (JobType.PDF_MERGE, (Format.PDF, Format.DOCX), Format.PDF, "Only PDFs and images"),
+        (JobType.PDF_MERGE, (Format.PDF, Format.PDF), Format.DOCX, "always makes a PDF"),
+        (JobType.PREVIEW, (Format.PDF, Format.PDF), Format.JPEG, "one document at a time"),
+        (JobType.PREVIEW, (Format.PDF,), Format.PDF, "Previews are images"),
+        (JobType.PDF_EDIT, (Format.PDF, Format.PNG), Format.PDF, "An edit takes PDFs"),
+        (JobType.EXPORT, (Format.PDF,), Format.CSV, "extraction results"),
+        (JobType.EXPORT, (Format.JSON,), Format.PNG, "can't be exported as PNG"),
+    ],
+)
+def test_refuses_a_merge_or_preview_when_its_inputs_or_target_do_not_fit_the_job_type(
+    job_type: JobType, formats: tuple[Format, ...], target: Format, message: str
+) -> None:
+    inputs = tuple(
+        InputFile(ref=ObjectRef(bucket="idp-originals", key=f"k/{n}"), format=f) for n, f in enumerate(formats)
+    )
+
+    with pytest.raises(InvalidRequestError, match=message):
+        ConversionRequest(
+            context=CONTEXT, inputs=inputs, target=target, options={}, output_prefix="acc/job", job_type=job_type
+        )
+
+
+def test_accepts_pdfs_and_images_together_when_the_job_is_a_merge() -> None:
+    inputs = tuple(
+        InputFile(ref=ObjectRef(bucket="idp-originals", key=f"k/{n}"), format=f)
+        for n, f in enumerate((Format.PDF, Format.JPEG, Format.PDF))
+    )
+
+    request = ConversionRequest(
+        context=CONTEXT, inputs=inputs, target=Format.PDF, options={}, output_prefix="a/b", job_type=JobType.PDF_MERGE
+    )
+
+    assert len(request.inputs) == 3
 
 
 def test_builds_output_keys_under_the_prefix_without_doubled_slashes() -> None:
