@@ -29,6 +29,7 @@ log = structlog.get_logger(__name__)
 
 _MAX_TOKENS = 512
 _JPEG_QUALITY = 90
+_SIDE_GAP_PX = 24  # white strip between a card's front and back
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
 
@@ -46,15 +47,17 @@ class VisionModelFieldReader:
     def prompt_version(self) -> str:
         return PROMPT_VERSION
 
-    def read_fields(self, document_type: str, page: PageImage, keys: Sequence[str]) -> Mapping[str, str | None]:
+    def read_fields(
+        self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str]
+    ) -> Mapping[str, str | None]:
         profile = PROFILES.get(document_type)
         if profile is None:
             raise AiUnavailableError(f"no AI profile for {document_type}")
-        answer = _values(self._ask(profile, page), profile)
+        answer = _values(self._ask(profile, _stack_sides(pages)), profile)
         wanted = set(keys)
         return {key: answer.get(name) for name, key in profile.field_keys.items() if key is not None and key in wanted}
 
-    def _ask(self, profile: CardProfile, page: PageImage) -> list[object]:
+    def _ask(self, profile: CardProfile, page: Image.Image) -> list[object]:
         body: dict[str, Any] = {
             "messages": [
                 {
@@ -87,12 +90,31 @@ class VisionModelFieldReader:
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise AiUnavailableError("the model's answer was not the requested JSON") from exc
 
-    def _data_url(self, page: PageImage) -> str:
-        image = Image.frombytes("RGB", (page.width, page.height), page.rgb)
+    def _data_url(self, page: Image.Image) -> str:
+        image = page.copy()
         image.thumbnail((self._max_edge_px, self._max_edge_px), Image.Resampling.LANCZOS)
         buffer = io.BytesIO()
         image.save(buffer, format="JPEG", quality=_JPEG_QUALITY)
         return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+
+def _stack_sides(pages: Sequence[PageImage]) -> Image.Image:
+    """Front above back, at the same width, with a white strip between (the web app's ``stack_sides``): the model
+    reads both sides of a card in one request."""
+    sides = [Image.frombytes("RGB", (p.width, p.height), p.rgb) for p in pages[:2]]
+    if len(sides) == 1:
+        return sides[0]
+    width = max(side.width for side in sides)
+    sides = [
+        side
+        if side.width == width
+        else side.resize((width, round(side.height * width / side.width)), Image.Resampling.LANCZOS)
+        for side in sides
+    ]
+    stacked = Image.new("RGB", (width, sides[0].height + _SIDE_GAP_PX + sides[1].height), "white")
+    stacked.paste(sides[0], (0, 0))
+    stacked.paste(sides[1], (0, sides[0].height + _SIDE_GAP_PX))
+    return stacked
 
 
 def _parse(content: str) -> object:

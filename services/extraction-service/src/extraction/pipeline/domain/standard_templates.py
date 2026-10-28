@@ -1,6 +1,14 @@
-"""The two standard templates (scope STANDARD): PAN card and Aadhaar card, written as code until the template feature
-stores definitions as JSON (IDP-03 ch. 2.5). Regions are page fractions measured on the sample cards in the repository.
+"""The standard templates (scope STANDARD): PAN card, Aadhaar card and Indian driving licence, written as code until
+the template feature stores definitions as JSON (IDP-03 ch. 2.5). PAN and Aadhaar regions are page fractions measured
+on the sample cards in the repository.
+
+The driving licence has no measured regions: its layout differs by state and by card generation, and there are no
+labelled samples here yet. Every DL field is read from the whole page, anchored to its printed caption (``DL No``,
+``DOB``, ``Valid Till``), and the AI fallback reads what the captions don't settle. Measure regions on real samples
+before relying on OCR alone (build log, entry 3).
 """
+
+from datetime import date
 
 from extraction.pipeline.domain.template import (
     Accept,
@@ -219,4 +227,114 @@ AADHAAR_CARD = TemplateDefinition(
     ),
 )
 
-STANDARD_TEMPLATES = (PAN_CARD, AADHAAR_CARD)
+# --- Indian driving licence ----------------------------------------------------------------------------------
+
+_DL_DATE = r"[0-9]{2}\s?[/.\-]\s?[0-9]{2}\s?[/.\-]\s?[0-9]{4}"
+_DL_DATE_RULE_FORMATS = ("dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy")
+_LATEST_VALIDITY = date(2100, 12, 31)  # a licence is valid until a date ahead
+# State code, RTO code, issue year and a seven-digit serial (Sarathi format): MH12 20190012345, DL-0420110149646.
+_DL_NUMBER = (
+    r"(?i)(?:dl\s*no|licen[cs]e\s*no)?\.?\s*:?\s*([A-Z]{2}[\s\-]?[0-9]{2}[\s\-]?(?:19|20)[0-9]{2}[\s\-]?[0-9]{7})"
+)
+_DL_NAME = r"(?i)\bname\s*[:.]?\s*([A-Z][A-Z .'\-]{2,60}?)(?=\s+(?:s/?[dwo]|son|daughter|wife|d\.?o\.?b|date|$))"
+
+
+def _dl_date(key: str, label: str, caption: str, *, required: bool, future: bool = False) -> FieldDefinition:
+    """``future``: a validity date lies ahead; other dates may not be later than today."""
+    return FieldDefinition(
+        key=key,
+        label=label,
+        type=FieldType.DATE,
+        box=_WHOLE_PAGE,
+        extract=rf"(?i)(?:{caption})\s*[:.]?\s*({_DL_DATE})",
+        rule=RuleSpec(
+            id=f"{key.replace('_', '-')}-date",
+            kind=RuleKind.DATE,
+            formats=_DL_DATE_RULE_FORMATS,
+            latest=_LATEST_VALIDITY if future else None,
+        ),
+        normalize=_DATE_NORMALIZE,
+        required=required,
+    )
+
+
+def _dl_optional(key: str, label: str, extract: str, pattern: str) -> FieldDefinition:
+    return FieldDefinition(
+        key=key,
+        label=label,
+        type=FieldType.TEXT,
+        box=_WHOLE_PAGE,
+        extract=extract,
+        rule=RuleSpec(id=f"{key.replace('_', '-')}-format", kind=RuleKind.REGEX, pattern=pattern),
+        normalize=(Normalizer.UPPER, Normalizer.COLLAPSE_SPACES),
+        required=False,
+    )
+
+
+DRIVING_LICENCE = TemplateDefinition(
+    template_id="standard-driving-licence",
+    version=1,
+    scope="STANDARD",
+    document_type="DRIVING_LICENCE",
+    aspect_ratio=1.586,
+    aspect_tolerance=0.3,
+    keywords=(r"DRIVING\s*LICEN[CS]E", r"\bDL\s*No", r"Transport\s*Department", r"Union\s*of\s*India"),
+    min_keyword_hits=1,
+    anchors=(),
+    fields=(
+        FieldDefinition(
+            key="license_number",
+            label="Licence number",
+            type=FieldType.ID,
+            box=_WHOLE_PAGE,
+            extract=_DL_NUMBER,
+            rule=RuleSpec(id="dl-number", kind=RuleKind.REGEX, pattern=r"[A-Z]{2}-?[0-9]{2}(?:19|20)[0-9]{2}[0-9]{7}"),
+            normalize=(Normalizer.UPPER, Normalizer.STRIP_SPACES),
+        ),
+        FieldDefinition(
+            key="name",
+            label="Name",
+            type=FieldType.NAME,
+            box=_WHOLE_PAGE,
+            extract=_DL_NAME,
+            rule=_NAME_RULE,
+            normalize=_NAME_NORMALIZE,
+            accept=_NAME_ACCEPT,
+        ),
+        _dl_date("dob", "Date of birth", r"\bd[o0]b\b|date\s*of\s*birth", required=True),
+        _dl_date("issue_date", "Date of issue", r"date\s*of\s*issue|\bdoi\b|issue\s*date|issued\s*on", required=False),
+        _dl_date(
+            "validity_nt",
+            "Valid till (non-transport)",
+            r"valid(?:ity)?\s*\(?\s*nt\s*\)?|valid\s*till",
+            required=False,
+            future=True,
+        ),
+        _dl_date(
+            "validity_tr", "Valid till (transport)", r"valid(?:ity)?\s*\(?\s*tr\s*\)?", required=False, future=True
+        ),
+        FieldDefinition(
+            key="address",
+            label="Address",
+            type=FieldType.ADDRESS,
+            box=_WHOLE_PAGE,
+            extract=r"(?i)address\s*:?\s*([A-Za-z0-9].{9,300}?[1-9][0-9]{5})(?![0-9])",
+            rule=RuleSpec(id="address-format", kind=RuleKind.REGEX, pattern=r"[A-Z0-9][A-Z0-9 ,.:;/()#'\-]{9,300}"),
+            normalize=(Normalizer.UPPER, Normalizer.COLLAPSE_SPACES),
+            accept=_NAME_ACCEPT_ADDRESS,
+            required=False,
+        ),
+        _dl_optional(
+            "blood_group", "Blood group", r"(?i)blood\s*group\s*[:.]?\s*((?:A|B|AB|O)\s?[+\-])", r"(?:A|B|AB|O)\s?[+\-]"
+        ),
+        _dl_optional("organ_donor", "Organ donor", r"(?i)organ\s*donor\s*[:.]?\s*([YN])\b", r"[YN]"),
+        _dl_optional(
+            "vehicle_classes",
+            "Vehicle classes",
+            r"(?i)\b((?:MCWG|MCWOG|LMV(?:-NT|-TR)?|HMV|HGMV|HPMV|TRANS|MGV|LMV-TR|E-RIKSHAW)(?:[\s,]+(?:MCWG|MCWOG|LMV(?:-NT|-TR)?|HMV|HGMV|HPMV|TRANS|MGV|E-RIKSHAW))*)\b",
+            r"[A-Z][A-Z\-]{1,9}(?:[ ,]+[A-Z][A-Z\-]{1,9})*",
+        ),
+    ),
+)
+
+STANDARD_TEMPLATES = (PAN_CARD, AADHAAR_CARD, DRIVING_LICENCE)

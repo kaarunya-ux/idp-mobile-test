@@ -7,6 +7,7 @@ pipeline services are built per run, with that run's progress reporter.
 
 import os
 import socket
+from collections.abc import Sequence
 from datetime import timedelta
 from importlib import metadata
 from pathlib import Path
@@ -29,11 +30,13 @@ from extraction.pipeline.application.services.run_extraction import RunExtractio
 from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.ports import ProgressReporterPort, UnitOfWorkFactory
 from extraction.pipeline.domain.quality import QualityThresholds
-from extraction.pipeline.domain.standard_templates import STANDARD_TEMPLATES
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.pipeline.infrastructure.ai.vision_reader import VisionModelFieldReader
+from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
 from extraction.pipeline.infrastructure.messaging.messages import PRODUCER
 from extraction.pipeline.infrastructure.messaging.publisher import RabbitEventPublisher
 from extraction.pipeline.infrastructure.persistence.repository import SqlUnitOfWork
+from extraction.pipeline.infrastructure.persistence.template_catalog import SqlTemplateCatalog
 from extraction.pipeline.infrastructure.preprocess.opencv_preprocessor import OpenCvPagePreparer
 from extraction.pipeline.infrastructure.preprocess.orientation import DocumentOrientationClassifier
 from extraction.pipeline.infrastructure.quality.opencv_quality_gate import OpenCvQualityAssessor
@@ -63,7 +66,8 @@ def pipeline_version() -> str:
 class PipelineServices:
     """``PipelineFactory``: the engines and models, loaded once; services built per run."""
 
-    def __init__(self, settings: Settings, clock: Clock) -> None:
+    def __init__(self, settings: Settings, clock: Clock, catalog: SqlTemplateCatalog) -> None:
+        self._catalog = catalog
         registry = ModelRegistry.from_file(Path(settings.ocr.models_file))
         limits = RuntimeLimits(threads=settings.ocr.threads)
         self._settings, self._clock = settings, clock
@@ -96,6 +100,11 @@ class PipelineServices:
             require_document_edges=quality.require_document_edges,
         )
         self._ai = build_ai_assist(settings)
+        self._digital = PdfiumTextReader(dpi=settings.limits.pdf_dpi)
+
+    @property
+    def digital_reader(self) -> PdfiumTextReader:
+        return self._digital
 
     def prepare_service(self, progress: ProgressReporterPort) -> PrepareDocumentService:
         return PrepareDocumentService(
@@ -106,11 +115,17 @@ class PipelineServices:
             progress=progress,
         )
 
-    def extract_service(self, progress: ProgressReporterPort) -> ExtractDocumentService:
+    @property
+    def catalog(self) -> SqlTemplateCatalog:
+        return self._catalog
+
+    def extract_service(
+        self, progress: ProgressReporterPort, templates: Sequence[TemplateDefinition]
+    ) -> ExtractDocumentService:
         return ExtractDocumentService(
             engines=self._engines,
             languages=_ENGINE_LANGUAGES,
-            templates=STANDARD_TEMPLATES,
+            templates=templates,
             thresholds=Thresholds(
                 name_similarity=self._settings.verify.name_similarity,
                 review_confidence=self._settings.review.confidence_threshold,
@@ -179,7 +194,7 @@ def build_run_service(settings: Settings, sessions: SessionFactory) -> RunExtrac
         build_units(sessions, clock),
         objects,
         objects,
-        PipelineServices(settings, clock),
+        PipelineServices(settings, clock, SqlTemplateCatalog(sessions)),
         clock,
         derived_bucket=storage.bucket_derived,
         stale_after=stale_after(settings),

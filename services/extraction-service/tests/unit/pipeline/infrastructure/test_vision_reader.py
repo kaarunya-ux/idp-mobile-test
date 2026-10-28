@@ -34,7 +34,7 @@ def test_maps_the_answer_array_onto_the_template_fields_when_the_card_is_a_pan()
         _content(json.dumps(["ABCPE1234F", "RAMESH SAHANI", "SURESH SAHANI", "father", "27/02/2002"]))
     )
 
-    values = reader.read_fields("PAN_CARD", PAGE, PAN_KEYS)
+    values = reader.read_fields("PAN_CARD", [PAGE], PAN_KEYS)
 
     assert values == {
         "pan_number": "ABCPE1234F",
@@ -51,14 +51,14 @@ def test_maps_the_answer_array_onto_the_template_fields_when_the_card_is_a_pan()
 def test_returns_only_the_keys_asked_for() -> None:
     reader, _ = _reader(_content(json.dumps(["ABCPE1234F", "A", "B", "father", "01/01/2000"])))
 
-    assert reader.read_fields("PAN_CARD", PAGE, ["pan_number"]) == {"pan_number": "ABCPE1234F"}
+    assert reader.read_fields("PAN_CARD", [PAGE], ["pan_number"]) == {"pan_number": "ABCPE1234F"}
 
 
 def test_turns_gender_codes_into_the_template_values_and_drops_values_outside_the_schema() -> None:
     answer = ["XXXX XXXX 1234", "ASHA RAO", "1990", "F", "12 MG Road Pune 411001", "4110"]  # PIN too short
     reader, _ = _reader(_content(json.dumps(answer)))
 
-    values = reader.read_fields("AADHAAR_CARD", PAGE, ["aadhaar_number", "gender", "pincode", "dob"])
+    values = reader.read_fields("AADHAAR_CARD", [PAGE], ["aadhaar_number", "gender", "pincode", "dob"])
 
     assert values == {"aadhaar_number": "XXXX XXXX 1234", "gender": "FEMALE", "pincode": None, "dob": "1990"}
 
@@ -76,7 +76,7 @@ def test_turns_gender_codes_into_the_template_values_and_drops_values_outside_th
 def test_reads_the_answer_when_the_host_does_not_enforce_the_format(content: str) -> None:
     reader, _ = _reader(_content(content))
 
-    assert reader.read_fields("PAN_CARD", PAGE, ["pan_number"]) == {"pan_number": "ABCPE1234F"}
+    assert reader.read_fields("PAN_CARD", [PAGE], ["pan_number"]) == {"pan_number": "ABCPE1234F"}
 
 
 @pytest.mark.parametrize(
@@ -92,7 +92,7 @@ def test_raises_ai_unavailable_when_the_host_gives_no_usable_answer(answer) -> N
     reader, _ = _reader(answer)
 
     with pytest.raises(AiUnavailableError):
-        reader.read_fields("PAN_CARD", PAGE, PAN_KEYS)
+        reader.read_fields("PAN_CARD", [PAGE], PAN_KEYS)
 
 
 def test_raises_ai_unavailable_when_the_host_is_unreachable_or_the_type_is_unknown() -> None:
@@ -102,7 +102,24 @@ def test_raises_ai_unavailable_when_the_host_is_unreachable_or_the_type_is_unkno
     reader, _ = _reader(refuse)
 
     with pytest.raises(AiUnavailableError):
-        reader.read_fields("PAN_CARD", PAGE, PAN_KEYS)
+        reader.read_fields("PAN_CARD", [PAGE], PAN_KEYS)
     with pytest.raises(AiUnavailableError, match="no AI profile"):
-        reader.read_fields("VOTER_ID", PAGE, ["x"])
+        reader.read_fields("VOTER_ID", [PAGE], ["x"])
     assert (reader.model_id, reader.prompt_version) == ("qwen3-vl-4b", "card-fields.v1")
+
+
+def test_sends_a_card_front_and_back_as_one_stacked_picture() -> None:
+    import base64  # noqa: PLC0415
+    import io  # noqa: PLC0415
+
+    from PIL import Image  # noqa: PLC0415
+
+    reader, sent = _reader(_content(json.dumps(["ABCPE1234F", "A", "B", "father", None])))
+    front = PageImage(width=40, height=20, rgb=bytes(40 * 20 * 3))
+    back = PageImage(width=80, height=40, rgb=bytes(80 * 40 * 3), page_index=1)
+
+    reader.read_fields("PAN_CARD", [front, back], ["pan_number"])
+
+    url = sent[0]["messages"][0]["content"][1]["image_url"]["url"]
+    with Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))) as image:
+        assert image.size == (80, 40 + 24 + 40)  # same width, front then a white strip then back

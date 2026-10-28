@@ -141,7 +141,7 @@ class FakeAi:
     model_id = "vl-test"
     prompt_version = "card-fields.v1"
 
-    def read_fields(self, document_type: str, page: PageImage, keys: Sequence[str]) -> dict[str, str | None]:
+    def read_fields(self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str]) -> dict[str, str | None]:
         self.asked.append((document_type, tuple(keys)))
         if self.down:
             raise AiUnavailableError("down")
@@ -190,3 +190,45 @@ def test_never_asks_the_ai_when_the_engines_settle_every_field() -> None:
 
     assert ai.asked == []
     assert result["provenance"]["models"] == []
+
+
+def _two_sided_command() -> ExtractDocumentCommand:
+    single = command()
+    back = PreparedPage(
+        page_index=1,
+        clean=PageImage(width=86, height=54, rgb=bytes(86 * 54 * 3), page_index=1),
+        binarised=single.pages[0].binarised,
+        steps=single.pages[0].steps,
+    )
+    return ExtractDocumentCommand(pages=(single.pages[0], back), qualities=(single.qualities[0],) * 2)
+
+
+def test_sends_both_sides_and_the_empty_optional_fields_once_the_ai_is_asked() -> None:
+    class Recording(FakeAi):
+        def read_fields(self, document_type, pages, keys):
+            self.sides = len(pages)
+            return super().read_fields(document_type, pages, keys)
+
+    ai = Recording({"pan_number": "ABCPE1234F"})
+
+    service(_disagreeing_engines(), Progress(), ai=AiAssist(reader=ai, confidence=0.9)).extract(_two_sided_command())
+
+    assert ai.sides == 2
+    (_, keys) = ai.asked[0]
+    assert "pan_number" in keys
+
+
+def test_reads_a_digital_pdf_from_its_text_layer_without_ocr() -> None:
+    engines = {"A": FakeEngine("A", PAN_LINES), "B": FakeEngine("B", PAN_LINES)}
+    digital = engines["A"].read_page(command().pages[0].clean, ("en",))  # the same words, as a text layer gives them
+    engines["A"].page_reads = 0
+    base = command()
+
+    result = service(engines, Progress()).extract(
+        ExtractDocumentCommand(pages=base.pages, qualities=base.qualities, digital_page=digital)
+    )
+
+    pan = fields_of(result)["pan_number"]
+    assert (engines["A"].page_reads, engines["B"].page_reads) == (0, 0)  # no OCR at all
+    assert (pan["value"], pan["source"], pan["status"]) == ("ABCPE1234F", "DIGITAL_TEXT", "ACCEPTED")
+    assert result["provenance"]["engines"] == [{"id": "digital-text", "version": "pdfium"}]

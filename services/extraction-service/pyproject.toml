@@ -15,10 +15,12 @@ dependencies = [
     # UUIDv7 ids (DB-03, standard ch. 22.3); used by core/ids.py for ids and fallback correlation ids
     "uuid-utils>=0.9",
     # conversion-service's stack for the database, inbox and outbox (same versions, same licences)
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",  # asyncio: greenlet, for the API's async engine
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
     "httpx>=0.27",  # the AI fallback's model client (and ai-gateway's, later)
+    # Not in the standard's ch. 22.3 list: verifies Keycloak bearer tokens (SEC-01). MIT; ADR 0005
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +54,7 @@ dev = [
     "hypothesis>=6.100",
     "pip-audit>=2.7",
     "boto3-stubs[s3]>=1.35",
+    "testcontainers[minio,postgres,rabbitmq]>=4.8",
     "celery-types>=0.22",
 ]
 

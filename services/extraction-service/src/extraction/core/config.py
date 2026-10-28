@@ -137,6 +137,22 @@ class OutboxSettings(BaseModel):
     backoff_max: timedelta = Field(timedelta(minutes=5), ge=timedelta(seconds=1))
 
 
+class IssuerSettings(BaseModel):
+    """One token issuer the API trusts (IDP-01 ch. 2: Keycloak, and the platform's own for service tokens)."""
+
+    issuer: HttpUrl  # the token's iss claim, exactly
+    jwks_url: HttpUrl
+
+
+class AuthSettings(BaseModel):
+    """Bearer token verification (SEC-01). Without issuers, every protected route answers 401."""
+
+    issuers: list[IssuerSettings] = Field(default_factory=list, max_length=5)
+    audience: str = Field("idp-api", min_length=1, max_length=128)  # IDP-01: aud=idp-api
+    jwks_cache: timedelta = Field(timedelta(minutes=10), ge=timedelta(minutes=1), le=timedelta(hours=24))
+    leeway: timedelta = Field(timedelta(seconds=30), ge=timedelta(0), le=timedelta(minutes=5))  # clock skew
+
+
 class AiFallbackSettings(BaseModel):
     """The AI fallback for fields the OCR engines can't settle (IDP-03 ch. 2.6 stage 7).
 
@@ -173,6 +189,7 @@ class Settings(BaseSettings):
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     ai_fallback: AiFallbackSettings = Field(default_factory=AiFallbackSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
     # Needed only by the processes that use them (consumers, workers, relay); read through require_*().
     db: DatabaseSettings | None = None
     rabbit: RabbitSettings | None = None

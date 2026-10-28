@@ -10,6 +10,7 @@ from extraction.core.db import Base
 
 # registers extraction_item
 from extraction.pipeline.infrastructure.persistence import orm  # noqa: F401
+from extraction.template.infrastructure import orm as template_orm  # noqa: F401
 
 target_metadata = Base.metadata
 

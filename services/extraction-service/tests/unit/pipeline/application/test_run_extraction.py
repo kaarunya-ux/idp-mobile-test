@@ -66,8 +66,21 @@ class Pipeline:
     def prepare_service(self, progress):
         return FakePrepare(progress, error=self._prepare_error)
 
-    def extract_service(self, progress):
+    def extract_service(self, progress, templates):
+        self.templates = templates
         return FakeExtract(progress, crash=self._crash)
+
+    class _Catalog:
+        def templates_for(self, account_id, template_id):
+            return ["the account's templates"]
+
+    catalog = _Catalog()
+
+    class _NoText:
+        def read_first_page(self, content):
+            return None
+
+    digital_reader = _NoText()
 
 
 @pytest.fixture
