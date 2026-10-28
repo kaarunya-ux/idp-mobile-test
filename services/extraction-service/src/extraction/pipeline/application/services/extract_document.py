@@ -20,7 +20,7 @@ from extraction.pipeline.domain.decisions import (
 )
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.models import PreparedPage
-from extraction.pipeline.domain.ports import AiFieldReaderPort, ProgressReporterPort
+from extraction.pipeline.domain.ports import AiCallContext, AiFieldReaderPort, ProgressReporterPort
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.reading import Reading, field_box, read_field, shift_for
 from extraction.pipeline.domain.result import PageSummary, Provenance, build_result
@@ -41,34 +41,38 @@ class AiAssist:
     """Stage 7's AI step: every field the engines left unsettled goes to the AI reader in one request."""
 
     reader: AiFieldReaderPort
-    confidence: float  # given to an AI value that passes its rule (settings: AI_FALLBACK__CONFIDENCE)
-
-    @property
-    def provenance(self) -> tuple[str, str]:
-        return (self.reader.model_id, self.reader.prompt_version)
+    confidence: float  # given to an AI value that passes its rule (settings: AI_GATEWAY__CONFIDENCE)
 
     def assist(
-        self, template: TemplateDefinition, decisions: list[FieldDecision], pages: Sequence[PageImage], today: date
-    ) -> tuple[list[FieldDecision], bool]:
-        """The decisions with the unsettled ones decided again by AI, and whether the AI was asked at all.
+        self,
+        template: TemplateDefinition,
+        decisions: list[FieldDecision],
+        pages: Sequence[PageImage],
+        today: date,
+        context: AiCallContext,
+    ) -> tuple[list[FieldDecision], tuple[str, str] | None]:
+        """The decisions with the unsettled ones decided again by AI, and the (model, prompt version) that answered.
 
         The AI is asked only when a field is unsettled (OCR first). Once it is asked, optional fields OCR found empty
-        go in the same request at no extra cost; an AI value for them still has to pass the field's rule.
+        go in the same request at no extra cost; an AI value for them still has to pass the field's rule. No answer
+        (gateway busy, model down, cap used) leaves the fields as OCR left them, and isn't counted as an AI call.
         """
         if not any(_is_unresolved(d) for d in decisions):
-            return decisions, False
+            return decisions, None
         wanted = [d.key for d in decisions if _is_unresolved(d) or d.status is FieldStatus.EMPTY]
-        try:
-            values = self.reader.read_fields(template.document_type, pages, wanted)
-        except AiUnavailableError:
-            return decisions, True  # asked, no answer: the fields stay as OCR left them
         definitions = {d.key: d for d in template.fields}
+        labelled = dataclasses.replace(context, labels={key: definitions[key].label for key in wanted})
+        try:
+            reading = self.reader.read_fields(template.document_type, pages, wanted, labelled)
+        except AiUnavailableError:
+            return decisions, None
+        values = reading.values
         return [
             decide_with_ai(definitions[d.key], d, values.get(d.key), confidence=self.confidence, today=today)
             if d.key in wanted
             else d
             for d in decisions
-        ], True
+        ], (reading.model_id, reading.prompt_version)
 
 
 class ExtractDocumentService:
@@ -123,10 +127,12 @@ class ExtractDocumentService:
         decisions = self._decide(classification.template, pages, page.clean, digital=digital) if classification else []
         self._progress.report(Stage.VERIFY, _DONE)
         models: list[tuple[str, str]] = []
-        if classification and self._ai is not None:
+        if classification and self._ai is not None and command.ai_context is not None:
             sides = [p.clean for p in command.pages[:2]]  # a card's front and back
-            decisions, asked = self._ai.assist(classification.template, decisions, sides, self._clock.now().date())
-            models = [self._ai.provenance] if asked else []
+            context = dataclasses.replace(command.ai_context, page_refs=command.ai_context.page_refs[:2])
+            today = self._clock.now().date()
+            decisions, answered = self._ai.assist(classification.template, decisions, sides, today, context)
+            models = [answered] if answered else []
         self._progress.report(Stage.AI_ASSIST, _DONE)
         result = build_result(
             classification=classification,

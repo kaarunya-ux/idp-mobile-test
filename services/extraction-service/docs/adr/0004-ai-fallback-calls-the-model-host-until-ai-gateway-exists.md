@@ -1,6 +1,6 @@
 # 4. The AI fallback calls the model host directly until ai-gateway exists
 
-Status: Accepted (temporary) · Date: 2026-10-28 · Deciders: Python team lead
+Status: Superseded by [ADR 0006](0006-ai-fallback-goes-through-ai-gateway.md) · Date: 2026-10-28 · Deciders: Python team lead
 
 ## Context
 

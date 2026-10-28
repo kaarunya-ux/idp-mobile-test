@@ -209,3 +209,27 @@ migrations/0002_templates.py      document_types, templates, template_versions, 
 | Publish without tests | Override reason required until E6 |
 | Idempotency records | Kept; **open:** a cleanup job after 24 h |
 | `POST /document-types` | No `Idempotency-Key`: a repeat is refused as a duplicate code (409), which is safe |
+
+## Entry 5: The AI fallback goes through ai-gateway (2026-10-28)
+
+**Goal:** IDP-03 ch. 4: only ai-gateway talks to the model server. ADR 0004's direct call is replaced (ADR 0006).
+
+### What we did
+
+| Change | Where |
+|---|---|
+| `GatewayFieldReader`: `field-read` batch form with page keys, field labels, account and priority | `pipeline/infrastructure/ai/gateway_reader.py` |
+| Client-credentials service token, cached until 30 s before expiry, dropped on a 401 | `core/service_auth.py` |
+| `AiCallContext` in, `AiReading` (values, model, prompt version) out | `pipeline/domain/ports.py` |
+| Pages stored before the AI step, image keys added to the result after | `run_extraction.py` |
+| `ExtractionRequest.priority` from the route it came on, stored with a default (no migration) | `jobs.py`, messaging and persistence mappers, `consumer.py` |
+| A call with no answer is no longer counted in `usage.aiCalls` | `extract_document.py` |
+| Settings `AI_GATEWAY__*` and `SERVICE_AUTH__*`; `AI_FALLBACK__*` only for `ENVIRONMENT=local` | `core/config.py`, `bootstrap.py` |
+
+### Check it
+
+```bash
+cd services/extraction-service && make check
+```
+
+Result (`make check` on the dev machine, with Docker): 519 tests pass, 87% coverage.

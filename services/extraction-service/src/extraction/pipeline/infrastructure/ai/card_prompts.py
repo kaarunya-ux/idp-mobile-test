@@ -5,8 +5,8 @@ real cards. The model answers with a fixed-order JSON array, not an object: key 
 output tokens by about 40%. ``FIELD_KEYS`` maps each answer position to the template field it fills; ``None``
 means the value is read but no template field takes it yet.
 
-When ai-gateway exists these move there as versioned prompt files (IDP-03 ch. 4.4, LLM-02); ``PROMPT_VERSION``
-names this set until then.
+Used only by the local backup ``VisionModelFieldReader`` (ADR 0006). ai-gateway has its own copy with its versioned
+prompt files (IDP-03 ch. 4.4, LLM-02); ``PROMPT_VERSION`` names this set.
 """
 
 from collections.abc import Mapping

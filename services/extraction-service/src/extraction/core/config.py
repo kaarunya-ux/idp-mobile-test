@@ -153,12 +153,30 @@ class AuthSettings(BaseModel):
     leeway: timedelta = Field(timedelta(seconds=30), ge=timedelta(0), le=timedelta(minutes=5))  # clock skew
 
 
-class AiFallbackSettings(BaseModel):
-    """The AI fallback for fields the OCR engines can't settle (IDP-03 ch. 2.6 stage 7).
+class AiGatewaySettings(BaseModel):
+    """The AI fallback for fields the OCR engines can't settle (IDP-03 ch. 2.6 stage 7), through ai-gateway.
 
-    Until ai-gateway exists, this calls the model host directly (an OpenAI-style server such as llama-server), as the
-    web extraction app did; then ``url`` points at ai-gateway instead. Leave ``url`` unset to turn the fallback off:
-    unsettled fields stay NEEDS_REVIEW, which is always safe.
+    Leave ``url`` unset to turn it off: unsettled fields stay NEEDS_REVIEW, which is always safe.
+    """
+
+    url: HttpUrl | None = None  # e.g. http://ai-gateway:8002
+    timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=1), le=timedelta(minutes=5))
+    confidence: float = Field(0.9, gt=0, le=1)  # given to an AI value that passes the field's rule (ML-07)
+
+
+class ServiceAuthSettings(BaseModel):
+    """This service's own client-credentials login, for calls to ai-gateway (SEC-07)."""
+
+    token_url: HttpUrl  # Keycloak: <issuer>/protocol/openid-connect/token
+    client_id: str = Field("extraction-service", min_length=1, max_length=128)
+    client_secret: SecretStr
+    audience: str | None = Field("ai-gateway", max_length=128)
+    timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(seconds=1), le=timedelta(minutes=1))
+
+
+class AiFallbackSettings(BaseModel):
+    """The model host directly, without ai-gateway (the web extraction app's way). Used only when
+    ``ENVIRONMENT=local`` and ``AI_GATEWAY__URL`` is unset (ADR 0006); anywhere else it is ignored.
     """
 
     url: HttpUrl | None = None  # e.g. http://10.0.3.66:8081 (the model host)
@@ -188,7 +206,9 @@ class Settings(BaseSettings):
     verify: VerifySettings = Field(default_factory=VerifySettings)
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
+    ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
     ai_fallback: AiFallbackSettings = Field(default_factory=AiFallbackSettings)
+    service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
     auth: AuthSettings = Field(default_factory=AuthSettings)
     # Needed only by the processes that use them (consumers, workers, relay); read through require_*().
     db: DatabaseSettings | None = None

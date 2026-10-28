@@ -1,7 +1,7 @@
 """The templates and document types API (IDP-03 ch. 2.10), reached through the Java gateway.
 
 Every route needs a token (SEC-02) and states its permission (SEC-03); the services make the real check. Bodies are
-one service call (RTR-02). Not here yet: suggestions (needs ai-gateway, build step E5), samples, test runs and the
+one service call (RTR-02). Not here yet: suggestions (through ai-gateway's template-suggest), samples, test runs and the
 mobile bundle (step E6).
 """
 

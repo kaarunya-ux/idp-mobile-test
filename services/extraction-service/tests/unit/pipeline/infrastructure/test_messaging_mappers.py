@@ -139,3 +139,12 @@ def test_writes_the_exact_envelope_java_expects_into_the_outbox(event, payload) 
         str(ITEM),
     )
     assert (row["ordering_key"], row["aggregate_version"], row["status"]) == (str(ITEM), event.sequence, "PENDING")
+
+
+def test_marks_the_request_as_priority_when_it_came_on_the_priority_route() -> None:
+    envelope = _envelope()
+    payload = ExtractionRequestedMessage.model_validate(envelope.payload)
+
+    command = to_accept_command(envelope, payload, event_id=uuid4(), priority=True)
+
+    assert command.request.priority

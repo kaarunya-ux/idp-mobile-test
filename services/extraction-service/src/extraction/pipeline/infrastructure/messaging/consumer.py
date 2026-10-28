@@ -122,7 +122,7 @@ async def handle(message: RabbitMessage, service: AcceptExtractionService, broke
     try:
         event_id = event_id_of(headers, envelope)
         try:
-            command = to_accept_command(envelope, payload, event_id=event_id)
+            command = to_accept_command(envelope, payload, event_id=event_id, priority=queue == queue_name("priority"))
         except DomainError as error:
             await asyncio.to_thread(
                 service.reject, to_reject_command(envelope, payload, event_id=event_id, error=error)

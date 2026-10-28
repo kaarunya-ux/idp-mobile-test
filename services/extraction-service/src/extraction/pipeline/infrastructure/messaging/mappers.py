@@ -58,7 +58,7 @@ def item_context(envelope: EnvelopeMessage, payload: ExtractionRequestedMessage)
 
 
 def to_accept_command(
-    envelope: EnvelopeMessage, payload: ExtractionRequestedMessage, *, event_id: UUID
+    envelope: EnvelopeMessage, payload: ExtractionRequestedMessage, *, event_id: UUID, priority: bool = False
 ) -> AcceptExtractionCommand:
     """Raise ``DomainError`` for a request this service can't act on; the caller turns it into ``WorkFailed``."""
     for file in payload.files:
@@ -71,6 +71,7 @@ def to_accept_command(
         files=tuple(ObjectRef(bucket=f.bucket, key=f.key) for f in payload.files),
         template_id=template,
         options=payload.options,
+        priority=priority,
     )
     return AcceptExtractionCommand(message_id=event_id, message_type=EXTRACTION_REQUESTED, request=request)
 
