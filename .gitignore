@@ -10,6 +10,12 @@ __pycache__/
 visiting_card_api/logs/
 visiting_card_api/ground_truth.json
 
+# IDP web app: local settings, benchmark reference answers (real ID data) and results
+idp_web_app/.env
+idp_web_app/bench/ground_truth.json
+idp_web_app/bench/results/
+idp_web_app/logs/
+
 # OS/editor cruft
 .DS_Store
 *.swp
@@ -47,3 +53,11 @@ script.txt
 # Test data
 test_images/
 images/
+# Kept local only: old visiting-card API copy (lives in vmbs-extraction-service), real salary/licence docs, MLX venvs, editor file
+web/
+indian_dl/
+Final Offer letter.pdf
+Final Payslip.pdf
+.venv-mlx/
+.venv-optiq/
+*.code-workspace
