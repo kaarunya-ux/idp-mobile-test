@@ -1,5 +1,5 @@
 # Targets from the Python Engineering Standard, ch. 22.2. `make check` runs exactly what CI runs.
-.PHONY: sync fmt check test-all audit run
+.PHONY: sync fmt check test-all audit run migrate
 
 sync:
 	uv sync --all-extras
@@ -24,3 +24,6 @@ audit:
 
 run:
 	uv run uvicorn extraction.main:app --host 127.0.0.1 --port 8000 --reload
+
+migrate:
+	uv run alembic upgrade head

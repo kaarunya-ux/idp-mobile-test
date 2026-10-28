@@ -67,3 +67,55 @@ def quality_error_for(issue: QualityIssue, page_index: int) -> QualityRejectedEr
     """The error to raise for ``issue`` on a page (counted from 1 in the message, as people count pages)."""
     error_type, advice = _BY_ISSUE[issue]
     return error_type(f"Page {page_index + 1} {advice}")
+
+
+class RequestRejectedError(DomainError):
+    """An ``ExtractionRequested`` this service can't act on: bad keys, too many files, a file type it can't read.
+    Reported as ``EXT-400-VALIDATION-001``."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.REQUEST_INVALID
+    title: ClassVar[str] = "Request can't be processed"
+
+
+class InputMissingError(DomainError):
+    """The file is no longer in storage (deleted, or a guest upload that expired). Reported as ``EXT-422-FILE-001``."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.FILE_REJECTED
+    title: ClassVar[str] = "File not found"
+
+    def __init__(self) -> None:
+        super().__init__("The file no longer exists in storage.")
+
+
+class ExtractionTimeoutError(DomainError):
+    """The item ran past its time limit. Reported as ``EXT-504-TIMEOUT-001``; Java may try again."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.TIMEOUT
+    title: ClassVar[str] = "Extraction took too long"
+    retryable: ClassVar[bool] = True
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"The extraction did not finish within {seconds:.0f} seconds.")
+
+
+class UnexpectedFailureError(DomainError):
+    """Something outside the user's file went wrong after every retry. Reported as ``EXT-500-INTERNAL-001``."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.INTERNAL_ERROR
+    title: ClassVar[str] = "Extraction failed"
+    retryable: ClassVar[bool] = True
+
+    def __init__(self) -> None:
+        super().__init__("The extraction failed for a reason unrelated to the file. Please try again.")
+
+
+class AiUnavailableError(Exception):
+    """The AI fallback could not answer (down, slow, or an answer that wasn't the requested shape). Not a user error:
+    the pipeline carries on without it (IDP-03 ch. 2.6: "AI unavailable -> NEEDS_REVIEW, not failure")."""
+
+
+class TooLargeError(DomainError):
+    """The file is bigger than this deployment accepts. Reported as ``EXT-422-FILE-001``."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.FILE_REJECTED
+    title: ClassVar[str] = "File too large"

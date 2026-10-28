@@ -3,14 +3,16 @@
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import date
 
 from extraction.core.clock import Clock
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.domain.classify import classify_page
-from extraction.pipeline.domain.decisions import FieldDecision, FieldStatus, Thresholds, decide_field
+from extraction.pipeline.domain.decisions import FieldDecision, FieldStatus, Thresholds, decide_field, decide_with_ai
+from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.models import PreparedPage
-from extraction.pipeline.domain.ports import ProgressReporterPort
+from extraction.pipeline.domain.ports import AiFieldReaderPort, ProgressReporterPort
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.reading import Reading, field_box, read_field, shift_for
 from extraction.pipeline.domain.result import PageSummary, Provenance, build_result
@@ -25,6 +27,37 @@ _ENGLISH = ("en",)
 _TIE_BREAKER = "C"
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AiAssist:
+    """Stage 7's AI step: every field the engines left unsettled goes to the AI reader in one request."""
+
+    reader: AiFieldReaderPort
+    confidence: float  # given to an AI value that passes its rule (settings: AI_FALLBACK__CONFIDENCE)
+
+    @property
+    def provenance(self) -> tuple[str, str]:
+        return (self.reader.model_id, self.reader.prompt_version)
+
+    def assist(
+        self, template: TemplateDefinition, decisions: list[FieldDecision], page: PageImage, today: date
+    ) -> tuple[list[FieldDecision], bool]:
+        """The decisions with the unsettled ones decided again by AI, and whether the AI was asked at all."""
+        unsettled = [d.key for d in decisions if _is_unresolved(d)]
+        if not unsettled:
+            return decisions, False
+        try:
+            values = self.reader.read_fields(template.document_type, page, unsettled)
+        except AiUnavailableError:
+            return decisions, True  # asked, no answer: the fields stay NEEDS_REVIEW
+        definitions = {d.key: d for d in template.fields}
+        return [
+            decide_with_ai(definitions[d.key], d, values.get(d.key), confidence=self.confidence, today=today)
+            if d.key in unsettled
+            else d
+            for d in decisions
+        ], True
+
+
 class ExtractDocumentService:
     """Reads the first page, picks the matching template, and decides each field (IDP-03 ch. 2.6, stages 5 to 7).
 
@@ -37,7 +70,8 @@ class ExtractDocumentService:
     built, so a field that is still unresolved stays NEEDS_REVIEW.
     """
 
-    def __init__(  # noqa: PLR0913 - every collaborator is a port or a number
+    # every collaborator is a port or a number
+    def __init__(  # noqa: PLR0913
         self,
         *,
         engines: Mapping[str, OcrEnginePort],
@@ -48,6 +82,7 @@ class ExtractDocumentService:
         languages: Mapping[str, Sequence[str]] | None = None,
         progress: ProgressReporterPort,
         monotonic: Callable[[], float] = time.monotonic,
+        ai: AiAssist | None = None,
     ) -> None:
         self._engines = engines
         self._languages = {slot: tuple((languages or {}).get(slot, _ENGLISH)) for slot in engines}
@@ -57,6 +92,7 @@ class ExtractDocumentService:
         self._pipeline_version = pipeline_version
         self._progress = progress
         self._monotonic = monotonic
+        self._ai = ai
 
     def extract(self, command: ExtractDocumentCommand) -> dict[str, object]:
         """The result JSON (IDP-00 ch. 7.8). Raises ``OcrEngineError`` only if no engine could read the page."""
@@ -71,6 +107,10 @@ class ExtractDocumentService:
         self._progress.report(Stage.CLASSIFY, _DONE)
         decisions = self._decide(classification.template, pages, page.clean) if classification else []
         self._progress.report(Stage.VERIFY, _DONE)
+        models: list[tuple[str, str]] = []
+        if classification and self._ai is not None:
+            decisions, asked = self._ai.assist(classification.template, decisions, page.clean, self._clock.now().date())
+            models = [self._ai.provenance] if asked else []
         self._progress.report(Stage.AI_ASSIST, _DONE)
         result = build_result(
             classification=classification,
@@ -80,6 +120,7 @@ class ExtractDocumentService:
                 pipeline_version=self._pipeline_version,
                 engines=[(f"ocr-{slot.lower()}", self._engines[slot].engine_version) for slot in sorted(self._engines)],
                 duration_ms=round((self._monotonic() - started) * 1000),
+                models=models,
             ),
         )
         self._progress.report(Stage.ASSEMBLE, _DONE)

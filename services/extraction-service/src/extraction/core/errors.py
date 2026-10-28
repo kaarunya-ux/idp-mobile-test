@@ -15,6 +15,7 @@ class DomainError(Exception):
 
     code: ClassVar[ErrorCode]
     title: ClassVar[str]
+    retryable: ClassVar[bool] = False  # WorkFailed.error.retryable: Java re-dispatches up to 3 times when true
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
