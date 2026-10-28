@@ -9,11 +9,13 @@ Business errors (an unreadable file, a blurred photo) end the item with their co
 or a bug: the item goes back to ``QUEUED`` and the exception goes up, so the task retries it (CEL-04) or, after the
 last retry, calls ``fail``.
 
-Pages are read from the first file. A second file (a card's back) is prepared and kept with the result, but reading
-fields across both sides comes with two-sided templates (build step E3).
+A RECHECK item runs the same stages on the uploaded original, then keeps the device's settled fields and takes the
+server's reading for the weak ones (``merging.merge_recheck``). The pages are stored before the AI step, because
+ai-gateway reads them by key.
 """
 
 import json
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import timedelta
@@ -30,26 +32,27 @@ from extraction.pipeline.application.commands import (
     RunExtractionCommand,
 )
 from extraction.pipeline.application.services.extract_document import ExtractDocumentService
+from extraction.pipeline.application.services.item_lifecycle import ItemLifecycle, StageClock
 from extraction.pipeline.application.services.prepare_document import PrepareDocumentService
 from extraction.pipeline.domain.jobs import (
-    ExtractionEvent,
-    ExtractionItem,
     ExtractionOutcome,
     ExtractionRequest,
     ObjectRef,
     ResultSummary,
 )
+from extraction.pipeline.domain.merging import merge_recheck
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.ports import (
     AiCallContext,
     DigitalTextReaderPort,
     ObjectStoragePort,
     PageImageStorePort,
+    PipelineMetricsPort,
     ProgressReporterPort,
     TemplateCatalogPort,
     UnitOfWorkFactory,
 )
-from extraction.pipeline.domain.stages import Stage
+from extraction.pipeline.domain.runs import PipelineRun, decision_counts, stage_durations
 from extraction.pipeline.domain.template import TemplateDefinition
 
 log = structlog.get_logger(__name__)
@@ -76,7 +79,8 @@ class PipelineFactory(Protocol):
 
 
 class RunExtractionService:
-    def __init__(
+    # every collaborator is a port or a number
+    def __init__(  # noqa: PLR0913
         self,
         units: UnitOfWorkFactory,
         storage: ObjectStoragePort,
@@ -86,70 +90,70 @@ class RunExtractionService:
         *,
         derived_bucket: str,
         stale_after: timedelta,
+        review_confidence: float = 0.85,
+        metrics: PipelineMetricsPort | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._units = units
+        self._lifecycle = ItemLifecycle(units, clock, stale_after=stale_after, metrics=metrics)
         self._storage = storage
         self._pages = pages
         self._pipeline = pipeline
-        self._clock = clock
         self._derived_bucket = derived_bucket
-        self._stale_after = stale_after
+        self._review_confidence = review_confidence
+        self._monotonic = monotonic
 
     def run(self, command: RunExtractionCommand) -> None:
-        item = self._start(command.item_id)
+        item = self._lifecycle.start(command.item_id)
         if item is None:
             return
+        progress = StageClock(self._lifecycle, item.id, self._monotonic)
         try:
-            outcome = self._extract(item.request)
+            outcome, result = self._extract(item.request, progress)
         except DomainError as error:
             self.fail(item.id, error)
             return
         except Exception:
-            self._transition(item.id, lambda it: it.requeue(self._clock.now()))  # let the retry start it again
+            self._lifecycle.requeue(item.id)  # let the retry start it again
             raise
-        self._transition(item.id, lambda it: it.complete(outcome, self._clock.now()))
-        log.info("extraction_completed", item_id=str(item.id), fields=outcome.summary.fields, ai_calls=outcome.ai_calls)
+        self._lifecycle.complete(item.id, outcome, _run_row(item.request, outcome, result, progress, self._clock))
 
     def fail(self, item_id: UUID, error: DomainError) -> None:
         """End the item with ``error`` (also called by the task after its last retry, or on a time limit)."""
-        self._transition(
-            item_id,
-            lambda it: it.fail(error.code, retryable=error.retryable, detail=error.detail, now=self._clock.now()),
-        )
-        log.warning("extraction_failed", item_id=str(item_id), code=error.code, retryable=error.retryable)
+        self._lifecycle.fail(item_id, error)
 
-    def _start(self, item_id: UUID) -> ExtractionItem | None:
-        with self._units() as unit:
-            item = unit.items.get_for_update(item_id)
-            if item is None or not item.can_start(self._clock.now(), stale_after=self._stale_after):
-                return None  # running elsewhere, finished, or a task for an item that was never stored
-            unit.add_event(item.start(self._clock.now()))
-            unit.items.save(item)
-            unit.commit()
-        return item
+    @property
+    def _clock(self) -> Clock:
+        return self._lifecycle.clock
 
-    def _extract(self, request: ExtractionRequest) -> ExtractionOutcome:
-        progress = _ItemProgress(self, request.context.item_id)
+    def _extract(self, request: ExtractionRequest, progress: StageClock) -> tuple[ExtractionOutcome, dict[str, Any]]:
         prepare = self._pipeline.prepare_service(progress)
         contents = [self._storage.read_bytes(f) for f in request.files]
         prepared_files = [prepare.prepare(PrepareDocumentCommand(content=content)) for content in contents]
         digital = self._pipeline.digital_reader.read_first_page(contents[0])
-        pages = tuple(page for result in prepared_files for page in result.pages)
+        pages = tuple(_renumbered([page for result in prepared_files for page in result.pages]))
         qualities = tuple(quality for result in prepared_files for quality in result.qualities)
-        pages = tuple(_renumbered(pages))
         templates = self._pipeline.catalog.templates_for(request.context.tenant_id, request.template_id)
         stored = self._store_pages(request, pages)  # before the AI step: ai-gateway reads the pages by key
         context = AiCallContext(
             account_id=request.context.tenant_id, priority=request.priority, page_refs=tuple(stored)
         )
-        result = self._pipeline.extract_service(progress, templates).extract(
-            ExtractDocumentCommand(pages=pages, qualities=qualities, digital_page=digital, ai_context=context)
+        command = ExtractDocumentCommand(
+            pages=pages,
+            qualities=qualities,
+            digital_page=digital,
+            ai_context=context,
+            template_forced=request.template_id is not None,
         )
+        result = self._pipeline.extract_service(progress, templates).extract(command)
         _add_image_keys(result, pages, stored)
+        if request.recheck is not None:
+            on_device = json.loads(self._storage.read_bytes(request.recheck.result))
+            result = merge_recheck(
+                on_device, result, asked=request.recheck.fields, review_confidence=self._review_confidence
+            )
         result_ref = ObjectRef(bucket=self._derived_bucket, key=request.derived_key(RESULT_NAME))
-        data = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()
-        self._storage.write_bytes(result_ref, data, RESULT_CONTENT_TYPE)
-        return _outcome(result, result_ref, len(pages))
+        self._storage.write_bytes(result_ref, encode_result(result), RESULT_CONTENT_TYPE)
+        return outcome_of(result, result_ref, len(pages)), result
 
     def _store_pages(self, request: ExtractionRequest, pages: Sequence[PreparedPage]) -> list[ObjectRef]:
         """Each prepared page as page-N.png in the derived bucket."""
@@ -160,31 +164,27 @@ class RunExtractionService:
             stored.append(ref)
         return stored
 
-    def progress(self, item_id: UUID, stage: Stage, percent: int) -> None:
-        self._transition(item_id, lambda it: it.progress(stage, percent, self._clock.now()))
 
-    def _transition(self, item_id: UUID, change: Callable[[ExtractionItem], ExtractionEvent | None]) -> None:
-        """Lock the item, apply ``change``, and commit it with the event it returns."""
-        with self._units() as unit:
-            item = unit.items.get_for_update(item_id)
-            if item is None:
-                return
-            event = change(item)
-            unit.items.save(item)
-            if event is not None:
-                unit.add_event(event)
-            unit.commit()
+def encode_result(result: dict[str, Any]) -> bytes:
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()
 
 
-class _ItemProgress:
-    """``ProgressReporterPort`` for one item: every report becomes a ``JobProgressed`` outbox row."""
-
-    def __init__(self, runner: RunExtractionService, item_id: UUID) -> None:
-        self._runner = runner
-        self._item_id = item_id
-
-    def report(self, stage: Stage, percent: int) -> None:
-        self._runner.progress(self._item_id, stage, percent)
+def _run_row(
+    request: ExtractionRequest, outcome: ExtractionOutcome, result: dict[str, Any], progress: StageClock, clock: Clock
+) -> PipelineRun:
+    return PipelineRun(
+        item_id=request.context.item_id,
+        account_id=request.context.tenant_id,
+        kind=request.kind,
+        document_type=outcome.document_type,
+        template_id=outcome.template_id,
+        template_version=outcome.template_version,
+        stages=stage_durations(progress.starts, progress.now()),
+        decisions=decision_counts(result),
+        ai_calls=outcome.ai_calls,
+        duration_ms=progress.elapsed_ms(),
+        created_at=clock.now(),
+    )
 
 
 def _renumbered(pages: Sequence[PreparedPage]) -> Sequence[PreparedPage]:
@@ -192,7 +192,7 @@ def _renumbered(pages: Sequence[PreparedPage]) -> Sequence[PreparedPage]:
     return [page if page.page_index == index else replace(page, page_index=index) for index, page in enumerate(pages)]
 
 
-def _outcome(result: dict[str, Any], result_ref: ObjectRef, pages: int) -> ExtractionOutcome:
+def outcome_of(result: dict[str, Any], result_ref: ObjectRef, pages: int) -> ExtractionOutcome:
     fields = result.get("fields", [])
     confidences = [float(f["confidence"]) for f in fields if isinstance(f.get("confidence"), int | float)]
     template = result.get("template") or {}

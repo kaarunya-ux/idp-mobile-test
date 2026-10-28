@@ -119,3 +119,14 @@ class TooLargeError(DomainError):
 
     code: ClassVar[ErrorCode] = ErrorCode.FILE_REJECTED
     title: ClassVar[str] = "File too large"
+
+
+class AiAnalysisUnavailableError(DomainError):
+    """Deep analysis is all AI: without an answer the item fails, retryable, so Java may dispatch it again."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.AI_UNAVAILABLE
+    title: ClassVar[str] = "AI unavailable"
+    retryable: ClassVar[bool] = True
+
+    def __init__(self) -> None:
+        super().__init__("The AI could not analyse the document right now. Try again later.")

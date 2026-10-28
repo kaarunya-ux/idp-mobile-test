@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from extraction.template.domain.designer import SampleFile
 from extraction.template.domain.models import VersionState
 
 
@@ -78,3 +79,11 @@ class DocumentTypeCommand:
     classifier_hints: dict[str, Any] | None
     default_template_id: UUID | None
     active: bool | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AddSamplesCommand:
+    caller: Caller
+    template_id: UUID
+    version: int
+    samples: tuple[tuple[tuple[SampleFile, ...], dict[str, str]], ...]  # (files, expected values) per sample

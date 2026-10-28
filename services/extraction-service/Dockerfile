@@ -4,6 +4,7 @@
 #   docker build --target api     -t extraction-service:api .      # the HTTP API: no OpenCV, OCR or models (ML-09)
 #   docker build --target service -t extraction-service:service .  # intake consumer, outbox relay, migrations
 #   docker build --target worker  -t extraction-service:worker .   # the pipeline: OpenCV, ONNX Runtime, OCR engines
+#                                                                   # (-Q pipeline; a second pool with -Q ai for deep analysis)
 #
 # The OCR models are not in the image: mount them at /models (OCR__MODELS_DIR). models.yaml, which pins their
 # checksums, is in the image, so a wrong or changed model file is refused at start-up (ML-01).

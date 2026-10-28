@@ -1,8 +1,9 @@
 """The FastAPI application: factory, lifespan, middleware, handlers and routers (standard ch. 3.2).
 
 Run with: ``uvicorn extraction.main:app --port 8000`` (IDP-03 ch. 2.2). CORS is not enabled here: only the edge
-component answers browsers (SEC-09). The API is the slim image: it wires templates and document types here, and never
-imports the pipeline's OpenCV or OCR code (that wiring is ``bootstrap``, for the workers).
+component answers browsers (SEC-09). The API is the slim image: it wires templates, document types and the designer
+here (``api_wiring``), and never imports the pipeline's OpenCV or OCR code (that wiring is ``bootstrap``, for the
+workers). Prometheus metrics are at ``/metrics``.
 """
 
 from collections.abc import AsyncIterator
@@ -10,8 +11,10 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
+from prometheus_client import make_asgi_app
 
 from extraction import health
+from extraction.api_wiring import build_designer
 from extraction.core.clock import Clock, SystemClock
 from extraction.core.config import Settings, get_settings
 from extraction.core.db import create_async_db_engine, create_async_session_factory
@@ -46,11 +49,15 @@ def create_app(clock: Clock | None = None, settings: Settings | None = None) -> 
     register_exception_handlers(app, clock)
     units = _template_units(settings, clock)
     app.state.token_verifier = TokenVerifier(settings.auth)
-    app.state.template_service = TemplateService(units, clock)
+    app.state.template_service = TemplateService(
+        units, clock, publish_min_accuracy=settings.templates.publish_min_accuracy
+    )
     app.state.document_type_service = DocumentTypeService(units)
+    app.state.designer_service = build_designer(settings, units, clock)
     app.include_router(health.router)
     app.include_router(template_routes.templates)
     app.include_router(template_routes.document_types)
+    app.mount("/metrics", make_asgi_app())
     return app
 
 

@@ -21,6 +21,10 @@ dependencies = [
     "httpx>=0.27",  # the AI fallback's model client (and ai-gateway's, later)
     # Not in the standard's ch. 22.3 list: verifies Keycloak bearer tokens (SEC-01). MIT; ADR 0005
     "pyjwt[crypto]>=2.9",
+    "prometheus-client>=0.20",  # IDP-03 ch. 2.12 metrics (OBS-06): /metrics on the API, multiprocess in the workers
+    # The API sends template sample and test-run tasks and reads sample OCR words from storage (E6)
+    "celery>=5.4",
+    "boto3>=1.35",
 ]
 
 [project.optional-dependencies]
@@ -35,9 +39,7 @@ workers = [
     "filetype>=1.2",
     "pypdfium2>=4.30",
     "pillow>=10.4",
-    # messaging, tasks and storage, as in conversion-service
-    "celery>=5.4",
-    "boto3>=1.35",
+    # messaging, as in conversion-service (Celery and boto3 are in the main list: the API uses them too)
     "faststream[rabbit,cli]>=0.5",
 ]
 
@@ -170,7 +172,7 @@ forbidden_modules = ["numpy", "cv2", "onnxruntime", "yaml", "PIL", "fastapi", "p
 [[tool.importlinter.contracts]]
 name = "API process stays slim (no CV, OCR or ML libraries in its image)"
 type = "forbidden"
-source_modules = ["extraction.main", "extraction.health"]
+source_modules = ["extraction.main", "extraction.health", "extraction.api_wiring"]
 forbidden_modules = ["cv2", "onnxruntime", "numpy", "PIL", "pypdfium2", "paddle", "torch", "yaml"]
 
 [[tool.importlinter.contracts]]

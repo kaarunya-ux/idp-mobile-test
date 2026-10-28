@@ -25,18 +25,27 @@ from extraction.core.db import SessionFactory, create_db_engine, create_session_
 from extraction.core.outbox import OutboxRelay
 from extraction.core.service_auth import ServiceTokenProvider
 from extraction.pipeline.application.services.accept_extraction import AcceptExtractionService
+from extraction.pipeline.application.services.designer_work import DesignerWorkService
 from extraction.pipeline.application.services.extract_document import AiAssist, ExtractDocumentService
 from extraction.pipeline.application.services.prepare_document import PrepareDocumentService
+from extraction.pipeline.application.services.run_deep_analysis import RunDeepAnalysisService
 from extraction.pipeline.application.services.run_extraction import RunExtractionService
 from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.ports import ProgressReporterPort, UnitOfWorkFactory
 from extraction.pipeline.domain.quality import QualityThresholds
 from extraction.pipeline.domain.template import TemplateDefinition
-from extraction.pipeline.infrastructure.ai.gateway_reader import GatewayFieldReader
+from extraction.pipeline.infrastructure.ai.gateway_reader import (
+    AiGatewayClient,
+    GatewayClassifier,
+    GatewayFieldReader,
+    GatewayPageAnalyser,
+)
 from extraction.pipeline.infrastructure.ai.vision_reader import VisionModelFieldReader
 from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
 from extraction.pipeline.infrastructure.messaging.messages import PRODUCER
 from extraction.pipeline.infrastructure.messaging.publisher import RabbitEventPublisher
+from extraction.pipeline.infrastructure.metrics import PrometheusPipelineMetrics
+from extraction.pipeline.infrastructure.persistence.designer_store import SqlDesignerWorkStore
 from extraction.pipeline.infrastructure.persistence.repository import SqlUnitOfWork
 from extraction.pipeline.infrastructure.persistence.template_catalog import SqlTemplateCatalog
 from extraction.pipeline.infrastructure.preprocess.opencv_preprocessor import OpenCvPagePreparer
@@ -44,7 +53,8 @@ from extraction.pipeline.infrastructure.preprocess.orientation import DocumentOr
 from extraction.pipeline.infrastructure.quality.opencv_quality_gate import OpenCvQualityAssessor
 from extraction.pipeline.infrastructure.quality.page_loader import DocumentPageLoader
 from extraction.pipeline.infrastructure.storage.s3_storage import S3ObjectStorage
-from extraction.pipeline.infrastructure.tasks import CeleryTaskQueue
+from extraction.pipeline.infrastructure.tasks import CeleryTaskQueue, WorkerServices
+from extraction.template.domain.definition_json import parse_definition
 from idp_ocr_engines import ModelRegistry, RuntimeLimits
 from idp_ocr_engines.engines.ppocr import PpOcrEngine, PpOcrModels
 from idp_ocr_engines.port import OcrEnginePort
@@ -101,8 +111,18 @@ class PipelineServices:
             min_short_side_px=quality.min_short_side_px,
             require_document_edges=quality.require_document_edges,
         )
-        self._ai = build_ai_assist(settings)
+        self._gateway = build_gateway(settings)
+        self._ai = build_ai_assist(settings, self._gateway)
         self._digital = PdfiumTextReader(dpi=settings.limits.pdf_dpi)
+
+    @property
+    def sample_engine(self) -> OcrEnginePort:
+        """Engine A reads template samples for suggestions (IDP-03 ch. 2.9: "OCR A")."""
+        return self._engines["A"]
+
+    @property
+    def gateway(self) -> AiGatewayClient | None:
+        return self._gateway
 
     @property
     def digital_reader(self) -> PdfiumTextReader:
@@ -155,28 +175,44 @@ def _engines(settings: Settings, registry: ModelRegistry, limits: RuntimeLimits)
     }
 
 
-def build_ai_assist(settings: Settings) -> AiAssist | None:
+def build_gateway(settings: Settings) -> AiGatewayClient | None:
+    """The ai-gateway client, or None when ``AI_GATEWAY__URL`` is unset."""
+    gateway = settings.ai_gateway
+    if gateway.url is None:
+        return None
+    auth = _required_service_auth(settings)
+    tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
+    seconds = gateway.timeout.total_seconds()
+    client = httpx.Client(
+        base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
+    )
+    return AiGatewayClient(client, tokens)
+
+
+def build_ai_assist(settings: Settings, gateway: AiGatewayClient | None) -> AiAssist | None:
     """The AI fallback: ai-gateway when ``AI_GATEWAY__URL`` is set; on a laptop without it, the model host directly
     (``AI_FALLBACK__URL``, local only, ADR 0006); otherwise None (unsettled fields then stay NEEDS_REVIEW)."""
-    gateway = settings.ai_gateway
-    if gateway.url is not None:
-        auth = _required_service_auth(settings)
-        tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
-        seconds = gateway.timeout.total_seconds()
-        client = httpx.Client(
-            base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
+    ai = settings.ai_gateway
+    if gateway is not None:
+        return AiAssist(
+            reader=GatewayFieldReader(gateway),
+            confidence=ai.confidence,
+            max_fields=ai.max_fields_per_document,
+            classifier=GatewayClassifier(gateway),
+            classify_min_confidence=ai.classify_min_confidence,
         )
-        return AiAssist(reader=GatewayFieldReader(client, tokens), confidence=gateway.confidence)
-    ai = settings.ai_fallback
-    if ai.url is None or settings.environment != "local":
+    direct = settings.ai_fallback
+    if direct.url is None or settings.environment != "local":
         return None
-    headers = {"Authorization": f"Bearer {ai.api_key.get_secret_value()}"} if ai.api_key else {}
-    seconds = ai.timeout.total_seconds()
+    headers = {"Authorization": f"Bearer {direct.api_key.get_secret_value()}"} if direct.api_key else {}
+    seconds = direct.timeout.total_seconds()
     client = httpx.Client(
-        base_url=str(ai.url).rstrip("/"), headers=headers, timeout=httpx.Timeout(seconds, connect=min(5.0, seconds))
+        base_url=str(direct.url).rstrip("/"), headers=headers, timeout=httpx.Timeout(seconds, connect=min(5.0, seconds))
     )
     return AiAssist(
-        reader=VisionModelFieldReader(client, model=ai.model, max_edge_px=ai.max_edge_px), confidence=ai.confidence
+        reader=VisionModelFieldReader(client, model=direct.model, max_edge_px=direct.max_edge_px),
+        confidence=direct.confidence,
+        max_fields=ai.max_fields_per_document,
     )
 
 
@@ -205,18 +241,46 @@ def build_accept_service(settings: Settings, sessions: SessionFactory, celery_ap
     )
 
 
-def build_run_service(settings: Settings, sessions: SessionFactory) -> RunExtractionService:
+def build_worker_services(settings: Settings, sessions: SessionFactory) -> WorkerServices:
     clock, storage = SystemClock(), settings.require_storage()
     objects = S3ObjectStorage(build_s3_client(storage), max_input_size=int(storage.max_input_size))
-    return RunExtractionService(
-        build_units(sessions, clock),
+    units, metrics = build_units(sessions, clock), PrometheusPipelineMetrics()
+    pipeline = PipelineServices(settings, clock, SqlTemplateCatalog(sessions))
+    gateway = pipeline.gateway
+    extraction = RunExtractionService(
+        units,
         objects,
         objects,
-        PipelineServices(settings, clock, SqlTemplateCatalog(sessions)),
+        pipeline,
         clock,
         derived_bucket=storage.bucket_derived,
         stale_after=stale_after(settings),
+        review_confidence=settings.review.confidence_threshold,
+        metrics=metrics,
     )
+    deep_analysis = RunDeepAnalysisService(
+        units,
+        objects,
+        GatewayPageAnalyser(gateway) if gateway is not None else None,
+        clock,
+        derived_bucket=storage.bucket_derived,
+        stale_after=stale_after(settings),
+        metrics=metrics,
+    )
+    store = SqlDesignerWorkStore(sessions, clock)
+    designer = DesignerWorkService(
+        store,
+        objects,
+        objects,
+        prepare=pipeline.prepare_service,
+        extract=pipeline.extract_service,
+        engine=pipeline.sample_engine,
+        digital=pipeline.digital_reader,
+        parse=parse_definition,
+        templates_bucket=storage.bucket_templates,
+        clock=clock,
+    )
+    return WorkerServices(extraction=extraction, deep_analysis=deep_analysis, designer=designer, designer_store=store)
 
 
 def build_s3_client(storage: StorageSettings) -> "S3Client":

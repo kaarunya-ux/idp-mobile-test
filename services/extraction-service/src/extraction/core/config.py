@@ -123,8 +123,21 @@ class StorageSettings(BaseModel):
     secret_key: SecretStr
     region: str = Field("us-east-1", min_length=1, max_length=32)
     bucket_derived: str = Field("idp-derived", min_length=3, max_length=63)  # page images and result.json (IDP-00 7.7)
+    bucket_templates: str = Field("idp-templates", min_length=3, max_length=63)  # prepared template samples
     max_input_size: ByteSize = ByteSize(200 * 1024 * 1024)  # FIL-05: nothing bigger is downloaded
     timeout: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
+
+
+class TemplatesSettings(BaseModel):
+    """The designer's publish gate (IDP-03 ch. 2.9). Changing it needs an evaluation report (ML-07)."""
+
+    publish_min_accuracy: float = Field(0.9, gt=0, le=1)  # every required field in the last test run
+
+
+class MetricsSettings(BaseModel):
+    """Where the worker serves Prometheus metrics (the API serves them at ``/metrics``)."""
+
+    port: int = Field(9100, ge=1024, le=65535)
 
 
 class OutboxSettings(BaseModel):
@@ -162,6 +175,8 @@ class AiGatewaySettings(BaseModel):
     url: HttpUrl | None = None  # e.g. http://ai-gateway:8002
     timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=1), le=timedelta(minutes=5))
     confidence: float = Field(0.9, gt=0, le=1)  # given to an AI value that passes the field's rule (ML-07)
+    max_fields_per_document: int = Field(10, ge=1, le=50)  # IDP-03 ch. 2.7: more unresolved -> review, not AI
+    classify_min_confidence: float = Field(0.8, gt=0, le=1)  # an AI classification below this stays unknown
 
 
 class ServiceAuthSettings(BaseModel):
@@ -207,6 +222,10 @@ class Settings(BaseSettings):
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
+    metrics: MetricsSettings = Field(default_factory=MetricsSettings)
+    templates: TemplatesSettings = Field(default_factory=TemplatesSettings)
+    # prometheus-client's own variable for multiprocess mode (the Celery workers); read here too, never elsewhere
+    prometheus_multiproc_dir: Path | None = None
     ai_fallback: AiFallbackSettings = Field(default_factory=AiFallbackSettings)
     service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
     auth: AuthSettings = Field(default_factory=AuthSettings)

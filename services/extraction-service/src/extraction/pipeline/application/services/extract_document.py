@@ -9,7 +9,7 @@ from datetime import date
 
 from extraction.core.clock import Clock
 from extraction.pipeline.application.commands import ExtractDocumentCommand
-from extraction.pipeline.domain.classify import classify_page
+from extraction.pipeline.domain.classify import Classification, classify_page
 from extraction.pipeline.domain.decisions import (
     FieldDecision,
     FieldSource,
@@ -20,7 +20,7 @@ from extraction.pipeline.domain.decisions import (
 )
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.models import PreparedPage
-from extraction.pipeline.domain.ports import AiCallContext, AiFieldReaderPort, ProgressReporterPort
+from extraction.pipeline.domain.ports import AiCallContext, AiClassifierPort, AiFieldReaderPort, ProgressReporterPort
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.reading import Reading, field_box, read_field, shift_for
 from extraction.pipeline.domain.result import PageSummary, Provenance, build_result
@@ -42,6 +42,27 @@ class AiAssist:
 
     reader: AiFieldReaderPort
     confidence: float  # given to an AI value that passes its rule (settings: AI_GATEWAY__CONFIDENCE)
+    max_fields: int = 10  # more unsettled fields than this go to review instead (AI_GATEWAY__MAX_FIELDS_PER_DOCUMENT)
+    classifier: AiClassifierPort | None = None
+    classify_min_confidence: float = 0.8  # an AI classification below this leaves the document unknown
+
+    def classify(
+        self, templates: Sequence[TemplateDefinition], context: AiCallContext
+    ) -> tuple[Classification | None, tuple[str, str] | None]:
+        """Stage 4 for a page the keywords didn't match: ask the AI which candidate type it is. Returns the
+        template for that type (the account's own first, as the catalog orders them) and who answered."""
+        if self.classifier is None or not templates or not context.page_refs:
+            return None, None
+        candidates = list(dict.fromkeys(t.document_type for t in templates))
+        try:
+            answer = self.classifier.classify(context.page_refs[0], candidates, context)
+        except AiUnavailableError:
+            return None, None
+        provenance = (answer.model_id, answer.prompt_version)
+        if answer.document_type is None or answer.confidence < self.classify_min_confidence:
+            return None, provenance
+        template = next(t for t in templates if t.document_type == answer.document_type)
+        return Classification(template=template, confidence=answer.confidence), provenance
 
     def assist(
         self,
@@ -57,7 +78,8 @@ class AiAssist:
         go in the same request at no extra cost; an AI value for them still has to pass the field's rule. No answer
         (gateway busy, model down, cap used) leaves the fields as OCR left them, and isn't counted as an AI call.
         """
-        if not any(_is_unresolved(d) for d in decisions):
+        unresolved = sum(_is_unresolved(d) for d in decisions)
+        if not unresolved or unresolved > self.max_fields:  # too many: the photo is the problem, not a field
             return decisions, None
         wanted = [d.key for d in decisions if _is_unresolved(d) or d.status is FieldStatus.EMPTY]
         definitions = {d.key: d for d in template.fields}
@@ -83,8 +105,9 @@ class ExtractDocumentService:
     they agree and the rule passes. Engine C is asked only if some field is unresolved: it then reads the page once and
     each unresolved field is decided again with two of three. (IDP-03 says C reads the field crop; Indra read crops
     badly, see ADR 0003.) Slot A also reads for CLASSIFY. ``languages`` says what each slot is asked to read (default
-    English only): a field in another language is read only by the slots that read that language. AI_ASSIST is not
-    built, so a field that is still unresolved stays NEEDS_REVIEW.
+    English only): a field in another language is read only by the slots that read that language. Fields still
+    unresolved go to the AI in one request (``AiAssist``); without an answer they stay NEEDS_REVIEW. A page the
+    keywords don't match goes to the AI's classify when one is configured.
     """
 
     # every collaborator is a port or a number
@@ -120,19 +143,16 @@ class ExtractDocumentService:
         pages = {_DIGITAL: command.digital_page} if command.digital_page is not None else self._read_pages(page.clean)
         self._progress.report(Stage.READ, _DONE)
         first = pages[sorted(pages)[0]]
-        classification = classify_page(
-            self._templates, page_text=first.text, width=page.clean.width, height=page.clean.height
-        )
+        classification, models = self._classify(command, first.text, page.clean)
         self._progress.report(Stage.CLASSIFY, _DONE)
         decisions = self._decide(classification.template, pages, page.clean, digital=digital) if classification else []
         self._progress.report(Stage.VERIFY, _DONE)
-        models: list[tuple[str, str]] = []
         if classification and self._ai is not None and command.ai_context is not None:
             sides = [p.clean for p in command.pages[:2]]  # a card's front and back
             context = dataclasses.replace(command.ai_context, page_refs=command.ai_context.page_refs[:2])
             today = self._clock.now().date()
             decisions, answered = self._ai.assist(classification.template, decisions, sides, today, context)
-            models = [answered] if answered else []
+            models += [answered] if answered else []
         self._progress.report(Stage.AI_ASSIST, _DONE)
         result = build_result(
             classification=classification,
@@ -149,6 +169,18 @@ class ExtractDocumentService:
         )
         self._progress.report(Stage.ASSEMBLE, _DONE)
         return dict(result)
+
+    def _classify(
+        self, command: ExtractDocumentCommand, text: str, page: PageImage
+    ) -> tuple[Classification | None, list[tuple[str, str]]]:
+        """The template named in the request; else keywords and shape; else, for an unknown page, the AI."""
+        if command.template_forced and len(self._templates) == 1:
+            return Classification(template=self._templates[0], confidence=1.0), []
+        found = classify_page(self._templates, page_text=text, width=page.width, height=page.height)
+        if found is not None or self._ai is None or command.ai_context is None:
+            return found, []
+        found, answered = self._ai.classify(self._templates, command.ai_context)
+        return found, [answered] if answered else []
 
     def _read_pages(self, image: PageImage) -> dict[str, OcrPage]:
         """Every engine except the tie-breaker reads the page, all at once; one that fails twice is left out."""

@@ -21,6 +21,8 @@ EVENT_ROUTING_KEYS = {
     "WorkFailed": "work.failed",
 }
 EXTRACTION_REQUESTED = "ExtractionRequested"
+DEEP_ANALYSIS_REQUESTED = "DeepAnalysisRequested"
+ACCOUNT_DELETED = "AccountDeleted"
 
 
 class _Incoming(BaseModel):
@@ -52,17 +54,47 @@ class FileMessage(_Incoming):
     pages: int | None = None
 
 
-class ExtractionRequestedMessage(_Incoming):
-    """IDP-00 ch. 7.6: jobId, itemId, documentId, files[], templateId?/auto, options, accountPolicy, deadline."""
+class ItemRequestMessage(_Incoming):
+    """What every work request names: its job and job item."""
 
     job_id: UUID
     item_id: UUID
+
+
+class ExtractionRequestedMessage(ItemRequestMessage):
+    """IDP-00 ch. 7.6: jobId, itemId, documentId, files[], templateId?/auto, options, accountPolicy, deadline."""
+
     document_id: UUID
     files: list[FileMessage] = Field(min_length=1, max_length=20)
     template_id: str | None = Field(default=None, max_length=64)  # absent or "auto": classify
     options: dict[str, Any] = Field(default_factory=dict)
     account_policy: dict[str, Any] = Field(default_factory=dict)  # masking: the standard templates always mask
     deadline: datetime | None = None  # Java's reaper enforces it; the worker has its own time limit
+
+
+class RefMessage(_Incoming):
+    bucket: str = Field(max_length=63)
+    key: str = Field(max_length=1024)
+
+
+class RecheckOptionsMessage(_Incoming):
+    """``options.recheck`` of an ``ExtractionRequested`` that is a RECHECK job (ADR 0007: proposed to Java)."""
+
+    result: RefMessage  # the on-device result JSON
+    fields: list[str] = Field(default_factory=list, max_length=50)
+
+
+class DeepAnalysisRequestedMessage(ItemRequestMessage):
+    """IDP-00 ch. 7.6: jobId, itemId, resultKey, pageKeys, question?. Keys are in the derived bucket."""
+
+    result_key: str = Field(max_length=1024)
+    page_keys: list[str] = Field(min_length=1, max_length=5)
+    question: str | None = Field(default=None, max_length=500)
+
+
+class AccountDeletedMessage(_Incoming):
+    account_id: UUID
+    delete_after: datetime | None = None
 
 
 class JobProgressedMessage(_Outgoing):

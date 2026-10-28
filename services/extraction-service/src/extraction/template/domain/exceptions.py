@@ -81,3 +81,38 @@ class IdempotencyKeyReusedError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("This Idempotency-Key was already used for a different request.")
+
+
+class SampleNotReadyError(DomainError):
+    code: ClassVar[ErrorCode] = ErrorCode.SAMPLE_NOT_READY
+    title: ClassVar[str] = "Sample not ready"
+
+    def __init__(self) -> None:
+        super().__init__("The sample is still being prepared, or it could not be read; add another one.")
+
+
+class SamplesMissingError(DomainError):
+    code: ClassVar[ErrorCode] = ErrorCode.SAMPLES_MISSING
+    title: ClassVar[str] = "No samples to test"
+
+    def __init__(self) -> None:
+        super().__init__("A test run needs at least one prepared sample with expected values.")
+
+
+class TestRunNotFoundError(DomainError):
+    __test__ = False
+
+    code: ClassVar[ErrorCode] = ErrorCode.TEST_RUN_NOT_FOUND
+    title: ClassVar[str] = "Not found"
+
+    def __init__(self) -> None:
+        super().__init__("There is no such test run.")
+
+
+class SuggestionsUnavailableError(DomainError):
+    code: ClassVar[ErrorCode] = ErrorCode.AI_UNAVAILABLE
+    title: ClassVar[str] = "AI unavailable"
+    retryable: ClassVar[bool] = True
+
+    def __init__(self) -> None:
+        super().__init__("Field suggestions are not available right now. Try again later, or add fields by hand.")

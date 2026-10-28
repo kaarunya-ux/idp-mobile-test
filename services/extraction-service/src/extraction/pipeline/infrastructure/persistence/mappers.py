@@ -6,12 +6,15 @@ from pydantic import BaseModel, ConfigDict
 
 from extraction.core.error_codes import ErrorCode
 from extraction.pipeline.domain.jobs import (
+    DeepAnalysisSpec,
     ExtractionCompleted,
     ExtractionItem,
     ExtractionRequest,
     ItemContext,
     ItemStatus,
+    JobKind,
     ObjectRef,
+    RecheckSpec,
     ResultSummary,
 )
 from extraction.pipeline.infrastructure.persistence.orm import ExtractionItemOrm
@@ -31,6 +34,9 @@ class StoredRequest(_Stored):
     template_id: str | None
     options: dict[str, Any]
     priority: bool = False  # rows stored before it existed read as standard
+    kind: str = "EXTRACTION"
+    recheck: dict[str, Any] | None = None  # {result: ref, fields: [...]}
+    analysis: dict[str, Any] | None = None  # {result: ref, pages: [refs], question}
 
 
 class StoredCompletion(_Stored):
@@ -71,6 +77,9 @@ def update_orm(row: ExtractionItemOrm, item: ExtractionItem) -> None:
         template_id=request.template_id,
         options=dict(request.options),
         priority=request.priority,
+        kind=request.kind,
+        recheck=_recheck_json(request.recheck),
+        analysis=_analysis_json(request.analysis),
     ).model_dump(mode="json")
     row.completion = _completion_json(item.completion) if item.completion else None
     row.error_code = item.error_code
@@ -89,6 +98,9 @@ def to_domain(row: ExtractionItemOrm) -> ExtractionItem:
         template_id=stored.template_id,
         options=stored.options,
         priority=stored.priority,
+        kind=JobKind(stored.kind),
+        recheck=_recheck(stored.recheck),
+        analysis=_analysis(stored.analysis),
     )
     return ExtractionItem(
         request=request,
@@ -131,4 +143,34 @@ def _completion(data: dict[str, Any], context: ItemContext) -> ExtractionComplet
         usage_pages=stored.usage_pages,
         usage_ai_calls=stored.usage_ai_calls,
         sequence=stored.sequence,
+    )
+
+
+def _ref_json(ref: ObjectRef) -> dict[str, str]:
+    return {"bucket": ref.bucket, "key": ref.key}
+
+
+def _ref(data: dict[str, Any]) -> ObjectRef:
+    return ObjectRef(bucket=str(data["bucket"]), key=str(data["key"]))
+
+
+def _recheck_json(spec: RecheckSpec | None) -> dict[str, Any] | None:
+    return {"result": _ref_json(spec.result), "fields": list(spec.fields)} if spec else None
+
+
+def _recheck(data: dict[str, Any] | None) -> RecheckSpec | None:
+    return RecheckSpec(result=_ref(data["result"]), fields=tuple(data.get("fields", ()))) if data else None
+
+
+def _analysis_json(spec: DeepAnalysisSpec | None) -> dict[str, Any] | None:
+    if spec is None:
+        return None
+    return {"result": _ref_json(spec.result), "pages": [_ref_json(p) for p in spec.pages], "question": spec.question}
+
+
+def _analysis(data: dict[str, Any] | None) -> DeepAnalysisSpec | None:
+    if not data:
+        return None
+    return DeepAnalysisSpec(
+        result=_ref(data["result"]), pages=tuple(_ref(p) for p in data["pages"]), question=data.get("question")
     )

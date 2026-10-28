@@ -73,7 +73,9 @@ class StorageSettings(BaseModel):
     access_key: SecretStr
     secret_key: SecretStr
     region: str = Field("us-east-1", min_length=1, max_length=32)
-    allowed_buckets: list[str] = Field(default_factory=lambda: ["idp-originals", "idp-derived"], max_length=10)
+    allowed_buckets: list[str] = Field(
+        default_factory=lambda: ["idp-originals", "idp-derived", "idp-templates"], max_length=10
+    )  # idp-templates: the designer's prepared samples (template-suggest)
     timeout: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
 
 

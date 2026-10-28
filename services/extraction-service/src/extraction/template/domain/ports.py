@@ -6,6 +6,7 @@ from types import TracebackType
 from typing import Any, Protocol, Self
 from uuid import UUID
 
+from extraction.template.domain.designer import Sample, SampleFile, TestRun
 from extraction.template.domain.models import DocumentType, Template, VersionState
 
 
@@ -64,9 +65,31 @@ class IdempotencyStorePort(Protocol):
     async def put(self, owner: str, key: str, response: StoredResponse) -> None: ...
 
 
+class SampleRepositoryPort(Protocol):
+    async def add(self, sample: Sample) -> None: ...
+
+    async def get(self, sample_id: UUID) -> Sample | None: ...
+
+    async def for_version(self, template_id: UUID, version: int) -> Sequence[Sample]: ...
+
+
+class TestRunRepositoryPort(Protocol):
+    async def add(self, run: TestRun) -> None: ...
+
+    async def get(self, run_id: UUID) -> TestRun | None: ...
+
+    async def latest_completed(self, template_id: UUID, version: int) -> TestRun | None: ...
+
+
 class TemplateUnitOfWorkPort(Protocol):
     @property
     def templates(self) -> TemplateRepositoryPort: ...
+
+    @property
+    def samples(self) -> SampleRepositoryPort: ...
+
+    @property
+    def test_runs(self) -> TestRunRepositoryPort: ...
 
     @property
     def document_types(self) -> DocumentTypeRepositoryPort: ...
@@ -81,3 +104,37 @@ class TemplateUnitOfWorkPort(Protocol):
     ) -> None: ...
 
     async def commit(self) -> None: ...
+
+
+class DesignerTasksPort(Protocol):
+    """Hands work to the pipeline workers: preparing a sample, running a test (Celery, ``pipeline`` queue)."""
+
+    async def prepare_sample(self, sample_id: UUID) -> None: ...
+
+    async def run_test(self, run_id: UUID) -> None: ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Suggestion:
+    fields: Sequence[dict[str, Any]]
+    tables: Sequence[dict[str, Any]]
+    model_id: str
+    prompt_version: str
+
+
+class TemplateSuggesterPort(Protocol):
+    """ai-gateway's ``template-suggest``. Raises ``SuggestionsUnavailableError`` when it can't answer."""
+
+    async def suggest(
+        self, page: SampleFile, words: Sequence[dict[str, Any]], account_id: UUID | None
+    ) -> Suggestion: ...
+
+
+class SampleStoragePort(Protocol):
+    """The prepared samples in ``idp-templates``."""
+
+    async def read_words(self, key: str) -> list[dict[str, Any]]: ...
+
+    async def delete_account(self, account_id: UUID) -> int:
+        """Delete every sample file of an account (``AccountDeleted``); returns how many."""
+        ...

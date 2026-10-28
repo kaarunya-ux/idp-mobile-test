@@ -1,19 +1,21 @@
 """The templates and document types API (IDP-03 ch. 2.10), reached through the Java gateway.
 
 Every route needs a token (SEC-02) and states its permission (SEC-03); the services make the real check. Bodies are
-one service call (RTR-02). Not here yet: suggestions (through ai-gateway's template-suggest), samples, test runs and the
-mobile bundle (step E6).
+one service call (RTR-02). The designer routes (samples, suggestions, test runs) and the mobile bundle are at the
+end; the bundle route comes first in the router, before ``/{template_id}``.
 """
 
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from extraction.core import permissions as perm
 from extraction.core.security import Principal, require_permission
 from extraction.template.api import mappers
 from extraction.template.api.schemas import (
+    AddSamplesRequest,
     CreateTemplateRequest,
     DocumentTypeListResponse,
     DocumentTypePatchRequest,
@@ -21,10 +23,14 @@ from extraction.template.api.schemas import (
     DocumentTypeResponse,
     ImportTemplateRequest,
     PublishRequest,
+    SampleListResponse,
     SaveDraftRequest,
+    SuggestionsRequest,
+    SuggestionsResponse,
     TemplatePageResponse,
     TemplateResponse,
     TemplateVersionResponse,
+    TestRunResponse,
 )
 from extraction.template.application.commands import (
     ImportTemplateCommand,
@@ -32,6 +38,7 @@ from extraction.template.application.commands import (
     SaveDraftCommand,
     VersionActionCommand,
 )
+from extraction.template.application.services.designer_service import DesignerService
 from extraction.template.application.services.document_type_service import DocumentTypeService
 from extraction.template.application.services.template_service import TemplateService
 from extraction.template.domain.models import VersionState
@@ -53,6 +60,11 @@ def provide_template_service(request: Request) -> TemplateService:
     return service
 
 
+def provide_designer_service(request: Request) -> DesignerService:
+    service: DesignerService = request.app.state.designer_service
+    return service
+
+
 def provide_document_type_service(request: Request) -> DocumentTypeService:
     service: DocumentTypeService = request.app.state.document_type_service
     return service
@@ -60,6 +72,25 @@ def provide_document_type_service(request: Request) -> DocumentTypeService:
 
 type Templates = Annotated[TemplateService, Depends(provide_template_service)]
 type DocumentTypes = Annotated[DocumentTypeService, Depends(provide_document_type_service)]
+type Designer = Annotated[DesignerService, Depends(provide_designer_service)]
+
+
+# --- Mobile bundle (before /{template_id}, which would otherwise take "bundle" as an id) --------------------------
+
+
+@templates.get("/bundle", summary="Template bundle for offline use", response_model=None, responses=_ERRORS | {304: {}})
+async def get_bundle(
+    principal: Reader,
+    service: Designer,
+    since: Annotated[str | None, Query(max_length=64)] = None,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match", max_length=80)] = None,
+) -> Response:
+    bundle = await service.bundle(mappers.caller_of(principal))
+    etag = f'"{bundle.version}"'
+    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
+    if since == bundle.version or if_none_match == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return JSONResponse(content=bundle.body, headers=headers)
 
 
 # --- Templates ------------------------------------------------------------------------------------------------
@@ -241,6 +272,75 @@ async def archive(template_id: UUID, principal: Writer, service: Templates) -> R
         VersionActionCommand(caller=mappers.caller_of(principal), idempotency_key="-", template_id=template_id)
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Designer: samples, suggestions, test runs ----------------------------------------------------------------
+
+
+@templates.post(
+    "/{template_id}/versions/{number}/samples",
+    summary="Attach samples",
+    response_model=SampleListResponse,
+    status_code=201,
+    responses=_ERRORS,
+)
+async def add_samples(
+    template_id: UUID, number: int, request: AddSamplesRequest, principal: Writer, service: Designer
+) -> SampleListResponse:
+    added = await service.add_samples(mappers.to_add_samples_command(request, principal, template_id, number))
+    return SampleListResponse(items=[mappers.to_sample_response(s) for s in added])
+
+
+@templates.get(
+    "/{template_id}/versions/{number}/samples",
+    summary="List samples",
+    response_model=SampleListResponse,
+    responses=_ERRORS,
+)
+async def list_samples(template_id: UUID, number: int, principal: Reader, service: Designer) -> SampleListResponse:
+    found = await service.list_samples(mappers.caller_of(principal), template_id, number)
+    return SampleListResponse(items=[mappers.to_sample_response(s) for s in found])
+
+
+@templates.post(
+    "/{template_id}/versions/{number}/suggestions",
+    summary="AI field suggestions",
+    response_model=SuggestionsResponse,
+    responses=_ERRORS,
+)
+async def suggest(
+    template_id: UUID, number: int, request: SuggestionsRequest, principal: Writer, service: Designer
+) -> SuggestionsResponse:
+    found = await service.suggest(mappers.caller_of(principal), template_id, number, request.sample_id)
+    return mappers.to_suggestions_response(found)
+
+
+@templates.post(
+    "/{template_id}/versions/{number}/test-runs",
+    summary="Run a test",
+    response_model=TestRunResponse,
+    status_code=202,
+    responses=_ERRORS,
+)
+async def start_test_run(
+    template_id: UUID, number: int, principal: Writer, service: Designer, response: Response
+) -> TestRunResponse:
+    run = await service.start_test_run(mappers.caller_of(principal), template_id, number)
+    response.headers["Location"] = f"/api/v1/templates/{template_id}/versions/{number}/test-runs/{run.id}"
+    return mappers.to_test_run_response(run)
+
+
+@templates.get(
+    "/{template_id}/versions/{number}/test-runs/{run_id}",
+    summary="Read a test run",
+    response_model=TestRunResponse,
+    responses=_ERRORS,
+)
+async def get_test_run(
+    template_id: UUID, number: int, run_id: UUID, principal: Writer, service: Designer
+) -> TestRunResponse:
+    run = await service.get_test_run(mappers.caller_of(principal), template_id, number, run_id)
+    return mappers.to_test_run_response(run)
 
 
 # --- Document types -------------------------------------------------------------------------------------------
