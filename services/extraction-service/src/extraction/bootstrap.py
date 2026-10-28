@@ -41,6 +41,7 @@ from extraction.pipeline.infrastructure.ai.gateway_reader import (
     GatewayPageAnalyser,
 )
 from extraction.pipeline.infrastructure.ai.vision_reader import VisionModelFieldReader
+from extraction.pipeline.infrastructure.digital.office_to_pdf import LibreOfficePdfConverter
 from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
 from extraction.pipeline.infrastructure.messaging.messages import PRODUCER
 from extraction.pipeline.infrastructure.messaging.publisher import RabbitEventPublisher
@@ -245,6 +246,7 @@ def build_worker_services(settings: Settings, sessions: SessionFactory) -> Worke
     clock, storage = SystemClock(), settings.require_storage()
     objects = S3ObjectStorage(build_s3_client(storage), max_input_size=int(storage.max_input_size))
     units, metrics = build_units(sessions, clock), PrometheusPipelineMetrics()
+    office = LibreOfficePdfConverter(binary=settings.office.binary, timeout=settings.office.timeout)
     pipeline = PipelineServices(settings, clock, SqlTemplateCatalog(sessions))
     gateway = pipeline.gateway
     extraction = RunExtractionService(
@@ -257,6 +259,7 @@ def build_worker_services(settings: Settings, sessions: SessionFactory) -> Worke
         stale_after=stale_after(settings),
         review_confidence=settings.review.confidence_threshold,
         metrics=metrics,
+        office=office,
     )
     deep_analysis = RunDeepAnalysisService(
         units,
@@ -279,6 +282,7 @@ def build_worker_services(settings: Settings, sessions: SessionFactory) -> Worke
         parse=parse_definition,
         templates_bucket=storage.bucket_templates,
         clock=clock,
+        office=office,
     )
     return WorkerServices(extraction=extraction, deep_analysis=deep_analysis, designer=designer, designer_store=store)
 

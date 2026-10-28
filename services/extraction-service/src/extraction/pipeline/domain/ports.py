@@ -49,6 +49,16 @@ class TemplateCatalogPort(Protocol):
         ...
 
 
+class OfficeConverterPort(Protocol):
+    """Word, Excel, PowerPoint and OpenDocument files become a PDF, so the digital-PDF path reads them with exact
+    positions and no OCR (IDP-03 ch. 2.6 stage 5)."""
+
+    def to_pdf(self, content: bytes) -> bytes | None:
+        """The PDF, or None when ``content`` isn't an Office document (PDFs and images pass through unchanged).
+        Raises ``FileRejectedError`` when the document can't be opened."""
+        ...
+
+
 class DigitalTextReaderPort(Protocol):
     """Reads a digital PDF's text layer (IDP-03 ch. 2.6 stage 5): no OCR for documents made by software."""
 

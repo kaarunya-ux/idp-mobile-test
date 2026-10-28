@@ -42,7 +42,16 @@ from extraction.pipeline.infrastructure.messaging.messages import (
 
 _AGGREGATE_TYPE = "extraction_item"
 _DERIVED_KEY_PARTS = 4
-_READABLE = ("application/pdf", "image/")  # what the page loader takes; it checks the real type again (FIL-03)
+# What the workers read: PDFs, images, and Office documents (turned into PDFs). The real type is checked again (FIL-03).
+_READABLE = (
+    "application/pdf",
+    "image/",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.",
+    "application/vnd.oasis.opendocument.",
+)
 
 
 def event_id_of(headers: Mapping[str, Any], envelope: EnvelopeMessage) -> UUID:
@@ -71,7 +80,9 @@ def to_accept_command(
     """Raise ``DomainError`` for a request this service can't act on; the caller turns it into ``WorkFailed``."""
     for file in payload.files:
         if not file.content_type.lower().startswith(_READABLE):
-            raise RequestRejectedError(f"Files of type {file.content_type} can't be read; send a PDF or an image.")
+            raise RequestRejectedError(
+                f"Files of type {file.content_type} can't be read; send a PDF, an image or an Office document."
+            )
     template = payload.template_id if payload.template_id not in (None, "auto") else None
     recheck = _recheck(payload.options.get("recheck"), envelope.tenant_id)
     request = ExtractionRequest(

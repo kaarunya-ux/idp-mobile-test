@@ -47,9 +47,11 @@ USER 10001
 CMD ["faststream", "run", "extraction.consumers:create_app", "--factory"]
 
 FROM runtime AS worker
-# OpenCV (headless) needs GLib at run time.
+# OpenCV (headless) needs GLib at run time. LibreOffice turns Office documents into PDFs (ADR 0008, as in
+# conversion-service); Noto fonts so Devanagari and other scripts never render as boxes.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libglib2.0-0 \
+    && apt-get install -y --no-install-recommends \
+        libglib2.0-0 libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-core fonts-noto-extra \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build-workers /app /app
 COPY models.yaml ./

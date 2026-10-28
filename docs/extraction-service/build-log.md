@@ -283,3 +283,23 @@ uv run alembic upgrade head         # against a real extraction_db, before deplo
 Result (`make check` on the dev machine, with Docker): 591 tests pass (585 unit, 6 integration), 91.6% coverage. The
 full-stack test uses the same RabbitMQ and MinIO containers as conversion-service: the stock testcontainers RabbitMQ
 (3.13) wasn't ready in time on this machine.
+
+## Entry 7: Word, Excel and PowerPoint input (2026-10-28)
+
+**Goal:** IDP-03 ch. 2.6 stage 5 for Office documents: exact text, no OCR.
+
+### What we did
+
+`LibreOfficePdfConverter` (`pipeline/infrastructure/digital/office_to_pdf.py`) turns `doc/docx/odt/xls/xlsx/ods/
+ppt/pptx/odp` (by content) into a PDF, which the digital-PDF path reads with positions. Used by the extraction run and
+the designer's samples. The worker image gets LibreOffice and the Noto fonts; `ExtractionRequested` accepts the Office
+content types. Why not python-docx/openpyxl: their text has no positions to match template boxes (ADR 0008).
+
+### Check it
+
+```bash
+cd services/extraction-service && make check
+```
+
+Result (`make check` on the dev machine, with Docker): 598 tests pass (592 unit, 6 integration), 92.9% coverage; one
+converts a hand-made Word file with the real LibreOffice and reads its text back.

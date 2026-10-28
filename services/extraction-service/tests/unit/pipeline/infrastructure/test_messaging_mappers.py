@@ -223,3 +223,15 @@ def test_refuses_deep_analysis_when_a_key_is_not_the_accounts_or_not_a_result(ch
 
     with pytest.raises(RequestRejectedError):
         to_deep_analysis_command(envelope, payload, event_id=uuid4(), derived_bucket="idp-derived")
+
+
+def test_accepts_word_and_excel_files() -> None:
+    files = [
+        {"bucket": "idp-originals", "key": f"{TENANT}/{DOC}/a", "contentType": ct}
+        for ct in (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+        )
+    ]
+
+    assert len(_command(_envelope(files=files)).request.files) == 2

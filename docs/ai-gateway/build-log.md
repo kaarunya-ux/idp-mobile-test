@@ -69,3 +69,27 @@ uv run pytest tests/integration -m integration     # Redis semaphore fairness, l
 ```
 
 Result (`make check` on the dev machine, with Docker): 85 tests pass (78 unit, 7 Redis integration), 97.5% coverage.
+
+## Entry 2: `mock-model`, the stand-in model server (2026-10-28)
+
+**Goal:** run the whole AI path (extraction -> gateway -> model) on a laptop or in CI without the GPU server
+(IDP-03 ch. 5), until the real model is pointed in.
+
+### What we did
+
+`src/mock_model/` (its own package; an import contract keeps it independent of `ai_gateway`): an OpenAI-style
+`POST /v1/chat/completions`. A recorded answer when one matches the schema name and a phrase of the question
+(`recorded/*.json`, made-up values only), otherwise the smallest answer that fits the requested JSON schema.
+`make mock-model` serves it on :4000; `docker build --target mock-model` builds its image.
+
+### Check it
+
+```bash
+cd services/ai-gateway
+make mock-model                                    # one terminal
+MODEL__BASE_URL=http://localhost:4000/v1 make run  # another: the gateway, answered by the mock
+make check
+```
+
+Result (`make check` on the dev machine, with Docker): 92 tests pass (85 unit, 7 for the mock among them: every
+gateway task passes its own answer checks against it; 7 Redis integration), 97.2% coverage.

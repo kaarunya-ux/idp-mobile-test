@@ -61,10 +61,12 @@ agreement before production.
 
 ## Not built
 
-Generic key-value and tables for unknown layouts (F-EX-12), Office text reading, a Celery pool per OCR engine
+Generic key-value and tables for unknown layouts (F-EX-12), a Celery pool per OCR engine
 (IDP-03's canvas; a scaling change, ADR 0003 item 10), Eureka registration (no approved Python client), the
 evaluation harness and golden sets (they need labelled real documents, which stay local), the 90-day cleanup of
 `pipeline_runs`, OpenTelemetry tracing.
+
+Office text reading came right after, in ADR 0008.
 
 ## Consequences
 

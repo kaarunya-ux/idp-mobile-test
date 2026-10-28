@@ -40,7 +40,8 @@ requires = ["uv_build>=0.8,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "ai_gateway"
+# mock_model is the laptop and CI stand-in for the model server (IDP-03 ch. 5); it never imports ai_gateway.
+module-name = ["ai_gateway", "mock_model"]
 
 # --- Lint and format (standard ch. 22.1) -------------------------------------
 [tool.ruff]
@@ -88,7 +89,7 @@ markers = [
 
 # --- Architecture rules (standard ch. 21.6) -----------------------------------
 [tool.importlinter]
-root_packages = ["ai_gateway"]
+root_packages = ["ai_gateway", "mock_model"]
 include_external_packages = true
 exclude_type_checking_imports = true  # imports under TYPE_CHECKING never run
 
@@ -130,7 +131,12 @@ source_modules = ["ai_gateway.ai.api"]
 forbidden_modules = ["ai_gateway.ai.infrastructure", "httpx", "redis", "boto3", "PIL"]
 
 [[tool.importlinter.contracts]]
+name = "The mock model and the gateway are independent (the mock stands in for another server)"
+type = "independence"
+modules = ["ai_gateway", "mock_model"]
+
+[[tool.importlinter.contracts]]
 name = "Runtime code imports no dev-only packages (type stubs are for TYPE_CHECKING blocks)"
 type = "forbidden"
-source_modules = ["ai_gateway"]
+source_modules = ["ai_gateway", "mock_model"]
 forbidden_modules = ["mypy_boto3_s3", "pytest", "respx"]
