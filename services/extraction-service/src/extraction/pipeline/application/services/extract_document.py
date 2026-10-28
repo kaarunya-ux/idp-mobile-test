@@ -1,5 +1,6 @@
 """Use case: CLASSIFY, READ, VERIFY and ASSEMBLE for one prepared document (IDP-03 ch. 2.6, stages 4 to 8)."""
 
+import dataclasses
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -9,7 +10,14 @@ from datetime import date
 from extraction.core.clock import Clock
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.domain.classify import classify_page
-from extraction.pipeline.domain.decisions import FieldDecision, FieldStatus, Thresholds, decide_field, decide_with_ai
+from extraction.pipeline.domain.decisions import (
+    FieldDecision,
+    FieldSource,
+    FieldStatus,
+    Thresholds,
+    decide_field,
+    decide_with_ai,
+)
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.ports import AiFieldReaderPort, ProgressReporterPort
@@ -25,6 +33,7 @@ from idp_ocr_engines.port import OcrEnginePort
 _DONE = 100
 _ENGLISH = ("en",)
 _TIE_BREAKER = "C"
+_DIGITAL = "digital"  # the slot name for a PDF's text layer
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -39,20 +48,24 @@ class AiAssist:
         return (self.reader.model_id, self.reader.prompt_version)
 
     def assist(
-        self, template: TemplateDefinition, decisions: list[FieldDecision], page: PageImage, today: date
+        self, template: TemplateDefinition, decisions: list[FieldDecision], pages: Sequence[PageImage], today: date
     ) -> tuple[list[FieldDecision], bool]:
-        """The decisions with the unsettled ones decided again by AI, and whether the AI was asked at all."""
-        unsettled = [d.key for d in decisions if _is_unresolved(d)]
-        if not unsettled:
+        """The decisions with the unsettled ones decided again by AI, and whether the AI was asked at all.
+
+        The AI is asked only when a field is unsettled (OCR first). Once it is asked, optional fields OCR found empty
+        go in the same request at no extra cost; an AI value for them still has to pass the field's rule.
+        """
+        if not any(_is_unresolved(d) for d in decisions):
             return decisions, False
+        wanted = [d.key for d in decisions if _is_unresolved(d) or d.status is FieldStatus.EMPTY]
         try:
-            values = self.reader.read_fields(template.document_type, page, unsettled)
+            values = self.reader.read_fields(template.document_type, pages, wanted)
         except AiUnavailableError:
-            return decisions, True  # asked, no answer: the fields stay NEEDS_REVIEW
+            return decisions, True  # asked, no answer: the fields stay as OCR left them
         definitions = {d.key: d for d in template.fields}
         return [
             decide_with_ai(definitions[d.key], d, values.get(d.key), confidence=self.confidence, today=today)
-            if d.key in unsettled
+            if d.key in wanted
             else d
             for d in decisions
         ], True
@@ -98,18 +111,21 @@ class ExtractDocumentService:
         """The result JSON (IDP-00 ch. 7.8). Raises ``OcrEngineError`` only if no engine could read the page."""
         started = self._monotonic()
         page = command.pages[0]
-        pages = self._read_pages(page.clean)
+        digital = command.digital_page is not None
+        # A digital PDF's text layer is exact: it is read instead of OCR (IDP-03 ch. 2.6 stage 5), as both readings
+        pages = {_DIGITAL: command.digital_page} if command.digital_page is not None else self._read_pages(page.clean)
         self._progress.report(Stage.READ, _DONE)
         first = pages[sorted(pages)[0]]
         classification = classify_page(
             self._templates, page_text=first.text, width=page.clean.width, height=page.clean.height
         )
         self._progress.report(Stage.CLASSIFY, _DONE)
-        decisions = self._decide(classification.template, pages, page.clean) if classification else []
+        decisions = self._decide(classification.template, pages, page.clean, digital=digital) if classification else []
         self._progress.report(Stage.VERIFY, _DONE)
         models: list[tuple[str, str]] = []
         if classification and self._ai is not None:
-            decisions, asked = self._ai.assist(classification.template, decisions, page.clean, self._clock.now().date())
+            sides = [p.clean for p in command.pages[:2]]  # a card's front and back
+            decisions, asked = self._ai.assist(classification.template, decisions, sides, self._clock.now().date())
             models = [self._ai.provenance] if asked else []
         self._progress.report(Stage.AI_ASSIST, _DONE)
         result = build_result(
@@ -118,7 +134,9 @@ class ExtractDocumentService:
             decisions=decisions,
             provenance=Provenance(
                 pipeline_version=self._pipeline_version,
-                engines=[(f"ocr-{slot.lower()}", self._engines[slot].engine_version) for slot in sorted(self._engines)],
+                engines=[("digital-text", "pdfium")]
+                if digital
+                else [(f"ocr-{slot.lower()}", self._engines[slot].engine_version) for slot in sorted(self._engines)],
                 duration_ms=round((self._monotonic() - started) * 1000),
                 models=models,
             ),
@@ -147,7 +165,7 @@ class ExtractDocumentService:
         return None
 
     def _decide(
-        self, template: TemplateDefinition, pages: Mapping[str, OcrPage], image: PageImage
+        self, template: TemplateDefinition, pages: Mapping[str, OcrPage], image: PageImage, *, digital: bool = False
     ) -> list[FieldDecision]:
         today = self._clock.now().date()
         shifts = {}
@@ -161,6 +179,9 @@ class ExtractDocumentService:
         tie_page = _LazyPage(lambda: self._read_tie_breaker(image))
         for definition in template.fields:
             box = field_box(definition, shifts)
+            if digital:
+                decisions.append(self._decide_digital(definition, pages[_DIGITAL], box, used, today))
+                continue
             readings: dict[str, Reading | None] = {
                 slot: self._read_field(definition, ocr, slot, box, used, today) for slot, ocr in pages.items()
             }
@@ -172,6 +193,25 @@ class ExtractDocumentService:
                     decision = decide_field(definition, readings, thresholds=self._thresholds, today=today)
             decisions.append(decision)
         return decisions
+
+    def _decide_digital(
+        self,
+        definition: FieldDefinition,
+        page: OcrPage,
+        box: Box,
+        used: dict[str, dict[str, Box]],
+        today: date,
+    ) -> FieldDecision:
+        """The text layer read once and counted as both readings: they agree by construction, so the rule alone
+        decides. Every language is read: the text layer has them all."""
+        skip = [used[_DIGITAL][key] for key in definition.excludes if key in used.setdefault(_DIGITAL, {})]
+        reading = read_field(definition, page.words, box, today=today, skip=skip, page_aspect=page.width / page.height)
+        if reading is not None:
+            used[_DIGITAL][definition.key] = reading.box
+        decision = decide_field(definition, {"A": reading, "B": reading}, thresholds=self._thresholds, today=today)
+        if decision.source is FieldSource.OCR_AGREE:
+            decision = dataclasses.replace(decision, source=FieldSource.DIGITAL_TEXT)
+        return dataclasses.replace(decision, readings={"digital": decision.readings.get("A")})
 
     def _read_field(
         self,

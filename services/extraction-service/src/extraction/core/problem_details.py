@@ -73,7 +73,9 @@ def register_exception_handlers(app: FastAPI, clock: Clock) -> None:
     async def on_domain_error(_: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, DomainError):  # the framework only routes DomainError here; this narrows the type
             raise exc
-        return respond(code=exc.code, title=exc.title, detail=exc.detail)
+        field_errors = getattr(exc, "field_errors", ())  # e.g. every invalid part of a template definition
+        problems = tuple(FieldProblem(field=field, message=message) for field, message in field_errors) or None
+        return respond(code=exc.code, title=exc.title, detail=exc.detail, errors=problems)
 
     async def on_request_invalid(_: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, RequestValidationError):

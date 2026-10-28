@@ -9,7 +9,8 @@ from extraction.pipeline.domain.jobs import ExtractionEvent, ExtractionItem, Obj
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.stages import Stage
-from idp_ocr_engines.model import PageImage
+from extraction.pipeline.domain.template import TemplateDefinition
+from idp_ocr_engines.model import OcrPage, PageImage
 
 
 class PageLoaderPort(Protocol):
@@ -38,6 +39,22 @@ class ProgressReporterPort(Protocol):
     def report(self, stage: Stage, percent: int) -> None: ...
 
 
+class TemplateCatalogPort(Protocol):
+    """The published templates a job may use: the standard ones and its account's own (IDP-03 ch. 2.6 stage 4)."""
+
+    def templates_for(self, account_id: UUID | None, template_id: str | None) -> Sequence[TemplateDefinition]:
+        """With ``template_id``, only that template when the account may use it; otherwise all of them."""
+        ...
+
+
+class DigitalTextReaderPort(Protocol):
+    """Reads a digital PDF's text layer (IDP-03 ch. 2.6 stage 5): no OCR for documents made by software."""
+
+    def read_first_page(self, content: bytes) -> OcrPage | None:
+        """The first page's words with positions, or None when it must be read with OCR (not a PDF, or a scan)."""
+        ...
+
+
 class AiFieldReaderPort(Protocol):
     """The AI fallback (IDP-03 ch. 2.6 stage 7): reads a document type's fields from the page in one request.
 
@@ -51,8 +68,11 @@ class AiFieldReaderPort(Protocol):
     @property
     def prompt_version(self) -> str: ...
 
-    def read_fields(self, document_type: str, page: PageImage, keys: Sequence[str]) -> Mapping[str, str | None]:
-        """The value of each key as printed, or None. Keys the reader doesn't know come back None."""
+    def read_fields(
+        self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str]
+    ) -> Mapping[str, str | None]:
+        """The value of each key as printed, or None. ``pages`` are the document's sides (a card's front and back);
+        the reader sees them together. Keys the reader doesn't know come back None."""
         ...
 
 

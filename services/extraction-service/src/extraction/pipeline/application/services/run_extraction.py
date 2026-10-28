@@ -41,12 +41,15 @@ from extraction.pipeline.domain.jobs import (
 )
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.ports import (
+    DigitalTextReaderPort,
     ObjectStoragePort,
     PageImageStorePort,
     ProgressReporterPort,
+    TemplateCatalogPort,
     UnitOfWorkFactory,
 )
 from extraction.pipeline.domain.stages import Stage
+from extraction.pipeline.domain.template import TemplateDefinition
 
 log = structlog.get_logger(__name__)
 
@@ -60,7 +63,15 @@ class PipelineFactory(Protocol):
 
     def prepare_service(self, progress: ProgressReporterPort) -> PrepareDocumentService: ...
 
-    def extract_service(self, progress: ProgressReporterPort) -> ExtractDocumentService: ...
+    def extract_service(
+        self, progress: ProgressReporterPort, templates: Sequence[TemplateDefinition]
+    ) -> ExtractDocumentService: ...
+
+    @property
+    def catalog(self) -> TemplateCatalogPort: ...
+
+    @property
+    def digital_reader(self) -> DigitalTextReaderPort: ...
 
 
 class RunExtractionService:
@@ -119,14 +130,15 @@ class RunExtractionService:
     def _extract(self, request: ExtractionRequest) -> ExtractionOutcome:
         progress = _ItemProgress(self, request.context.item_id)
         prepare = self._pipeline.prepare_service(progress)
-        prepared_files = [
-            prepare.prepare(PrepareDocumentCommand(content=self._storage.read_bytes(f))) for f in request.files
-        ]
+        contents = [self._storage.read_bytes(f) for f in request.files]
+        prepared_files = [prepare.prepare(PrepareDocumentCommand(content=content)) for content in contents]
+        digital = self._pipeline.digital_reader.read_first_page(contents[0])
         pages = tuple(page for result in prepared_files for page in result.pages)
         qualities = tuple(quality for result in prepared_files for quality in result.qualities)
         pages = tuple(_renumbered(pages))
-        result = self._pipeline.extract_service(progress).extract(
-            ExtractDocumentCommand(pages=pages, qualities=qualities)
+        templates = self._pipeline.catalog.templates_for(request.context.tenant_id, request.template_id)
+        result = self._pipeline.extract_service(progress, templates).extract(
+            ExtractDocumentCommand(pages=pages, qualities=qualities, digital_page=digital)
         )
         self._store_pages(request, pages, result)
         result_ref = ObjectRef(bucket=self._derived_bucket, key=request.derived_key(RESULT_NAME))

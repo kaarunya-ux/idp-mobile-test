@@ -2,7 +2,7 @@
 
 Reads documents into structured fields: standard and organisation templates, the extraction pipeline (quality gate, preparation, dual OCR, verification, AI fallback), re-checks of on-device results and the evaluation harness for OCR engines. Specified in IDP-03 ch. 2 and built to the Python Engineering Standard. Owned by the Python team (IDP-00 ch. 3.1).
 
-**Status: it runs as a service (build steps E1 and E2, 2026-10-28; see the [build log](../../docs/extraction-service/build-log.md)).** Java's `ExtractionRequested` arrives over RabbitMQ; a Celery worker reads the file from MinIO and runs the whole pipeline (SCAN, QUALITY_CHECK, PREPARE, CLASSIFY, READ with engines A and B, VERIFY, AI_ASSIST, ASSEMBLE); the page images and `result.json` go to `idp-derived`, and `JobProgressed` / `ExtractionCompleted` / `WorkFailed` go back on `idp.events` through an outbox in `extraction_db`. Standard templates: PAN and Aadhaar. **OCR is the first layer; AI is the fallback** for fields the engines can't settle, accepted only when the field's rule passes (ported from the web extraction app; ADR 0004). Templates API, designer, DL template, two-sided cards, digital-PDF reading, recheck, deep analysis and the bundle come next (build log, steps E3-E6). The old prototype is in [`ocr_test_app/`](ocr_test_app/README.md).
+**Status: it runs as a service (build steps E1 and E2, 2026-10-28; see the [build log](../../docs/extraction-service/build-log.md)).** Java's `ExtractionRequested` arrives over RabbitMQ; a Celery worker reads the file from MinIO and runs the whole pipeline (SCAN, QUALITY_CHECK, PREPARE, CLASSIFY, READ with engines A and B, VERIFY, AI_ASSIST, ASSEMBLE); the page images and `result.json` go to `idp-derived`, and `JobProgressed` / `ExtractionCompleted` / `WorkFailed` go back on `idp.events` through an outbox in `extraction_db`. Standard templates: PAN, Aadhaar and Indian driving licence. Digital PDFs are read from their text layer, with no OCR; a card's back is read together with its front by the AI fallback. **OCR is the first layer; AI is the fallback** for fields the engines can't settle, accepted only when the field's rule passes (ported from the web extraction app; ADR 0004). **Templates and document types** are stored in `extraction_db` and managed through the API below; the worker uses the published ones (standard plus the account's own). Suggestions, test runs, recheck, deep analysis and the mobile bundle come next (build log, steps E5-E6). The old prototype is in [`ocr_test_app/`](ocr_test_app/README.md).
 
 ## Processes
 
@@ -12,6 +12,7 @@ Reads documents into structured fields: standard and organisation templates, the
 | `intake` (FastStream consumer) | `faststream run extraction.consumers:create_app --factory` | `service` |
 | `relay` (outbox publisher) | `python -m extraction.outbox_relay` | `service` |
 | migrations (pre-deploy job) | `alembic upgrade head` | `service` |
+| standard templates (after migrating, safe to repeat) | `python -m extraction.seed` | `service` |
 | `worker-pipeline` (Celery) | `celery -A extraction.worker worker -Q pipeline -c 4 --prefetch-multiplier 1` | `worker` (mount the models at `/models`) |
 
 ## Run it
@@ -61,12 +62,14 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `RABBIT__URL` | — (required by intake, relay) | `amqp://user:password@host:5672/vhost` | Where `ExtractionRequested` arrives and events are published |
 | `RABBIT__PREFETCH` / `RABBIT__DELIVERY_LIMIT` | `10` / `5` | | Messages held at once / deliveries before the dead-letter queue |
 | `CELERY__BROKER_URL` | — (required by intake, workers) | `amqp://...` | The task queue between intake and the pipeline workers |
-| `CELERY__SOFT_TIME_LIMIT` / `CELERY__TIME_LIMIT` | `540` / `600` s | 30 s – 1 h | Soft: the item fails cleanly (`EXT-504-TIMEOUT-001`); hard: the task is killed |
+| `CELERY__SOFT_TIME_LIMIT` / `CELERY__TIME_LIMIT` | `540` / `600` s | 30 s – 1 h | Soft: the item fails cleanly (`EXT-504-PIPELINE-001`); hard: the task is killed |
 | `CELERY__MAX_RETRIES` | `3` | 0–10 | Retries for passing failures (database, storage) before `EXT-500-INTERNAL-001` |
 | `STORAGE__ENDPOINT` / `STORAGE__ACCESS_KEY` / `STORAGE__SECRET_KEY` | — (required by workers) | | MinIO, run by the Java team |
 | `STORAGE__BUCKET_DERIVED` | `idp-derived` | a bucket name | Page images and `result.json` (IDP-00 ch. 7.7) |
 | `STORAGE__MAX_INPUT_SIZE` / `STORAGE__TIMEOUT` | `200MiB` / `30` s | | Larger inputs are refused before downloading |
 | `OUTBOX__BATCH_SIZE` / `OUTBOX__POLL_INTERVAL` / `OUTBOX__LEASE` / `OUTBOX__MAX_ATTEMPTS` / `OUTBOX__BACKOFF_MAX` | `100` / `1` s / `60` s / `10` / `300` s | | The relay (as in conversion-service) |
+| `AUTH__ISSUERS` | `[]` (every protected route 401) | JSON list of `{"issuer": ..., "jwks_url": ...}` | Trusted token issuers (Keycloak; IDP-01) |
+| `AUTH__AUDIENCE` / `AUTH__JWKS_CACHE` / `AUTH__LEEWAY` | `idp-api` / `600` s / `30` s | | Required audience; how long keys are cached; allowed clock skew |
 | `AI_FALLBACK__URL` | — (off) | `http://10.0.3.66:8081` | The model host until ai-gateway exists; unset = unsettled fields stay NEEDS_REVIEW |
 | `AI_FALLBACK__API_KEY` / `AI_FALLBACK__MODEL` | — | | Must match the model host; the model id is sent with requests |
 | `AI_FALLBACK__TIMEOUT` / `AI_FALLBACK__MAX_EDGE_PX` | `120` s / `1280` | | Give up after this; longest image side sent |
@@ -78,7 +81,26 @@ None at runtime yet. PostgreSQL, Redis, RabbitMQ, MinIO and the AI gateway arriv
 
 ## API
 
-Only the probes so far: `GET /health/live` and `GET /health/ready`, public by design. Errors use RFC 9457 problem details with `code`, `correlationId` and `timestamp` (ERR-04); `X-Correlation-Id` is kept or created and echoed on every response. CORS is not enabled here: only the gateway answers browsers (SEC-09).
+Through the Java gateway, with a Keycloak bearer token (SEC-01: JWKS, `iss`, `aud=idp-api`, `exp`; ADR 0005). The
+account always comes from the token's `account_id` (SEC-05): another account's template answers 404. Roles become
+permissions as IDP-00 ch. 7.2 says (`ORG_ADMIN`/`ORG_OWNER` write and publish; every role reads; `PLATFORM_ADMIN`
+manages standard templates). Errors are RFC 9457 problem details.
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `GET` | `/api/v1/document-types` | `template:read` | standard + the account's own, active only |
+| `POST` / `PATCH` | `/api/v1/document-types[/{code}]` | `template:write` | `scope: STANDARD` needs `PLATFORM_ADMIN` |
+| `GET` | `/api/v1/templates` | `template:read` | `scope`, `documentType`, `q`, `state`, `cursor`, `limit` (≤ 200) |
+| `POST` | `/api/v1/templates` | `template:write` | `Idempotency-Key`; 201 + `Location` + `ETag` |
+| `GET` | `/api/v1/templates/{id}` · `/versions/{n}` | `template:read` | with `ETag` |
+| `PUT` | `/api/v1/templates/{id}/versions/{n}` | `template:write` | DRAFT only (409); `If-Match` (412 when stale) |
+| `POST` | `/api/v1/templates/{id}/versions` | `template:write` | new draft from the published version |
+| `POST` | `/api/v1/templates/{id}/versions/{n}/publish` · `/restore` | `template:publish` | publish needs `overrideReason` until test runs exist |
+| `POST` | `/api/v1/templates/{id}/clone` · `/api/v1/templates/import` | `template:write` | into the caller's account |
+| `GET` | `/api/v1/templates/{id}/export` | `template:write` | portable JSON |
+| `DELETE` | `/api/v1/templates/{id}` | `template:write` | archives; never deletes |
+
+Not yet: suggestions (needs ai-gateway, E5), samples, test runs and the mobile bundle (E6).
 
 ## Layout
 
@@ -196,7 +218,7 @@ The Hindi fields, the address and PIN fields, the extra template keys and a few 
 ## Not here yet, and why
 
 The prototype's EasyOCR engine is not ported to `idp_ocr_engines`: it was clearly the weakest in the benchmark, and which engines fill slots A, B
-and C is open decision D-1 (IDP-00 ch. 10). Still to come, each with its build step: templates and document types with their API and tokens (E4), the DL template, two-sided cards and digital-PDF reading (E3), ai-gateway (E5), recheck, deep analysis, the template bundle, metrics and integration tests against real PostgreSQL, RabbitMQ and MinIO (E6).
+and C is open decision D-1 (IDP-00 ch. 10). Still to come, each with its build step: templates and document types with their API and tokens (E4), ai-gateway (E5), recheck, deep analysis, the template bundle, metrics and integration tests against real PostgreSQL, RabbitMQ and MinIO (E6).
 
 ## Operations
 

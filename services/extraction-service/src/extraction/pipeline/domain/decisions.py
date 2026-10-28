@@ -29,6 +29,7 @@ class FieldSource(StrEnum):
     OCR_AGREE = "OCR_AGREE"
     OCR_2_OF_3 = "OCR_2_OF_3"
     AI = "AI"  # the AI fallback read it and the field's rule passed
+    DIGITAL_TEXT = "DIGITAL_TEXT"  # read from a digital PDF's text layer, no OCR
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -195,8 +196,9 @@ def decide_with_ai(
     definition: FieldDefinition, decision: FieldDecision, ai_value: str | None, *, confidence: float, today: date
 ) -> FieldDecision:
     """Stage 7 (IDP-03 ch. 2.6): an unsettled field, read again by AI. The AI value is accepted only when the field's
-    rule passes, the same rule OCR readings must pass; otherwise the field stays NEEDS_REVIEW with the AI reading kept
-    for the reviewer. The engines' readings are kept either way."""
+    rule passes, the same rule OCR readings must pass; otherwise the field keeps the status OCR gave it (NEEDS_REVIEW,
+    or EMPTY for an optional field) with the AI reading kept for the reviewer. The engines' readings are kept either
+    way."""
     readings = {**decision.readings, "ai": ai_value}
     if not ai_value:
         return dataclasses.replace(decision, readings=readings)

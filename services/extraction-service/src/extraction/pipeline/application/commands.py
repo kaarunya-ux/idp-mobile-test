@@ -7,6 +7,7 @@ from extraction.core.errors import DomainError
 from extraction.pipeline.domain.jobs import ExtractionRequest, ItemContext
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.quality import QualityScores
+from idp_ocr_engines.model import OcrPage
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -22,6 +23,7 @@ class ExtractDocumentCommand:
 
     pages: tuple[PreparedPage, ...]
     qualities: tuple[QualityScores, ...]
+    digital_page: OcrPage | None = None  # page 0's text layer, when the document is a digital PDF (no OCR then)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

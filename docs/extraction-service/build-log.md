@@ -63,7 +63,7 @@ Sumukh standardized now runs inside a worker.
 
 ```
 core/                db.py, inbox.py, outbox.py (copied from conversion-service); config: DB__, RABBIT__, CELERY__,
-                     STORAGE__, OUTBOX__, AI_FALLBACK__; errors gain `retryable`; EXT-504-TIMEOUT-001
+                     STORAGE__, OUTBOX__, AI_FALLBACK__; errors gain `retryable`; EXT-504-PIPELINE-001
 pipeline/domain/     jobs.py (request, item and its rules, events); ports for storage, page images, the unit of
                      work, the task queue and the AI reader; decisions: FieldSource.AI and decide_with_ai
 pipeline/application accept_extraction.py (intake), run_extraction.py (the worker); extract_document.py gains the
@@ -115,3 +115,97 @@ instead of environment reads, its field names mapped onto the templates' (`paren
 | `accountPolicy.masking` | The standard Aadhaar template always masks; per-account policy comes with templates |
 | Models | Not in the image: mounted at `/models`; `models.yaml` in the image pins their checksums |
 | Not tested end to end | As agreed for today; integration tests against real services come with E6 |
+
+## Entry 3: Driving licence, two-sided cards, digital PDFs (step E3, 2026-10-28)
+
+**Goal:** the three gaps E2 left: no DL template, a card's back not read, and digital PDFs going through OCR.
+
+### What we did
+
+| Part | What | Where |
+|---|---|---|
+| **Driving licence template** | `standard-driving-licence`: number, name, DOB, issue date, validity (NT and TR), address, blood group, organ donor, vehicle classes. Recognised by "Driving Licence", "DL No", "Transport Department" or "Union of India" | `pipeline/domain/standard_templates.py` |
+| **Two-sided cards** | When a card has a back, the AI fallback sees the front and back **stacked into one picture** (the web extraction app's `stack_sides`), so fields printed on the back (the Aadhaar address) can be read | `infrastructure/ai/vision_reader.py` |
+| **Optional fields to AI** | Once the AI is asked (only when a field is unsettled: OCR first), optional fields OCR found empty go in the same request; an AI value still has to pass the field's rule | `application/services/extract_document.py` (`AiAssist`) |
+| **Digital PDFs: no OCR** | A PDF with a text layer is read with PDFium (words with positions, grouped by the engine library's layout rules). Both readings are the text layer, so the rule alone decides; source `DIGITAL_TEXT`. Scans inside a PDF, and rotated pages, still go to OCR | `infrastructure/digital/pdf_text_reader.py` |
+
+### Why it's built this way
+
+| Choice | Why it matters |
+|---|---|
+| DL fields read from the whole page, anchored to captions | State formats differ and there are no labelled DL samples here, so measured regions would be guesses. Captions (`DL No`, `DOB`, `Valid Till`) are on every format. **Measure regions on real samples** before relying on OCR alone |
+| Validity dates may be in the future | The date rule refuses dates after today by default; a licence's expiry is ahead (until 2100) |
+| Stacking only for the AI | OCR templates measure regions on one side; stacking would move them. The AI reads both sides as one picture, which the web app benchmarked |
+| Words split at PDFium's spaces | Glyph boxes are tight: narrow letters ("1", "r") leave gaps that looked like word breaks. Found by a test |
+
+### Lessons
+
+- **Two tests caught two real bugs before any document did:** words split inside ("Pe rmanent", "ABCPE1 234F") and a DL's future validity date rejected as "after today".
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| DL accuracy | Caption-based OCR plus AI fallback. **Open:** a labelled DL set (state formats) to measure regions and accuracy (ML-12) |
+| Two-sided OCR | OCR reads the front; the back is read by AI. **Open:** per-side templates (Aadhaar back) with E4 |
+| Digital PDF layout | Text-layer positions are fractions of the unprepared page; a digital PDF isn't straightened, so they match |
+
+## Entry 4: Templates and document types (step E4, 2026-10-28)
+
+**Goal:** templates stop being code. They live in `extraction_db`, change through an API with versions and a publish
+step, and the worker uses whatever is published.
+
+### What we did
+
+```
+template/                         the new feature (IDP-03 ch. 2.3)
+  domain/   models.py             Template (versions DRAFT -> PUBLISHED -> RETIRED, archive, clone), DocumentType
+            definition_json.py    schema v1 JSON (IDP-03 ch. 2.5) <-> the pipeline's TemplateDefinition
+            ports.py, exceptions.py
+  application/services/           TemplateService, DocumentTypeService (async; the real permission checks)
+  infrastructure/                 orm.py, repository.py: async SQLAlchemy, unit of work, idempotency store
+  api/                            schemas, mappers, routes: /api/v1/templates, /api/v1/document-types
+core/   security.py, permissions.py   bearer tokens (PyJWT, ADR 0005), roles -> permissions (IDP-00 ch. 7.2)
+        db.py                     + the async engine for the API
+pipeline/infrastructure/persistence/template_catalog.py   the worker reads published templates (cached 60 s)
+seed.py                           python -m extraction.seed: the three standard templates and document types
+migrations/0002_templates.py      document_types, templates, template_versions, template_test_runs, idempotency_record
+```
+
+### Rules
+
+| Rule | Where |
+|---|---|
+| Only a DRAFT changes (409 `EXT-409-TEMPLATE-001`); one PUBLISHED per template (database index); restore brings back a RETIRED one | `Template`, migration 0002 |
+| Publishing needs a passing test in the last 24 h, **or an override reason** (409 `EXT-409-TEMPLATE-002`). Test runs come with E6, so today every publish carries a reason, which is recorded | `Template.publish` |
+| Standard templates: everyone reads, only `PLATFORM_ADMIN` changes. An account's own: only that account, anyone else gets 404 (SEC-05) | `TemplateService` |
+| Non-idempotent writes need `Idempotency-Key`: same key returns the first result, same key with a different body is 409 | `TemplateService._once` |
+| Saving a draft needs `If-Match` with the ETag; stale is 412 | repository `save` |
+| A definition is checked completely: every problem comes back in `errors` (422 `EXT-422-DEFINITION-001`) | `definition_json` |
+
+### Why it's built this way
+
+| Choice | Why it matters |
+|---|---|
+| The JSON round-trips the standard templates exactly (tested) | A stored template reads the same as the code one; no behaviour change when templates move to the database |
+| Unsupported schema parts are refused, not ignored (tables, CHECKSUM rules, page > 0, field types the pipeline can't read) | A template that saves but silently does nothing would be worse than a clear 422 |
+| The worker falls back to the code templates when the database has none | Nothing breaks between deploying and running the seed |
+| Async API, sync worker | RTR-04 for routes; the worker stays synchronous (CEL-01) |
+
+### Lessons
+
+- **Running the migrations on a real database caught a missing dependency:** SQLAlchemy's async mode needs `greenlet`
+  (`sqlalchemy[asyncio]`); the API would have failed at start-up.
+- **Rereading the spec caught a wrong code from E2:** IDP-03 names the time-limit error `EXT-504-PIPELINE-001`; fixed
+  before anything used it.
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| JWT library | **PyJWT** (MIT), not on the approved list: ADR 0005, **the lead's approval** |
+| Document types per organisation | `account_id` added to `document_types` (IDP-03 ch. 2.4 has no column for it; IDP-00 says organisations have their own) |
+| Categories | ID, FINANCE, TAX, LEGAL, HEALTH, EDUCATION, OTHER (IDP-03 says "ID/FINANCE/…"; confirm the list) |
+| Publish without tests | Override reason required until E6 |
+| Idempotency records | Kept; **open:** a cleanup job after 24 h |
+| `POST /document-types` | No `Idempotency-Key`: a repeat is refused as a duplicate code (409), which is safe |

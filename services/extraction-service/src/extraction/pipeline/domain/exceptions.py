@@ -88,7 +88,7 @@ class InputMissingError(DomainError):
 
 
 class ExtractionTimeoutError(DomainError):
-    """The item ran past its time limit. Reported as ``EXT-504-TIMEOUT-001``; Java may try again."""
+    """The item ran past its time limit. Reported as ``EXT-504-PIPELINE-001``; Java may try again."""
 
     code: ClassVar[ErrorCode] = ErrorCode.TIMEOUT
     title: ClassVar[str] = "Extraction took too long"

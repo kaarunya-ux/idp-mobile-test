@@ -20,3 +20,30 @@ class DomainError(Exception):
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
         self.detail = detail
+
+
+class UnauthenticatedError(DomainError):
+    code: ClassVar[ErrorCode] = ErrorCode.UNAUTHENTICATED
+    title: ClassVar[str] = "Not signed in"
+
+    def __init__(self) -> None:
+        super().__init__("A valid bearer token is required.")  # never say why: no oracle for attackers
+
+
+class PermissionDeniedError(DomainError):
+    code: ClassVar[ErrorCode] = ErrorCode.FORBIDDEN
+    title: ClassVar[str] = "Not allowed"
+
+    def __init__(self, permission: str) -> None:
+        super().__init__(f"This needs the {permission} permission.")
+
+
+class DependencyUnavailableError(DomainError):
+    """A service the request needs isn't there (no database configured, say). Reported as 503."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.DEPENDENCY_UNAVAILABLE
+    title: ClassVar[str] = "Service unavailable"
+    retryable: ClassVar[bool] = True
+
+    def __init__(self, what: str) -> None:
+        super().__init__(f"The {what} is not available right now.")
