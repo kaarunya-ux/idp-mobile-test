@@ -12,8 +12,10 @@ from extraction.pipeline.domain.jobs import (
     ExtractionItem,
     ExtractionRequest,
     ItemContext,
+    JobKind,
     ObjectRef,
 )
+from extraction.pipeline.domain.runs import PipelineRun
 from idp_ocr_engines.model import PageImage
 
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -35,7 +37,16 @@ class Database:
     items: dict[UUID, ExtractionItem] = field(default_factory=dict)
     inbox: set[UUID] = field(default_factory=set)
     events: list[ExtractionEvent] = field(default_factory=list)
+    runs: list[PipelineRun] = field(default_factory=list)
     commits: int = 0
+
+
+class _Runs:
+    def __init__(self, staged: list[PipelineRun]) -> None:
+        self._staged = staged
+
+    def add(self, run: PipelineRun) -> None:
+        self._staged.append(run)
 
 
 class _Items:
@@ -68,7 +79,9 @@ class _Unit:
         self._items = copy.deepcopy(database.items)
         self._inbox: set[UUID] = set()
         self._events: list[ExtractionEvent] = []
+        self._runs: list[PipelineRun] = []
         self.items = _Items(self._items)
+        self.runs = _Runs(self._runs)
 
     def __enter__(self) -> Self:
         return self
@@ -89,15 +102,18 @@ class _Unit:
         self._database.items = self._items
         self._database.inbox |= self._inbox
         self._database.events += self._events
+        self._database.runs += self._runs
         self._database.commits += 1
 
 
 class Tasks:
     def __init__(self) -> None:
         self.sent: list[UUID] = []
+        self.kinds: list[JobKind] = []
 
-    def enqueue(self, item_id: UUID) -> None:
+    def enqueue(self, item_id: UUID, kind: JobKind = JobKind.EXTRACTION) -> None:
         self.sent.append(item_id)
+        self.kinds.append(kind)
 
 
 class Storage:

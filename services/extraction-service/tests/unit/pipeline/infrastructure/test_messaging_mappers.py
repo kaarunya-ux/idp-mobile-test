@@ -9,14 +9,24 @@ from extraction.pipeline.domain.exceptions import RequestRejectedError
 from extraction.pipeline.domain.jobs import (
     ExtractionCompleted,
     ItemContext,
+    JobKind,
     JobProgressed,
     ObjectRef,
     ResultSummary,
     WorkFailed,
 )
 from extraction.pipeline.domain.stages import Stage
-from extraction.pipeline.infrastructure.messaging.mappers import event_id_of, to_accept_command, to_outbox_row
-from extraction.pipeline.infrastructure.messaging.messages import EnvelopeMessage, ExtractionRequestedMessage
+from extraction.pipeline.infrastructure.messaging.mappers import (
+    event_id_of,
+    to_accept_command,
+    to_deep_analysis_command,
+    to_outbox_row,
+)
+from extraction.pipeline.infrastructure.messaging.messages import (
+    DeepAnalysisRequestedMessage,
+    EnvelopeMessage,
+    ExtractionRequestedMessage,
+)
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 TENANT, JOB, ITEM, DOC = uuid4(), uuid4(), uuid4(), uuid4()
@@ -148,3 +158,68 @@ def test_marks_the_request_as_priority_when_it_came_on_the_priority_route() -> N
     command = to_accept_command(envelope, payload, event_id=uuid4(), priority=True)
 
     assert command.request.priority
+
+
+def test_maps_a_recheck_option_to_a_recheck_request() -> None:
+    recheck = {"result": {"bucket": "idp-derived", "key": f"{TENANT}/{DOC}/device/result.json"}, "fields": ["name"]}
+
+    request = _command(_envelope(options={"recheck": recheck, "language": ["en"]})).request
+
+    assert request.kind is JobKind.RECHECK
+    assert request.recheck is not None
+    assert (request.recheck.result.key, request.recheck.fields) == (recheck["result"]["key"], ("name",))
+    assert request.options == {"language": ["en"]}
+
+
+@pytest.mark.parametrize(
+    "recheck",
+    [
+        {"result": {"bucket": "idp-derived", "key": f"{uuid4()}/{DOC}/device/result.json"}},  # another account
+        {"fields": ["name"]},  # no result
+    ],
+)
+def test_refuses_a_recheck_of_another_accounts_result_or_without_one(recheck: dict) -> None:
+    with pytest.raises(RequestRejectedError):
+        _command(_envelope(options={"recheck": recheck}))
+
+
+def _deep(**changes: object) -> tuple[EnvelopeMessage, DeepAnalysisRequestedMessage]:
+    payload = {
+        "jobId": str(JOB),
+        "itemId": str(ITEM),
+        "resultKey": f"{TENANT}/{DOC}/{uuid4()}/result.json",
+        "pageKeys": [f"{TENANT}/{DOC}/first/page-0.png"],
+        "question": "Is it valid?",
+        **changes,
+    }
+    envelope = _envelope().model_copy(update={"type": "DeepAnalysisRequested", "payload": payload})
+    return envelope, DeepAnalysisRequestedMessage.model_validate(payload)
+
+
+def test_maps_deep_analysis_to_an_item_for_the_same_document() -> None:
+    envelope, payload = _deep()
+
+    command = to_deep_analysis_command(envelope, payload, event_id=uuid4(), derived_bucket="idp-derived")
+
+    request = command.request
+    assert (request.kind, request.document_id, request.files) == (JobKind.DEEP_ANALYSIS, DOC, ())
+    assert request.analysis is not None
+    assert request.analysis.question == "Is it valid?"
+    assert request.analysis.pages[0].bucket == "idp-derived"
+    assert command.message_type == "DeepAnalysisRequested"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"resultKey": "not-a-derived-key"},
+        {"resultKey": f"{TENANT}/not-a-uuid/item/result.json"},
+        {"resultKey": f"{uuid4()}/{DOC}/item/result.json"},  # another account's result
+        {"pageKeys": [f"{uuid4()}/{DOC}/first/page-0.png"]},  # another account's page
+    ],
+)
+def test_refuses_deep_analysis_when_a_key_is_not_the_accounts_or_not_a_result(changes: dict) -> None:
+    envelope, payload = _deep(**changes)
+
+    with pytest.raises(RequestRejectedError):
+        to_deep_analysis_command(envelope, payload, event_id=uuid4(), derived_bucket="idp-derived")

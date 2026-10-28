@@ -34,6 +34,10 @@ class ErrorCode(StrEnum):
     VERSION_MISMATCH = "EXT-412-VERSION-001"  # new: If-Match doesn't match the current version (optimistic lock)
     INTERNAL_ERROR = "EXT-500-INTERNAL-001"  # new, not in IDP-03 ch. 2.12: an unexpected failure (ERR-06)
     DEPENDENCY_UNAVAILABLE = "EXT-503-DEPENDENCY-001"  # new: the database isn't configured or reachable
+    AI_UNAVAILABLE = "EXT-503-AI-001"  # new: deep analysis or suggestions without an answer from ai-gateway
+    SAMPLE_NOT_READY = "EXT-409-SAMPLE-001"  # new: a template sample isn't prepared (yet), or failed
+    SAMPLES_MISSING = "EXT-409-SAMPLE-002"  # new: a test run needs samples with expected values
+    TEST_RUN_NOT_FOUND = "EXT-404-TESTRUN-001"  # new
     TIMEOUT = "EXT-504-PIPELINE-001"  # IDP-03 ch. 2.12: the item ran past its time limit
 
     @property

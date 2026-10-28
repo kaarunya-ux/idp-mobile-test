@@ -90,15 +90,42 @@ class TemplateVersionOrm(Base):
 
 
 class TemplateTestRunOrm(Base):
-    """Filled by the designer's test runs (build step E6); the table exists so publish rules can read it then."""
+    """The designer's test runs (IDP-03 ch. 2.4 and 2.9). ``samples`` is the snapshot that was tested."""
 
     __tablename__ = "template_test_runs"
+    __table_args__ = (
+        CheckConstraint("status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED')", name="status"),
+        Index(None, "template_version_id", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     template_version_id: Mapped[UUID] = mapped_column(ForeignKey("template_versions.id"))
     status: Mapped[str] = mapped_column(String(16))
-    samples: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    samples: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     report: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    definition_hash: Mapped[str] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TemplateSampleOrm(Base):
+    """A designer's sample document and its expected values (IDP-03 ch. 2.9)."""
+
+    __tablename__ = "template_samples"
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING', 'READY', 'FAILED')", name="status"),
+        Index(None, "template_version_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    template_version_id: Mapped[UUID] = mapped_column(ForeignKey("template_versions.id"))
+    files: Mapped[list[dict[str, str]]] = mapped_column(JSONB)
+    expected: Mapped[dict[str, str]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(16))
+    page_key: Mapped[str | None] = mapped_column(Text)
+    words_key: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

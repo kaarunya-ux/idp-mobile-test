@@ -22,6 +22,18 @@ from extraction.core.db import (
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.integration
+TABLES = (
+    "template_samples",
+    "template_test_runs",
+    "template_versions",
+    "templates",
+    "document_types",
+    "idempotency_record",
+    "pipeline_runs",
+    "extraction_item",
+    "outbox_event",
+    "inbox_message",
+)
 
 
 @pytest.fixture(scope="session")
@@ -45,6 +57,4 @@ async def async_sessions(database: DatabaseSettings, sessions: SessionFactory) -
     yield create_async_session_factory(engine)
     await engine.dispose()
     with sessions.begin() as session:
-        session.execute(
-            text("TRUNCATE template_test_runs, template_versions, templates, document_types, idempotency_record")
-        )
+        session.execute(text(f"TRUNCATE {', '.join(TABLES)} CASCADE"))

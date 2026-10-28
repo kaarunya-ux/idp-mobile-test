@@ -5,16 +5,28 @@ from uuid import UUID
 
 from extraction.core.security import Principal
 from extraction.template.api.schemas import (
+    AddSamplesRequest,
     CreateTemplateRequest,
     DocumentTypePatchRequest,
     DocumentTypeRequest,
     DocumentTypeResponse,
+    SampleFileBody,
+    SampleResponse,
+    SuggestionsResponse,
     TemplateResponse,
     TemplateVersionResponse,
+    TestRunResponse,
     VersionSummaryResponse,
 )
-from extraction.template.application.commands import Caller, CreateTemplateCommand, DocumentTypeCommand
+from extraction.template.application.commands import (
+    AddSamplesCommand,
+    Caller,
+    CreateTemplateCommand,
+    DocumentTypeCommand,
+)
+from extraction.template.domain.designer import Sample, SampleFile, TestRun
 from extraction.template.domain.models import DocumentType, Template, TemplateVersion
+from extraction.template.domain.ports import Suggestion
 
 
 def caller_of(principal: Principal) -> Caller:
@@ -109,3 +121,50 @@ def parse_if_match(value: str) -> int:
         return int(value.strip().removeprefix("W/").strip('"'))
     except ValueError:
         return -1
+
+
+def to_add_samples_command(
+    request: AddSamplesRequest, principal: Principal, template_id: UUID, version: int
+) -> AddSamplesCommand:
+    return AddSamplesCommand(
+        caller=caller_of(principal),
+        template_id=template_id,
+        version=version,
+        samples=tuple(
+            (tuple(SampleFile(bucket=f.bucket, key=f.key) for f in sample.files), dict(sample.expected))
+            for sample in request.samples
+        ),
+    )
+
+
+def to_sample_response(sample: Sample) -> SampleResponse:
+    return SampleResponse(
+        id=sample.id,
+        files=[SampleFileBody(bucket=f.bucket, key=f.key) for f in sample.files],
+        expected=sample.expected,
+        status=sample.status.value,
+        page_key=sample.page_key,
+        error_code=sample.error_code,
+        created_at=sample.created_at,
+    )
+
+
+def to_suggestions_response(suggestion: Suggestion) -> SuggestionsResponse:
+    return SuggestionsResponse(
+        fields=list(suggestion.fields),
+        tables=list(suggestion.tables),
+        model=suggestion.model_id,
+        prompt_version=suggestion.prompt_version,
+    )
+
+
+def to_test_run_response(run: TestRun) -> TestRunResponse:
+    return TestRunResponse(
+        id=run.id,
+        status=run.status.value,
+        samples=len(run.samples),
+        report=run.report,
+        error_code=run.error_code,
+        created_at=run.created_at,
+        finished_at=run.finished_at,
+    )

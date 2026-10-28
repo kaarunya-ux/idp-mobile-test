@@ -48,6 +48,46 @@ class ObjectRef:
             raise RequestRejectedError("An object key is empty, too long or not a safe relative path.")
 
 
+class JobKind(StrEnum):
+    """What a job item asks for (IDP-00 ch. 7.5). All three share the item lifecycle and the events."""
+
+    EXTRACTION = "EXTRACTION"
+    RECHECK = "RECHECK"  # an on-device result: the server reads the weak fields again (F-EX-15)
+    DEEP_ANALYSIS = "DEEP_ANALYSIS"  # a stored result and its pages go to the AI (F-EX-09)
+
+
+MAX_RECHECK_FIELDS = 50
+MAX_ANALYSIS_PAGES = 5  # ai-gateway's page-analysis limit
+MAX_QUESTION_LENGTH = 500  # IDP-02 ch. 3.6
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RecheckSpec:
+    """The on-device result to check, and which fields to read again (empty: every field that isn't settled)."""
+
+    result: ObjectRef
+    fields: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if len(self.fields) > MAX_RECHECK_FIELDS:
+            raise RequestRejectedError(f"A recheck takes at most {MAX_RECHECK_FIELDS} fields.")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeepAnalysisSpec:
+    """The stored result, the page images it was read from, and an optional question from the user."""
+
+    result: ObjectRef
+    pages: tuple[ObjectRef, ...]
+    question: str | None = None
+
+    def __post_init__(self) -> None:
+        if not 1 <= len(self.pages) <= MAX_ANALYSIS_PAGES:
+            raise RequestRejectedError(f"Deep analysis takes 1 to {MAX_ANALYSIS_PAGES} page images.")
+        if self.question is not None and not 1 <= len(self.question.strip()) <= MAX_QUESTION_LENGTH:
+            raise RequestRejectedError(f"The question must be 1 to {MAX_QUESTION_LENGTH} characters.")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ItemContext:
     """Which item an event is about, and the ids that travel in its envelope."""
@@ -68,12 +108,21 @@ class ExtractionRequest:
     template_id: str | None  # None: classify against the standard templates ("auto")
     options: Mapping[str, object]
     priority: bool = False  # it came on the priority route; ai-gateway serves those first (IDP-03 ch. 4.5)
+    kind: JobKind = JobKind.EXTRACTION
+    recheck: RecheckSpec | None = None  # with RECHECK
+    analysis: DeepAnalysisSpec | None = None  # with DEEP_ANALYSIS
 
     def __post_init__(self) -> None:
+        if self.kind is JobKind.DEEP_ANALYSIS:
+            if self.analysis is None or self.files:
+                raise RequestRejectedError("Deep analysis takes a stored result and its pages, not files.")
+            return
         if not 1 <= len(self.files) <= MAX_FILES:
             raise RequestRejectedError(
                 f"An extraction takes 1 to {MAX_FILES} files (a document, or a card's two sides)."
             )
+        if (self.kind is JobKind.RECHECK) != (self.recheck is not None):
+            raise RequestRejectedError("A recheck names the on-device result to check.")
 
     def derived_key(self, name: str) -> str:
         """``<accountId>/<documentId>/<jobItemId>/<name>`` in the derived bucket (IDP-00 ch. 7.7)."""

@@ -3,12 +3,13 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Protocol, Self
+from typing import Any, Protocol, Self
 from uuid import UUID
 
-from extraction.pipeline.domain.jobs import ExtractionEvent, ExtractionItem, ObjectRef
+from extraction.pipeline.domain.jobs import ExtractionEvent, ExtractionItem, JobKind, ObjectRef
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.quality import QualityScores
+from extraction.pipeline.domain.runs import PipelineRun
 from extraction.pipeline.domain.stages import Stage
 from extraction.pipeline.domain.template import TemplateDefinition
 from idp_ocr_engines.model import OcrPage, PageImage
@@ -92,6 +93,98 @@ class AiFieldReaderPort(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AiClassification:
+    document_type: str | None  # one of the candidates, or None
+    confidence: float
+    model_id: str
+    prompt_version: str
+
+
+class AiClassifierPort(Protocol):
+    """ai-gateway's ``classify``: which candidate type a page shows, when the keywords found none (stage 4)."""
+
+    def classify(self, page: ObjectRef, candidates: Sequence[str], context: AiCallContext) -> AiClassification:
+        """Raises ``AiUnavailableError`` when it can't answer; the document then stays unknown."""
+        ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AiAnalysis:
+    """Deep analysis: fields the extraction missed or got wrong, a summary and warnings (IDP-03 ch. 4.2)."""
+
+    fields: Sequence[Mapping[str, object]]
+    summary: str
+    warnings: Sequence[str]
+    model_id: str
+    prompt_version: str
+
+
+class AiAnalysisPort(Protocol):
+    """ai-gateway's ``page-analysis`` (F-EX-09)."""
+
+    def analyse(
+        self, pages: Sequence[ObjectRef], current: Mapping[str, object], question: str | None, context: AiCallContext
+    ) -> AiAnalysis:
+        """Raises ``AiUnavailableError`` when it can't answer."""
+        ...
+
+
+# --- Template designer work (samples and test runs, IDP-03 ch. 2.9) --------------------------------------------
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SampleWork:
+    id: UUID
+    template_id: UUID
+    version: int
+    account_id: UUID | None  # None: a standard template
+    files: tuple[ObjectRef, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TestSample:
+    __test__ = False
+
+    sample_id: str
+    files: tuple[ObjectRef, ...]
+    expected: Mapping[str, str]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TestRunWork:
+    __test__ = False
+
+    id: UUID
+    template_id: UUID
+    version: int
+    account_id: UUID | None
+    definition: Mapping[str, object]  # schema v1 JSON of the tested version
+    samples: Sequence[TestSample]
+
+
+class DesignerWorkStorePort(Protocol):
+    """The designer's rows, as the workers change them. Each call is its own short transaction."""
+
+    def pending_sample(self, sample_id: UUID) -> SampleWork | None:
+        """The sample if it still needs preparing, else None (prepared already, or unknown)."""
+        ...
+
+    def sample_ready(self, sample_id: UUID, *, page_key: str, words_key: str) -> None: ...
+
+    def sample_failed(self, sample_id: UUID, code: str) -> None: ...
+
+    def start_test_run(self, run_id: UUID) -> TestRunWork | None:
+        """QUEUED -> RUNNING; None when it isn't queued (a repeat, or unknown)."""
+        ...
+
+    def finish_test_run(self, run_id: UUID, report: Mapping[str, Any]) -> None:
+        """COMPLETED, with the report; the version's ``accuracy`` is updated too."""
+        ...
+
+    def fail_test_run(self, run_id: UUID, code: str) -> None: ...
+
+
 # --- Job items: storage, database, task queue (the plumbing conversion-service uses too) ------------------------
 
 
@@ -122,11 +215,18 @@ class ExtractionItemRepositoryPort(Protocol):
     def save(self, item: ExtractionItem) -> None: ...
 
 
+class PipelineRunRepositoryPort(Protocol):
+    def add(self, run: PipelineRun) -> None: ...
+
+
 class UnitOfWorkPort(Protocol):
     """One database transaction: item changes, the inbox and outbox rows commit together (OBX-01, MSG-02)."""
 
     @property
     def items(self) -> ExtractionItemRepositoryPort: ...
+
+    @property
+    def runs(self) -> PipelineRunRepositoryPort: ...
 
     def __enter__(self) -> Self: ...
 
@@ -149,6 +249,14 @@ type UnitOfWorkFactory = Callable[[], UnitOfWorkPort]
 
 
 class TaskQueuePort(Protocol):
-    def enqueue(self, item_id: UUID) -> None:
-        """Hand the item to a pipeline worker (``pipeline`` queue, IDP-03 ch. 2.2)."""
+    def enqueue(self, item_id: UUID, kind: JobKind = JobKind.EXTRACTION) -> None:
+        """Hand the item to a worker: the ``pipeline`` queue, or ``ai`` for deep analysis (IDP-03 ch. 2.2)."""
         ...
+
+
+class PipelineMetricsPort(Protocol):
+    """IDP-03 ch. 2.12's metrics, from each finished or failed item."""
+
+    def run_finished(self, run: PipelineRun) -> None: ...
+
+    def item_failed(self, code: str) -> None: ...

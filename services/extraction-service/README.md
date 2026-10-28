@@ -2,18 +2,21 @@
 
 Reads documents into structured fields: standard and organisation templates, the extraction pipeline (quality gate, preparation, dual OCR, verification, AI fallback), re-checks of on-device results and the evaluation harness for OCR engines. Specified in IDP-03 ch. 2 and built to the Python Engineering Standard. Owned by the Python team (IDP-00 ch. 3.1).
 
-**Status: it runs as a service (build steps E1 and E2, 2026-10-28; see the [build log](../../docs/extraction-service/build-log.md)).** Java's `ExtractionRequested` arrives over RabbitMQ; a Celery worker reads the file from MinIO and runs the whole pipeline (SCAN, QUALITY_CHECK, PREPARE, CLASSIFY, READ with engines A and B, VERIFY, AI_ASSIST, ASSEMBLE); the page images and `result.json` go to `idp-derived`, and `JobProgressed` / `ExtractionCompleted` / `WorkFailed` go back on `idp.events` through an outbox in `extraction_db`. Standard templates: PAN, Aadhaar and Indian driving licence. Digital PDFs are read from their text layer, with no OCR; a card's back is read together with its front by the AI fallback. **OCR is the first layer; AI is the fallback** for fields the engines can't settle, accepted only when the field's rule passes (ported from the web extraction app; ADR 0004). **Templates and document types** are stored in `extraction_db` and managed through the API below; the worker uses the published ones (standard plus the account's own). Suggestions, test runs, recheck, deep analysis and the mobile bundle come next (build log, steps E5-E6). The old prototype is in [`ocr_test_app/`](ocr_test_app/README.md).
+**Status: it runs as a service (build steps E1 and E2, 2026-10-28; see the [build log](../../docs/extraction-service/build-log.md)).** Java's `ExtractionRequested` arrives over RabbitMQ; a Celery worker reads the file from MinIO and runs the whole pipeline (SCAN, QUALITY_CHECK, PREPARE, CLASSIFY, READ with engines A and B, VERIFY, AI_ASSIST, ASSEMBLE); the page images and `result.json` go to `idp-derived`, and `JobProgressed` / `ExtractionCompleted` / `WorkFailed` go back on `idp.events` through an outbox in `extraction_db`. Standard templates: PAN, Aadhaar and Indian driving licence. Digital PDFs are read from their text layer, with no OCR; a card's back is read together with its front by the AI fallback. **OCR is the first layer; AI is the fallback** for fields the engines can't settle, accepted only when the field's rule passes (ported from the web extraction app; ADR 0004). **Templates and document types** are stored in `extraction_db` and managed through the API below; the worker uses the published ones (standard plus the account's own). **Recheck** of on-device results, **deep analysis**, AI classify for unknown documents, the **template designer** (samples, AI suggestions, test runs, a real publish gate), the **mobile template bundle**, account deletion, `pipeline_runs` and Prometheus metrics were added in step E6 (ADR 0007). The old prototype is in [`ocr_test_app/`](ocr_test_app/README.md).
 
 ## Processes
 
 | Process | Command | Image (`docker build --target`) |
 |---|---|---|
-| API (templates later; probes now) | `uvicorn extraction.main:app --port 8000` | `api` |
+| API (templates, designer, bundle, probes, `/metrics`) | `uvicorn extraction.main:app --port 8000` | `api` |
 | `intake` (FastStream consumer) | `faststream run extraction.consumers:create_app --factory` | `service` |
 | `relay` (outbox publisher) | `python -m extraction.outbox_relay` | `service` |
 | migrations (pre-deploy job) | `alembic upgrade head` | `service` |
 | standard templates (after migrating, safe to repeat) | `python -m extraction.seed` | `service` |
-| `worker-pipeline` (Celery) | `celery -A extraction.worker worker -Q pipeline -c 4 --prefetch-multiplier 1` | `worker` (mount the models at `/models`) |
+| `worker-pipeline` (Celery: extraction, recheck, template samples and test runs) | `celery -A extraction.worker worker -Q pipeline -c 4 --prefetch-multiplier 1` | `worker` (mount the models at `/models`) |
+| `worker-ai` (Celery: deep analysis, waits on ai-gateway) | `celery -A extraction.worker worker -Q ai -c 8 --prefetch-multiplier 1` | `worker` |
+
+Workers serve Prometheus metrics on `METRICS__PORT` when `PROMETHEUS_MULTIPROC_DIR` names an empty folder (one per worker).
 
 ## Run it
 
@@ -66,6 +69,7 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `CELERY__MAX_RETRIES` | `3` | 0–10 | Retries for passing failures (database, storage) before `EXT-500-INTERNAL-001` |
 | `STORAGE__ENDPOINT` / `STORAGE__ACCESS_KEY` / `STORAGE__SECRET_KEY` | — (required by workers) | | MinIO, run by the Java team |
 | `STORAGE__BUCKET_DERIVED` | `idp-derived` | a bucket name | Page images and `result.json` (IDP-00 ch. 7.7) |
+| `STORAGE__BUCKET_TEMPLATES` | `idp-templates` | a bucket name | Prepared template samples (page image and OCR words) |
 | `STORAGE__MAX_INPUT_SIZE` / `STORAGE__TIMEOUT` | `200MiB` / `30` s | | Larger inputs are refused before downloading |
 | `OUTBOX__BATCH_SIZE` / `OUTBOX__POLL_INTERVAL` / `OUTBOX__LEASE` / `OUTBOX__MAX_ATTEMPTS` / `OUTBOX__BACKOFF_MAX` | `100` / `1` s / `60` s / `10` / `300` s | | The relay (as in conversion-service) |
 | `AUTH__ISSUERS` | `[]` (every protected route 401) | JSON list of `{"issuer": ..., "jwks_url": ...}` | Trusted token issuers (Keycloak; IDP-01) |
@@ -73,13 +77,30 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `AI_GATEWAY__URL` | — (off) | `http://ai-gateway:8002` | The AI fallback (ADR 0006); unset = unsettled fields stay NEEDS_REVIEW |
 | `AI_GATEWAY__TIMEOUT` | `60` s | | Give up after this |
 | `AI_GATEWAY__CONFIDENCE` | `0.9` | 0–1 | Given to an AI value that passes its rule (ML-07: change with an evaluation) |
+| `AI_GATEWAY__MAX_FIELDS_PER_DOCUMENT` | `10` | 1–50 | More unsettled fields go to review instead of the AI (IDP-03 ch. 2.7) |
+| `AI_GATEWAY__CLASSIFY_MIN_CONFIDENCE` | `0.8` | 0–1 | An AI classification of an unknown page below this stays unknown |
+| `TEMPLATES__PUBLISH_MIN_ACCURACY` | `0.9` | 0–1 | Every required field in the last test run (IDP-03 ch. 2.9) |
+| `METRICS__PORT` / `PROMETHEUS_MULTIPROC_DIR` | `9100` / — | | The workers' metrics; the API serves `/metrics` itself |
 | `SERVICE_AUTH__TOKEN_URL` / `SERVICE_AUTH__CLIENT_SECRET` | — | | Keycloak client credentials for the gateway; needed with `AI_GATEWAY__URL` |
 | `SERVICE_AUTH__CLIENT_ID` / `SERVICE_AUTH__AUDIENCE` | `extraction-service` / `ai-gateway` | | |
 | `AI_FALLBACK__URL`, `__API_KEY`, `__MODEL`, `__TIMEOUT`, `__MAX_EDGE_PX`, `__CONFIDENCE` | — (off) | | Local only, without the gateway: the model host directly, as the web app did |
 
 ## Dependencies
 
-None at runtime yet. PostgreSQL, Redis, RabbitMQ, MinIO and the AI gateway arrive with the features that use them (IDP-03 ch. 2.2, 2.4, 2.11).
+PostgreSQL (`extraction_db`), RabbitMQ (messages and the Celery broker), MinIO (`idp-originals`, `idp-derived`,
+`idp-templates`), Keycloak (tokens), and ai-gateway (optional: without it the AI steps are off and fields stay for
+review). No Redis: IDP-03 lists `REDIS__URL`, but nothing here caches yet.
+
+## Messages
+
+| Consumes | Queue | Does |
+|---|---|---|
+| `ExtractionRequested` | `extraction-service.extraction-requested.priority` / `.standard` | an EXTRACTION item; with `options.recheck` a RECHECK item (ADR 0007) |
+| `DeepAnalysisRequested` | `extraction-service.deep-analysis-requested` | a DEEP_ANALYSIS item on the `ai` worker |
+| `AccountDeleted` | `extraction-service.account-deleted` (`idp.events`, `account.deleted`) | archives the account's templates and types, deletes its samples |
+
+Publishes `JobProgressed`, `ExtractionCompleted` and `WorkFailed` (IDP-00 ch. 7.6) through the outbox. `AccountChanged`
+isn't consumed: the masking policy arrives with every request, so there is nothing to cache.
 
 ## API
 
@@ -97,12 +118,15 @@ manages standard templates). Errors are RFC 9457 problem details.
 | `GET` | `/api/v1/templates/{id}` · `/versions/{n}` | `template:read` | with `ETag` |
 | `PUT` | `/api/v1/templates/{id}/versions/{n}` | `template:write` | DRAFT only (409); `If-Match` (412 when stale) |
 | `POST` | `/api/v1/templates/{id}/versions` | `template:write` | new draft from the published version |
-| `POST` | `/api/v1/templates/{id}/versions/{n}/publish` · `/restore` | `template:publish` | publish needs `overrideReason` until test runs exist |
+| `POST` | `/api/v1/templates/{id}/versions/{n}/publish` · `/restore` | `template:publish` | publish needs a passing test run on this definition from the last 24 h, or `overrideReason` |
+| `POST` / `GET` | `/api/v1/templates/{id}/versions/{n}/samples` | `template:write` / `template:read` | up to 20 per version; files from the account's own uploads; prepared by a worker |
+| `POST` | `/api/v1/templates/{id}/versions/{n}/suggestions` | `template:write` | AI field suggestions from a prepared sample; not saved |
+| `POST` / `GET` | `/api/v1/templates/{id}/versions/{n}/test-runs[/{runId}]` | `template:write` | 202, then the report: per-field accuracy and confusions |
+| `GET` | `/api/v1/templates/bundle?since=` | `template:read` | mobile bundle: published definitions, rules, thresholds; `ETag`, `304` |
 | `POST` | `/api/v1/templates/{id}/clone` · `/api/v1/templates/import` | `template:write` | into the caller's account |
 | `GET` | `/api/v1/templates/{id}/export` | `template:write` | portable JSON |
 | `DELETE` | `/api/v1/templates/{id}` | `template:write` | archives; never deletes |
 
-Not yet: suggestions (ai-gateway's `template-suggest` is ready), samples, test runs and the mobile bundle (E6).
 
 ## Layout
 
@@ -220,7 +244,10 @@ The Hindi fields, the address and PIN fields, the extra template keys and a few 
 ## Not here yet, and why
 
 The prototype's EasyOCR engine is not ported to `idp_ocr_engines`: it was clearly the weakest in the benchmark, and which engines fill slots A, B
-and C is open decision D-1 (IDP-00 ch. 10). Still to come, each with its build step: recheck, deep analysis, the template bundle, metrics and integration tests against real PostgreSQL, RabbitMQ and MinIO (E6).
+and C is open decision D-1 (IDP-00 ch. 10). Also not built (ADR 0007): the generic key-value and table path for unknown
+layouts (F-EX-12), Office text reading, one Celery pool per OCR engine (a scaling change), Eureka registration, the
+evaluation harness with golden sets (needs labelled real documents, which stay local), and the 90-day cleanup of
+`pipeline_runs`.
 
 ## Operations
 

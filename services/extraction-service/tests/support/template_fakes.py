@@ -7,6 +7,7 @@ from typing import Self
 from uuid import UUID
 
 from extraction.template.application.commands import Caller
+from extraction.template.domain.designer import Sample, TestRun, TestRunStatus
 from extraction.template.domain.exceptions import VersionMismatchError
 from extraction.template.domain.models import DocumentType, Template
 from extraction.template.domain.ports import StoredResponse, TemplateQuery
@@ -28,6 +29,8 @@ class Store:
     templates: dict[UUID, Template] = field(default_factory=dict)
     types: list[DocumentType] = field(default_factory=list)
     keys: dict[tuple[str, str], StoredResponse] = field(default_factory=dict)
+    samples: dict[UUID, Sample] = field(default_factory=dict)
+    runs: dict[UUID, TestRun] = field(default_factory=dict)
 
 
 class _Templates:
@@ -98,6 +101,39 @@ class _Keys:
         self._staged[(owner, key)] = response
 
 
+class _Samples:
+    def __init__(self, staged: dict[UUID, Sample]) -> None:
+        self._staged = staged
+
+    async def add(self, sample: Sample) -> None:
+        self._staged[sample.id] = sample
+
+    async def get(self, sample_id: UUID) -> Sample | None:
+        return self._staged.get(sample_id)
+
+    async def for_version(self, template_id: UUID, version: int) -> list[Sample]:
+        return [s for s in self._staged.values() if (s.template_id, s.version) == (template_id, version)]
+
+
+class _Runs:
+    def __init__(self, staged: dict[UUID, TestRun]) -> None:
+        self._staged = staged
+
+    async def add(self, run: TestRun) -> None:
+        self._staged[run.id] = run
+
+    async def get(self, run_id: UUID) -> TestRun | None:
+        return self._staged.get(run_id)
+
+    async def latest_completed(self, template_id: UUID, version: int) -> TestRun | None:
+        done = [
+            r
+            for r in self._staged.values()
+            if (r.template_id, r.version) == (template_id, version) and r.status is TestRunStatus.COMPLETED
+        ]
+        return max(done, key=lambda r: r.finished_at or NOW) if done else None
+
+
 class Unit:
     """Copies the store on entry and writes back on commit, like a transaction."""
 
@@ -108,6 +144,8 @@ class Unit:
         self._templates = copy.deepcopy(self._store.templates)
         self._types = copy.deepcopy(self._store.types)
         self._keys = dict(self._store.keys)
+        self._samples = copy.deepcopy(self._store.samples)
+        self._runs = copy.deepcopy(self._store.runs)
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -125,8 +163,17 @@ class Unit:
     def idempotency(self) -> _Keys:
         return _Keys(self._keys)
 
+    @property
+    def samples(self) -> _Samples:
+        return _Samples(self._samples)
+
+    @property
+    def test_runs(self) -> _Runs:
+        return _Runs(self._runs)
+
     async def commit(self) -> None:
         self._store.templates, self._store.types, self._store.keys = self._templates, self._types, self._keys
+        self._store.samples, self._store.runs = self._samples, self._runs
 
 
 def standard_types() -> list[DocumentType]:

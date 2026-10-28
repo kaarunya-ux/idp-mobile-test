@@ -104,3 +104,57 @@ class DocumentTypeResponse(_Body):
 
 class DocumentTypeListResponse(_Body):
     items: list[DocumentTypeResponse]
+
+
+# --- Designer: samples, suggestions, test runs, bundle (IDP-03 ch. 2.9 and 2.10) ---------------------------------
+
+
+class SampleFileBody(_Body):
+    bucket: str = Field(min_length=3, max_length=63)
+    key: str = Field(min_length=1, max_length=1024)
+
+
+class SampleBody(_Body):
+    files: list[SampleFileBody] = Field(min_length=1, max_length=2)  # a document, or a card's two sides
+    expected: dict[str, str] = Field(default_factory=dict, max_length=100)  # field key -> the right value
+
+
+class AddSamplesRequest(_Body):
+    samples: list[SampleBody] = Field(min_length=1, max_length=20)
+
+
+class SampleResponse(_Body):
+    id: UUID
+    files: list[SampleFileBody]
+    expected: dict[str, str]
+    status: str
+    page_key: str | None
+    error_code: str | None
+    created_at: datetime
+
+
+class SampleListResponse(_Body):
+    items: list[SampleResponse]
+
+
+class SuggestionsRequest(_Body):
+    sample_id: UUID | None = None  # default: the first ready sample
+
+
+class SuggestionsResponse(_Body):
+    fields: list[dict[str, Any]]
+    tables: list[dict[str, Any]]
+    model: str
+    prompt_version: str
+
+
+class TestRunResponse(_Body):
+    __test__ = False
+
+    id: UUID
+    status: str
+    samples: int
+    report: dict[str, Any] | None
+    error_code: str | None
+    created_at: datetime
+    finished_at: datetime | None

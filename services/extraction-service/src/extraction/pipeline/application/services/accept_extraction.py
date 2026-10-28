@@ -35,7 +35,7 @@ class AcceptExtractionService:
                 action = IntakeAction.ENQUEUE if item and item.status is ItemStatus.QUEUED else IntakeAction.SKIP
             unit.commit()
         if action is IntakeAction.ENQUEUE:
-            self._tasks.enqueue(item_id)
+            self._tasks.enqueue(item_id, command.request.kind)
         log.info("extraction_request_accepted", item_id=str(item_id), action=action)
         return action
 

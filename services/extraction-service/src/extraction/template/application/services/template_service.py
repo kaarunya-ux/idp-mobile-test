@@ -25,6 +25,7 @@ from uuid import UUID
 from extraction.core.clock import Clock
 from extraction.core.errors import PermissionDeniedError
 from extraction.core.ids import new_id
+from extraction.pipeline.domain.evaluation import report_passes
 from extraction.template.application.commands import (
     Caller,
     CreateTemplateCommand,
@@ -34,6 +35,7 @@ from extraction.template.application.commands import (
     VersionActionCommand,
 )
 from extraction.template.domain.definition_json import check_definition
+from extraction.template.domain.designer import definition_hash
 from extraction.template.domain.exceptions import (
     DefinitionInvalidError,
     DocumentTypeNotFoundError,
@@ -57,15 +59,16 @@ class TemplatePage:
 
 
 class TemplateService:
-    def __init__(self, units: UnitFactory, clock: Clock) -> None:
+    def __init__(self, units: UnitFactory, clock: Clock, *, publish_min_accuracy: float = 0.9) -> None:
         self._units = units
         self._clock = clock
+        self._publish_min_accuracy = publish_min_accuracy  # IDP-03 ch. 2.9: every required field at 90 %
 
     # --- Reads --------------------------------------------------------------------------------------------
 
     async def get(self, caller: Caller, template_id: UUID) -> Template:
         async with self._units() as unit:
-            return _visible(await unit.templates.get(template_id), caller)
+            return visible_template(await unit.templates.get(template_id), caller)
 
     async def get_version(self, caller: Caller, template_id: UUID, number: int) -> tuple[Template, TemplateVersion]:
         template = await self.get(caller, template_id)
@@ -106,7 +109,7 @@ class TemplateService:
         caller = command.caller
         if command.standard and not caller.is_platform_admin:
             raise PermissionDeniedError(_STANDARD_WRITE)
-        account = None if command.standard else _account(caller)
+        account = None if command.standard else account_of(caller)
         definition = check_definition(command.definition, document_type=command.document_type)
 
         async def action(unit: TemplateUnitOfWorkPort) -> Template:
@@ -130,7 +133,7 @@ class TemplateService:
 
     async def save_draft(self, command: SaveDraftCommand) -> Template:
         async with self._units() as unit:
-            template = _writable(await unit.templates.get(command.template_id), command.caller)
+            template = writable_template(await unit.templates.get(command.template_id), command.caller)
             definition = check_definition(command.definition, document_type=template.document_type_code)
             template.save_draft(command.number, definition, self._clock.now())
             await unit.templates.save(template, expected_row_version=command.expected_row_version)
@@ -141,7 +144,19 @@ class TemplateService:
         return await self._change(command, "new-version", lambda t: t.new_version(self._clock.now()))
 
     async def publish(self, command: VersionActionCommand) -> Template:
+        """Publishing needs a passing test run on this exact definition from the last 24 hours, or a reason."""
         number = _number(command)
+        async with self._units() as unit:
+            template = visible_template(await unit.templates.get(command.template_id), command.caller)
+            run = await unit.test_runs.latest_completed(template.id, number)
+        definition = template.version(number).definition
+        passed = (
+            run is not None
+            and run.definition_hash == definition_hash(definition)
+            and run.report is not None
+            and report_passes(run.report, min_accuracy=self._publish_min_accuracy)
+        )
+        tested_at = run.finished_at if passed and run is not None else None
         return await self._change(
             command,
             "publish",
@@ -149,10 +164,30 @@ class TemplateService:
                 number,
                 actor=command.caller.actor_id,
                 now=self._clock.now(),
-                tested_at=None,  # test runs come with the designer back end (build step E6)
+                tested_at=tested_at,
                 override_reason=command.override_reason,
             ),
         )
+
+    async def archive_account(self, account_id: UUID) -> int:
+        """``AccountDeleted``: archive every template of the account and switch off its document types."""
+        archived = 0
+        async with self._units() as unit:
+            query = TemplateQuery(
+                account_id=account_id, scope="ORG", document_type=None, text=None, state=None, after=None, limit=10_000
+            )
+            for template in await unit.templates.find(query):
+                before = template.row_version
+                template.archive(self._clock.now())
+                if template.row_version != before:
+                    await unit.templates.save(template, expected_row_version=before)
+                    archived += 1
+            for document_type in await unit.document_types.list_visible(account_id):
+                if document_type.account_id == account_id and document_type.active:
+                    document_type.active = False
+                    await unit.document_types.save(document_type)
+            await unit.commit()
+        return archived
 
     async def restore(self, command: VersionActionCommand) -> Template:
         number = _number(command)
@@ -163,7 +198,7 @@ class TemplateService:
     async def archive(self, command: VersionActionCommand) -> Template:
         """Idempotent by nature (DELETE): archiving twice is the same as once."""
         async with self._units() as unit:
-            template = _writable(await unit.templates.get(command.template_id), command.caller)
+            template = writable_template(await unit.templates.get(command.template_id), command.caller)
             before = template.row_version
             template.archive(self._clock.now())
             await unit.templates.save(template, expected_row_version=before)
@@ -172,10 +207,10 @@ class TemplateService:
 
     async def clone(self, command: VersionActionCommand) -> Template:
         """Copy a template the caller can see into the caller's account, as a new draft (IDP-03 ch. 2.10)."""
-        account = _account(command.caller)
+        account = account_of(command.caller)
 
         async def action(unit: TemplateUnitOfWorkPort) -> Template:
-            source = _visible(await unit.templates.get(command.template_id), command.caller)
+            source = visible_template(await unit.templates.get(command.template_id), command.caller)
             copy = source.clone(id=new_id(), account_id=account, actor=command.caller.actor_id, now=self._clock.now())
             await unit.templates.add(copy)
             return copy
@@ -203,7 +238,7 @@ class TemplateService:
 
     async def _change(self, command: VersionActionCommand, op: str, change: Callable[[Template], object]) -> Template:
         async def action(unit: TemplateUnitOfWorkPort) -> Template:
-            template = _writable(await unit.templates.get(command.template_id), command.caller)
+            template = writable_template(await unit.templates.get(command.template_id), command.caller)
             before = template.row_version
             change(template)
             await unit.templates.save(template, expected_row_version=before)
@@ -226,7 +261,7 @@ class TemplateService:
             if stored is not None:
                 if stored.request_hash != digest:
                     raise IdempotencyKeyReusedError
-                return _visible(await unit.templates.get(UUID(stored.body["templateId"])), caller)
+                return visible_template(await unit.templates.get(UUID(stored.body["templateId"])), caller)
             template = await action(unit)
             await unit.idempotency.put(
                 caller.owner, key, StoredResponse(request_hash=digest, body={"templateId": str(template.id)})
@@ -235,20 +270,20 @@ class TemplateService:
         return template
 
 
-def _visible(template: Template | None, caller: Caller) -> Template:
+def visible_template(template: Template | None, caller: Caller) -> Template:
     if template is None or not (template.is_standard or template.account_id == caller.account_id):
         raise TemplateNotFoundError  # another account's template looks absent (SEC-05)
     return template
 
 
-def _writable(template: Template | None, caller: Caller) -> Template:
-    found = _visible(template, caller)
+def writable_template(template: Template | None, caller: Caller) -> Template:
+    found = visible_template(template, caller)
     if found.is_standard and not caller.is_platform_admin:
         raise PermissionDeniedError(_STANDARD_WRITE)
     return found
 
 
-def _account(caller: Caller) -> UUID:
+def account_of(caller: Caller) -> UUID:
     if caller.account_id is None:
         raise TemplateStateError("Your sign-in has no account yet; finish onboarding first.")
     return caller.account_id

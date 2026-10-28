@@ -26,6 +26,7 @@ class ExtractDocumentCommand:
     qualities: tuple[QualityScores, ...]
     digital_page: OcrPage | None = None  # page 0's text layer, when the document is a digital PDF (no OCR then)
     ai_context: AiCallContext | None = None  # without it the AI step is skipped (fields stay for review)
+    template_forced: bool = False  # the request named its template: use it without classifying (stage 4)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -1,6 +1,6 @@
 """Table mapping for job items (DAO-01, DAO-02). ``*Orm`` objects never leave this package (OBJ-02).
 
-The rest of ``extraction_db`` (document types, templates, pipeline runs; IDP-03 ch. 2.4) comes with build step E4.
+Templates and document types are mapped in ``extraction.template.infrastructure.orm``.
 """
 
 from datetime import datetime
@@ -33,3 +33,21 @@ class ExtractionItemOrm(Base):
     error_code: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PipelineRunOrm(Base):
+    """IDP-03 ch. 2.4: timings and decision counts per finished item, kept 90 days (a cleanup job deletes older)."""
+
+    __tablename__ = "pipeline_runs"
+
+    job_item_id: Mapped[UUID] = mapped_column(primary_key=True)
+    account_id: Mapped[UUID] = mapped_column(index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    document_type_code: Mapped[str | None] = mapped_column(String(64))
+    template_id: Mapped[str | None] = mapped_column(String(64))
+    template_version: Mapped[int | None] = mapped_column(Integer)
+    stages: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    engine_results: Mapped[dict[str, Any]] = mapped_column(JSONB)  # "<source>/<status>" -> count
+    ai_calls: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

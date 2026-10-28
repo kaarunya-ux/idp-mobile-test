@@ -233,3 +233,53 @@ cd services/extraction-service && make check
 ```
 
 Result (`make check` on the dev machine, with Docker): 519 tests pass, 87% coverage.
+
+## Entry 6: The rest of IDP-03 ch. 2: recheck, deep analysis, the designer, the bundle (step E6, 2026-10-28)
+
+**Goal:** every job type and API IDP-00 and IDP-03 give extraction-service, so the service is complete. The open
+contract points are in ADR 0007.
+
+### What we did
+
+| Piece | What it does | Where |
+|---|---|---|
+| Job kinds | EXTRACTION, RECHECK, DEEP_ANALYSIS share one item lifecycle and the same events | `jobs.py`, `item_lifecycle.py` |
+| Recheck | `ExtractionRequested` + `options.recheck`: full pipeline on the original, the device's settled fields kept | `merging.merge_recheck`, `run_extraction.py` |
+| Deep analysis | `DeepAnalysisRequested` -> `ai` queue -> ai-gateway `page-analysis` -> `result.analysis` (accepted fields untouched) | `run_deep_analysis.py`, `consumer.py` |
+| AI classify | an unknown page goes to ai-gateway `classify`; ≥ 0.8 picks the template | `extract_document.AiAssist.classify` |
+| AI field cap | more than 10 unsettled fields: review, no AI call | `AiAssist.assist` |
+| Named template | a request's `templateId` is used without classifying | `ExtractDocumentCommand.template_forced` |
+| Samples | `POST/GET .../samples`; a worker stores page 0 and engine A's words in `idp-templates` | `designer_service.py`, `designer_work.py` |
+| Suggestions | `POST .../suggestions`: the prepared sample to ai-gateway `template-suggest` | `designer_adapters.py` |
+| Test runs | `POST/GET .../test-runs`: every ready sample read with the tested version, scored per field | `evaluation.py`, `designer_work.py` |
+| Publish gate | a passing run (same definition, < 24 h, required fields ≥ 90 %) or a reason | `TemplateService.publish` |
+| Mobile bundle | `GET /api/v1/templates/bundle`: published definitions, rule ids, thresholds; ETag / `since` -> 304 | `DesignerService.bundle` |
+| Account deletion | `AccountDeleted`: templates archived, types off, samples deleted | `consumers.py`, `TemplateService.archive_account` |
+| `pipeline_runs` | stage timings, decision counts, AI calls per finished item | `runs.py`, `repository.py` |
+| Metrics | IDP-03 ch. 2.12 counters and histograms; `/metrics` on the API, multiprocess in the workers | `metrics.py`, `worker.py`, `main.py` |
+| Migration 0003 | `template_samples`, `pipeline_runs`, test-run columns | `migrations/versions/0003_designer_and_runs.py` |
+| Integration tests | the designer on Postgres; a request through RabbitMQ, the worker, MinIO and the outbox | `tests/integration/` |
+
+### Rules
+
+| Rule | Where |
+|---|---|
+| SEC-05: keys in messages and sample files must be the account's own | `mappers._own`, `designer.check_sample_files` |
+| TX-03: tasks are sent after the commit | `DesignerService` |
+| CEL-03: every task checks its row first, so a repeat does nothing | `pending_sample`, `start_test_run`, `ItemLifecycle.start` |
+| ML-07: the new thresholds are settings | `AI_GATEWAY__MAX_FIELDS_PER_DOCUMENT`, `__CLASSIFY_MIN_CONFIDENCE`, `TEMPLATES__PUBLISH_MIN_ACCURACY` |
+| MIG-02, MIG-05: written by hand, additive only | migration 0003 |
+| DEP-02: `prometheus-client`, `celery`, `boto3` move to the main list (all approved) | `pyproject.toml` |
+
+### Check it
+
+```bash
+cd services/extraction-service
+uv sync --all-extras
+make check                          # includes the integration tests: needs Docker
+uv run alembic upgrade head         # against a real extraction_db, before deploying
+```
+
+Result (`make check` on the dev machine, with Docker): 591 tests pass (585 unit, 6 integration), 91.6% coverage. The
+full-stack test uses the same RabbitMQ and MinIO containers as conversion-service: the stock testcontainers RabbitMQ
+(3.13) wasn't ready in time on this machine.

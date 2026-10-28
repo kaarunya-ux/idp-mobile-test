@@ -56,7 +56,7 @@ Callers treat every 5xx as "AI unavailable": the fields stay for review, and the
 | `CAPS__GUEST`, `CAPS__PERSONAL`, `CAPS__CORPORATE` | 10, 30, 5000 | Calls per account per UTC day |
 | `BREAKER__FAILURES`, `BREAKER__WINDOW`, `BREAKER__RESET_AFTER` | 5, 30 s, 30 s | |
 | `REDIS__URL` | none | Without it the AI routes answer 503 |
-| `STORAGE__ENDPOINT`, `STORAGE__ACCESS_KEY`, `STORAGE__SECRET_KEY`, `STORAGE__REGION`, `STORAGE__ALLOWED_BUCKETS`, `STORAGE__TIMEOUT` | none, none, none, `us-east-1`, `["idp-originals","idp-derived"]`, 30 s | Without them the AI routes answer 503 |
+| `STORAGE__ENDPOINT`, `STORAGE__ACCESS_KEY`, `STORAGE__SECRET_KEY`, `STORAGE__REGION`, `STORAGE__ALLOWED_BUCKETS`, `STORAGE__TIMEOUT` | none, none, none, `us-east-1`, `["idp-originals","idp-derived","idp-templates"]`, 30 s | Without them the AI routes answer 503 |
 | `AUTH__ISSUERS` | `[]` | JSON list of `{issuer, jwks_url}` |
 | `AUTH__AUDIENCE`, `AUTH__ALLOWED_CLIENTS` | `ai-gateway`, `["extraction-service","conversion-service"]` | |
 

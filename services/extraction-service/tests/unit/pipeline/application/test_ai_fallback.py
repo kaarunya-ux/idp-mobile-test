@@ -5,13 +5,15 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
+import pytest
+
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.application.services.extract_document import AiAssist, ExtractDocumentService
 from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.domain.models import PreparationSteps, PreparedPage
-from extraction.pipeline.domain.ports import AiCallContext, AiReading
+from extraction.pipeline.domain.ports import AiCallContext, AiClassification, AiReading
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.stages import Stage
 from extraction.pipeline.domain.standard_templates import STANDARD_TEMPLATES
@@ -266,3 +268,74 @@ def test_reads_a_digital_pdf_from_its_text_layer_without_ocr() -> None:
     assert (engines["A"].page_reads, engines["B"].page_reads) == (0, 0)  # no OCR at all
     assert (pan["value"], pan["source"], pan["status"]) == ("ABCPE1234F", "DIGITAL_TEXT", "ACCEPTED")
     assert result["provenance"]["engines"] == [{"id": "digital-text", "version": "pdfium"}]
+
+
+class FakeClassifier:
+    def __init__(self, document_type: str | None, confidence: float = 0.9, *, down: bool = False) -> None:
+        self.document_type, self.confidence, self.down, self.asked = document_type, confidence, down, []
+
+    def classify(self, page: ObjectRef, candidates: Sequence[str], context: AiCallContext) -> AiClassification:
+        self.asked.append((page, list(candidates)))
+        if self.down:
+            raise AiUnavailableError("down")
+        return AiClassification(
+            document_type=self.document_type, confidence=self.confidence, model_id="vl", prompt_version="classify.v1"
+        )
+
+
+def _unknown_page_engines() -> dict[str, FakeEngine]:
+    lines = [(0.1, 0.2, "SOMETHING"), (0.1, 0.4, "ABCPE1234F"), (0.1, 0.6, "27/02/2002")]
+    return {"A": FakeEngine("A", lines), "B": FakeEngine("B", lines)}
+
+
+def test_asks_the_ai_which_type_it_is_when_the_keywords_match_nothing() -> None:
+    classifier = FakeClassifier("PAN_CARD")
+    ai = AiAssist(reader=FakeAi(), confidence=0.9, classifier=classifier)
+
+    result = service(_unknown_page_engines(), Progress(), ai=ai).extract(command())
+
+    assert result["documentType"] == {"code": "PAN_CARD", "confidence": 0.9}
+    assert classifier.asked[0][0] == CONTEXT.page_refs[0]
+    assert "PAN_CARD" in classifier.asked[0][1]
+    assert {"id": "vl", "promptVersion": "classify.v1"} in result["provenance"]["models"]
+
+
+@pytest.mark.parametrize(
+    "classifier", [FakeClassifier("PAN_CARD", 0.5), FakeClassifier(None), FakeClassifier("X", down=True)]
+)
+def test_leaves_the_document_unknown_when_the_ai_is_unsure_or_down(classifier: FakeClassifier) -> None:
+    ai = AiAssist(reader=FakeAi(), confidence=0.9, classifier=classifier)
+
+    result = service(_unknown_page_engines(), Progress(), ai=ai).extract(command())
+
+    assert result["documentType"]["code"] is None
+    assert result["fields"] == []
+
+
+def test_does_not_ask_the_ai_when_more_fields_are_unsettled_than_allowed() -> None:
+    reader = FakeAi({"pan_number": "ABCPE1234F"})
+
+    service(_disagreeing_engines(), Progress(), ai=AiAssist(reader=reader, confidence=0.9, max_fields=0)).extract(
+        command()
+    )
+
+    assert reader.asked == []
+
+
+def test_uses_the_named_template_without_classifying_when_the_request_names_one() -> None:
+    pan = next(t for t in STANDARD_TEMPLATES if t.document_type == "PAN_CARD")
+    base = command()
+    forced = ExtractDocumentCommand(pages=base.pages, qualities=base.qualities, template_forced=True)
+    engines = _unknown_page_engines()
+    extractor = ExtractDocumentService(
+        engines=engines,
+        templates=[pan],
+        thresholds=Thresholds(name_similarity=0.95, review_confidence=0.85),
+        clock=FixedClock(),
+        pipeline_version="0.1.0",
+        progress=Progress(),
+    )
+
+    result = extractor.extract(forced)
+
+    assert result["documentType"] == {"code": "PAN_CARD", "confidence": 1.0}
