@@ -20,9 +20,10 @@ from celery import Celery
 from faststream.rabbit import RabbitBroker
 
 from extraction.core.clock import Clock, SystemClock
-from extraction.core.config import Settings, StorageSettings
+from extraction.core.config import MissingSettingsError, ServiceAuthSettings, Settings, StorageSettings
 from extraction.core.db import SessionFactory, create_db_engine, create_session_factory
 from extraction.core.outbox import OutboxRelay
+from extraction.core.service_auth import ServiceTokenProvider
 from extraction.pipeline.application.services.accept_extraction import AcceptExtractionService
 from extraction.pipeline.application.services.extract_document import AiAssist, ExtractDocumentService
 from extraction.pipeline.application.services.prepare_document import PrepareDocumentService
@@ -31,6 +32,7 @@ from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.ports import ProgressReporterPort, UnitOfWorkFactory
 from extraction.pipeline.domain.quality import QualityThresholds
 from extraction.pipeline.domain.template import TemplateDefinition
+from extraction.pipeline.infrastructure.ai.gateway_reader import GatewayFieldReader
 from extraction.pipeline.infrastructure.ai.vision_reader import VisionModelFieldReader
 from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
 from extraction.pipeline.infrastructure.messaging.messages import PRODUCER
@@ -154,9 +156,19 @@ def _engines(settings: Settings, registry: ModelRegistry, limits: RuntimeLimits)
 
 
 def build_ai_assist(settings: Settings) -> AiAssist | None:
-    """The AI fallback, or None when ``AI_FALLBACK__URL`` is unset (unsettled fields then stay NEEDS_REVIEW)."""
+    """The AI fallback: ai-gateway when ``AI_GATEWAY__URL`` is set; on a laptop without it, the model host directly
+    (``AI_FALLBACK__URL``, local only, ADR 0006); otherwise None (unsettled fields then stay NEEDS_REVIEW)."""
+    gateway = settings.ai_gateway
+    if gateway.url is not None:
+        auth = _required_service_auth(settings)
+        tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
+        seconds = gateway.timeout.total_seconds()
+        client = httpx.Client(
+            base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
+        )
+        return AiAssist(reader=GatewayFieldReader(client, tokens), confidence=gateway.confidence)
     ai = settings.ai_fallback
-    if ai.url is None:
+    if ai.url is None or settings.environment != "local":
         return None
     headers = {"Authorization": f"Bearer {ai.api_key.get_secret_value()}"} if ai.api_key else {}
     seconds = ai.timeout.total_seconds()
@@ -166,6 +178,12 @@ def build_ai_assist(settings: Settings) -> AiAssist | None:
     return AiAssist(
         reader=VisionModelFieldReader(client, model=ai.model, max_edge_px=ai.max_edge_px), confidence=ai.confidence
     )
+
+
+def _required_service_auth(settings: Settings) -> ServiceAuthSettings:
+    if settings.service_auth is None:
+        raise MissingSettingsError("AI_GATEWAY__URL needs SERVICE_AUTH__TOKEN_URL and SERVICE_AUTH__CLIENT_SECRET")
+    return settings.service_auth
 
 
 def build_session_factory(settings: Settings) -> SessionFactory:

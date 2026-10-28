@@ -6,6 +6,7 @@ from uuid import UUID
 from extraction.core.errors import DomainError
 from extraction.pipeline.domain.jobs import ExtractionRequest, ItemContext
 from extraction.pipeline.domain.models import PreparedPage
+from extraction.pipeline.domain.ports import AiCallContext
 from extraction.pipeline.domain.quality import QualityScores
 from idp_ocr_engines.model import OcrPage
 
@@ -24,6 +25,7 @@ class ExtractDocumentCommand:
     pages: tuple[PreparedPage, ...]
     qualities: tuple[QualityScores, ...]
     digital_page: OcrPage | None = None  # page 0's text layer, when the document is a digital PDF (no OCR then)
+    ai_context: AiCallContext | None = None  # without it the AI step is skipped (fields stay for review)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

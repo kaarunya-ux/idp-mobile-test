@@ -1,0 +1,136 @@
+[project]
+name = "ai-gateway"
+version = "0.1.0"
+description = "IDP ai-gateway: the only caller of the local model server (IDP-03 ch. 4)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+# Every library is on the standard's ch. 22.3 list except PyJWT (ADR 0001, as in extraction-service's ADR 0005).
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "structlog>=24.4",
+    "uuid-utils>=0.9",  # UUIDv7 ids (DB-03); queue tickets and fallback correlation ids
+    "httpx>=0.27",  # the model server client
+    "redis>=5.0",  # the shared model semaphore, its waiting queues and the daily caps (IDP-03 ch. 4.5)
+    "boto3>=1.35",  # page images from MinIO, read in a worker thread (ASY-01)
+    "prometheus-client>=0.20",  # IDP-03 ch. 4.6 metrics (OBS-06)
+    "pillow>=10.4",  # resize to the long side limit and stack a card's two sides (IDP-03 ch. 4.3)
+    # Not in the standard's ch. 22.3 list: verifies service tokens (SEC-01, SEC-07). MIT; ADR 0001
+    "pyjwt[crypto]>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "respx>=0.21",
+    "mypy>=1.11",
+    "ruff>=0.6",
+    "import-linter>=2.1",
+    "pip-audit>=2.7",
+    "boto3-stubs[s3]>=1.35",
+    "testcontainers[minio,redis]>=4.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "ai_gateway"
+
+# --- Lint and format (standard ch. 22.1) -------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "S", "C4", "SIM", "PL", "RUF", "ASYNC", "DTZ", "T20", "ERA", "PT", "TID", "C90", "PERF"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest checks results with plain assert statements (S101) and compares against literal expected values on
+# purpose (PLR2004); made-up tokens are compared as strings (S105, S106).
+"tests/**" = ["S101", "PLR2004", "S105", "S106"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 7
+max-statements = 50
+max-branches = 12
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+# --- Types (standard PY-01) ---------------------------------------------------
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+
+# --- Tests (standard ch. 21) --------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]  # shared test helpers in tests/support
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "--strict-markers --import-mode=importlib"
+markers = [
+    "unit: fast tests with no external services",
+    "integration: tests against real Redis or MinIO",
+    "slow: excluded from make check",
+]
+
+# --- Architecture rules (standard ch. 21.6) -----------------------------------
+[tool.importlinter]
+root_packages = ["ai_gateway"]
+include_external_packages = true
+exclude_type_checking_imports = true  # imports under TYPE_CHECKING never run
+
+[[tool.importlinter.contracts]]
+name = "Layers inside the ai feature"
+type = "layers"
+layers = [
+    "ai_gateway.ai.api",
+    "ai_gateway.ai.infrastructure",
+    "ai_gateway.ai.application",
+    "ai_gateway.ai.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "core does not depend on features or entry points"
+type = "forbidden"
+source_modules = ["ai_gateway.core"]
+forbidden_modules = ["ai_gateway.ai", "ai_gateway.main", "ai_gateway.bootstrap", "ai_gateway.health"]
+
+[[tool.importlinter.contracts]]
+name = "AI domain is pure (no framework, no I/O, no configuration, no clock)"
+type = "forbidden"
+source_modules = ["ai_gateway.ai.domain"]
+forbidden_modules = [
+    "fastapi", "starlette", "pydantic", "pydantic_settings", "httpx", "redis", "boto3", "botocore", "PIL",
+    "structlog", "jwt", "ai_gateway.core.config", "ai_gateway.core.logging", "ai_gateway.core.problem_details",
+]
+
+[[tool.importlinter.contracts]]
+name = "AI application depends on ports, not adapters"
+type = "forbidden"
+source_modules = ["ai_gateway.ai.application"]
+forbidden_modules = ["fastapi", "httpx", "redis", "boto3", "botocore", "PIL", "ai_gateway.core.config"]
+
+[[tool.importlinter.contracts]]
+name = "API does not touch adapters (they are wired in bootstrap)"
+type = "forbidden"
+source_modules = ["ai_gateway.ai.api"]
+forbidden_modules = ["ai_gateway.ai.infrastructure", "httpx", "redis", "boto3", "PIL"]
+
+[[tool.importlinter.contracts]]
+name = "Runtime code imports no dev-only packages (type stubs are for TYPE_CHECKING blocks)"
+type = "forbidden"
+source_modules = ["ai_gateway"]
+forbidden_modules = ["mypy_boto3_s3", "pytest", "respx"]

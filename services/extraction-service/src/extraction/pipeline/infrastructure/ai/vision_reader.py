@@ -6,8 +6,9 @@ right shape (llama-server turns the schema into a grammar). Every value is check
 because not every host enforces it. Anything that isn't a usable answer raises ``AiUnavailableError``, so the
 pipeline leaves the fields for review.
 
-Temporary by design (IDP-03 ch. 4: only ai-gateway talks to the model server). When ai-gateway exists, a gateway
-client replaces this class behind the same port; nothing else changes.
+Kept as the web app's backup for laptops without ai-gateway: bootstrap uses it only when ``ENVIRONMENT=local`` and
+``AI_GATEWAY__URL`` is unset (ADR 0006). Everywhere else ``GatewayFieldReader`` is used (IDP-03 ch. 4: only
+ai-gateway talks to the model server). The gateway has its own copy of the prompts.
 """
 
 import base64
@@ -22,6 +23,7 @@ import structlog
 from PIL import Image
 
 from extraction.pipeline.domain.exceptions import AiUnavailableError
+from extraction.pipeline.domain.ports import AiCallContext, AiReading
 from extraction.pipeline.infrastructure.ai.card_prompts import PROFILES, PROMPT_VERSION, CardProfile
 from idp_ocr_engines.model import PageImage
 
@@ -39,23 +41,19 @@ class VisionModelFieldReader:
         self._model = model
         self._max_edge_px = max_edge_px
 
-    @property
-    def model_id(self) -> str:
-        return self._model or "vision-model"
-
-    @property
-    def prompt_version(self) -> str:
-        return PROMPT_VERSION
-
     def read_fields(
-        self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str]
-    ) -> Mapping[str, str | None]:
+        self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str], context: AiCallContext
+    ) -> AiReading:
+        """``context`` is not needed here: the pages are sent as bytes, and there is no queue or cap."""
         profile = PROFILES.get(document_type)
         if profile is None:
             raise AiUnavailableError(f"no AI profile for {document_type}")
         answer = _values(self._ask(profile, _stack_sides(pages)), profile)
         wanted = set(keys)
-        return {key: answer.get(name) for name, key in profile.field_keys.items() if key is not None and key in wanted}
+        values = {
+            key: answer.get(name) for name, key in profile.field_keys.items() if key is not None and key in wanted
+        }
+        return AiReading(values=values, model_id=self._model or "vision-model", prompt_version=PROMPT_VERSION)
 
     def _ask(self, profile: CardProfile, page: Image.Image) -> list[object]:
         body: dict[str, Any] = {

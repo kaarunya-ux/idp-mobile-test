@@ -1,6 +1,7 @@
 """What the first pipeline stages need from the outside, in domain language (ports, standard ch. 7)."""
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Protocol, Self
 from uuid import UUID
@@ -55,22 +56,37 @@ class DigitalTextReaderPort(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AiCallContext:
+    """Who an AI call is for and where its pages are stored: ai-gateway reads images by key, uses the account for its
+    daily cap and the priority for its queue (IDP-03 ch. 4.2). ``labels`` describe the fields to a generic prompt."""
+
+    account_id: UUID
+    priority: bool
+    page_refs: tuple[ObjectRef, ...]  # the same pages as ``pages``, in the derived bucket
+    labels: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AiReading:
+    """The values the AI read, and which model and prompt read them (the result's provenance, ML-04)."""
+
+    values: Mapping[str, str | None]
+    model_id: str
+    prompt_version: str
+
+
 class AiFieldReaderPort(Protocol):
     """The AI fallback (IDP-03 ch. 2.6 stage 7): reads a document type's fields from the page in one request.
 
-    Today a vision model on the model host; once ai-gateway exists, its ``field-read`` endpoint. Raises
-    ``AiUnavailableError`` when it can't answer: the fields then stay NEEDS_REVIEW, which is never a failure.
+    ai-gateway's ``field-read`` (``GatewayFieldReader``); for a laptop without the gateway, the model host directly
+    (``VisionModelFieldReader``, ADR 0006). Raises ``AiUnavailableError`` when it can't answer: the fields then stay
+    NEEDS_REVIEW, which is never a failure.
     """
 
-    @property
-    def model_id(self) -> str: ...
-
-    @property
-    def prompt_version(self) -> str: ...
-
     def read_fields(
-        self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str]
-    ) -> Mapping[str, str | None]:
+        self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str], context: AiCallContext
+    ) -> AiReading:
         """The value of each key as printed, or None. ``pages`` are the document's sides (a card's front and back);
         the reader sees them together. Keys the reader doesn't know come back None."""
         ...

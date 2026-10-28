@@ -30,6 +30,7 @@ class StoredRequest(_Stored):
     files: list[_StoredRef]
     template_id: str | None
     options: dict[str, Any]
+    priority: bool = False  # rows stored before it existed read as standard
 
 
 class StoredCompletion(_Stored):
@@ -69,6 +70,7 @@ def update_orm(row: ExtractionItemOrm, item: ExtractionItem) -> None:
         files=[_StoredRef(bucket=f.bucket, key=f.key) for f in request.files],
         template_id=request.template_id,
         options=dict(request.options),
+        priority=request.priority,
     ).model_dump(mode="json")
     row.completion = _completion_json(item.completion) if item.completion else None
     row.error_code = item.error_code
@@ -86,6 +88,7 @@ def to_domain(row: ExtractionItemOrm) -> ExtractionItem:
         files=tuple(ObjectRef(bucket=f.bucket, key=f.key) for f in stored.files),
         template_id=stored.template_id,
         options=stored.options,
+        priority=stored.priority,
     )
     return ExtractionItem(
         request=request,

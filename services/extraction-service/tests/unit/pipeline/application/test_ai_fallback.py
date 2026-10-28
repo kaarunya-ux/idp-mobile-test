@@ -3,18 +3,26 @@
 import threading
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from uuid import UUID
 
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.application.services.extract_document import AiAssist, ExtractDocumentService
 from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.exceptions import AiUnavailableError
+from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.domain.models import PreparationSteps, PreparedPage
+from extraction.pipeline.domain.ports import AiCallContext, AiReading
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.stages import Stage
 from extraction.pipeline.domain.standard_templates import STANDARD_TEMPLATES
 from idp_ocr_engines.errors import OcrEngineError
 from idp_ocr_engines.model import Box, OcrPage, OcrRegion, OcrWord, PageImage
 
+CONTEXT = AiCallContext(
+    account_id=UUID("0192f0aa-0000-7000-8000-000000000001"),
+    priority=True,
+    page_refs=tuple(ObjectRef(bucket="idp-derived", key=f"acct/doc/item/page-{i}.png") for i in range(3)),
+)
 PAN_LINES = [
     (0.05, 0.12, "INCOME TAX DEPARTMENT"),
     (0.20, 0.30, "Permanent Account Number Card"),
@@ -103,7 +111,7 @@ def command() -> ExtractDocumentCommand:
         steps=PreparationSteps(warped=False, deskew_degrees=0.0, rotation_degrees=0, orientation_confidence=None),
     )
     quality = QualityScores(blur=500.0, brightness=0.6, glare=0.0, short_side_px=900, edges_found=True)
-    return ExtractDocumentCommand(pages=(page,), qualities=(quality,))
+    return ExtractDocumentCommand(pages=(page,), qualities=(quality,), ai_context=CONTEXT)
 
 
 def service(
@@ -137,15 +145,17 @@ def fields_of(result: dict[str, object]) -> dict[str, dict[str, object]]:
 class FakeAi:
     def __init__(self, answer: dict[str, str | None] | None = None, *, down: bool = False) -> None:
         self.answer, self.down, self.asked = answer or {}, down, []
+        self.contexts: list[AiCallContext] = []
 
-    model_id = "vl-test"
-    prompt_version = "card-fields.v1"
-
-    def read_fields(self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str]) -> dict[str, str | None]:
+    def read_fields(
+        self, document_type: str, pages: Sequence[PageImage], keys: Sequence[str], context: AiCallContext
+    ) -> AiReading:
         self.asked.append((document_type, tuple(keys)))
+        self.contexts.append(context)
         if self.down:
             raise AiUnavailableError("down")
-        return {key: self.answer.get(key) for key in keys}
+        values = {key: self.answer.get(key) for key in keys}
+        return AiReading(values=values, model_id="vl-test", prompt_version="field-read.v1")
 
 
 def _disagreeing_engines() -> dict[str, FakeEngine]:
@@ -161,7 +171,29 @@ def test_accepts_the_ai_value_when_the_engines_disagree_and_the_rule_passes() ->
     assert ai.asked == [("PAN_CARD", ("pan_number",))]  # only the unsettled field, one request
     assert (pan["value"], pan["source"], pan["status"], pan["confidence"]) == ("ABCPE1234F", "AI", "ACCEPTED", 0.9)
     assert pan["readings"]["ai"] == "ABCPE1234F"
-    assert result["provenance"]["models"] == [{"id": "vl-test", "promptVersion": "card-fields.v1"}]
+    assert result["provenance"]["models"] == [{"id": "vl-test", "promptVersion": "field-read.v1"}]
+
+
+def test_sends_the_account_priority_stored_page_keys_and_labels_when_asking_the_ai() -> None:
+    ai = FakeAi({"pan_number": "ABCPE1234F"})
+
+    service(_disagreeing_engines(), Progress(), ai=AiAssist(reader=ai, confidence=0.9)).extract(command())
+
+    sent = ai.contexts[0]
+    assert (sent.account_id, sent.priority, sent.page_refs) == (CONTEXT.account_id, True, CONTEXT.page_refs[:2])
+    assert sent.labels["pan_number"]
+
+
+def test_skips_the_ai_when_the_command_has_no_ai_context() -> None:
+    ai = FakeAi({"pan_number": "ABCPE1234F"})
+    base = command()
+
+    result = service(_disagreeing_engines(), Progress(), ai=AiAssist(reader=ai, confidence=0.9)).extract(
+        ExtractDocumentCommand(pages=base.pages, qualities=base.qualities)
+    )
+
+    assert ai.asked == []
+    assert fields_of(result)["pan_number"]["status"] == "NEEDS_REVIEW"
 
 
 def test_keeps_the_field_for_review_when_the_ai_value_fails_the_rule() -> None:
@@ -179,7 +211,7 @@ def test_keeps_the_field_for_review_and_does_not_fail_when_the_ai_is_down() -> N
     )
 
     assert fields_of(result)["pan_number"]["status"] == "NEEDS_REVIEW"
-    assert result["provenance"]["models"] == [{"id": "vl-test", "promptVersion": "card-fields.v1"}]  # it was asked
+    assert result["provenance"]["models"] == []  # no answer: not counted as an AI call
 
 
 def test_never_asks_the_ai_when_the_engines_settle_every_field() -> None:
@@ -200,14 +232,16 @@ def _two_sided_command() -> ExtractDocumentCommand:
         binarised=single.pages[0].binarised,
         steps=single.pages[0].steps,
     )
-    return ExtractDocumentCommand(pages=(single.pages[0], back), qualities=(single.qualities[0],) * 2)
+    return ExtractDocumentCommand(
+        pages=(single.pages[0], back), qualities=(single.qualities[0],) * 2, ai_context=CONTEXT
+    )
 
 
 def test_sends_both_sides_and_the_empty_optional_fields_once_the_ai_is_asked() -> None:
     class Recording(FakeAi):
-        def read_fields(self, document_type, pages, keys):
+        def read_fields(self, document_type, pages, keys, context):
             self.sides = len(pages)
-            return super().read_fields(document_type, pages, keys)
+            return super().read_fields(document_type, pages, keys, context)
 
     ai = Recording({"pan_number": "ABCPE1234F"})
 

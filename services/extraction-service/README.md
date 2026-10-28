@@ -70,10 +70,12 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `OUTBOX__BATCH_SIZE` / `OUTBOX__POLL_INTERVAL` / `OUTBOX__LEASE` / `OUTBOX__MAX_ATTEMPTS` / `OUTBOX__BACKOFF_MAX` | `100` / `1` s / `60` s / `10` / `300` s | | The relay (as in conversion-service) |
 | `AUTH__ISSUERS` | `[]` (every protected route 401) | JSON list of `{"issuer": ..., "jwks_url": ...}` | Trusted token issuers (Keycloak; IDP-01) |
 | `AUTH__AUDIENCE` / `AUTH__JWKS_CACHE` / `AUTH__LEEWAY` | `idp-api` / `600` s / `30` s | | Required audience; how long keys are cached; allowed clock skew |
-| `AI_FALLBACK__URL` | — (off) | `http://10.0.3.66:8081` | The model host until ai-gateway exists; unset = unsettled fields stay NEEDS_REVIEW |
-| `AI_FALLBACK__API_KEY` / `AI_FALLBACK__MODEL` | — | | Must match the model host; the model id is sent with requests |
-| `AI_FALLBACK__TIMEOUT` / `AI_FALLBACK__MAX_EDGE_PX` | `120` s / `1280` | | Give up after this; longest image side sent |
-| `AI_FALLBACK__CONFIDENCE` | `0.9` | 0–1 | Given to an AI value that passes its rule (ML-07: change with an evaluation) |
+| `AI_GATEWAY__URL` | — (off) | `http://ai-gateway:8002` | The AI fallback (ADR 0006); unset = unsettled fields stay NEEDS_REVIEW |
+| `AI_GATEWAY__TIMEOUT` | `60` s | | Give up after this |
+| `AI_GATEWAY__CONFIDENCE` | `0.9` | 0–1 | Given to an AI value that passes its rule (ML-07: change with an evaluation) |
+| `SERVICE_AUTH__TOKEN_URL` / `SERVICE_AUTH__CLIENT_SECRET` | — | | Keycloak client credentials for the gateway; needed with `AI_GATEWAY__URL` |
+| `SERVICE_AUTH__CLIENT_ID` / `SERVICE_AUTH__AUDIENCE` | `extraction-service` / `ai-gateway` | | |
+| `AI_FALLBACK__URL`, `__API_KEY`, `__MODEL`, `__TIMEOUT`, `__MAX_EDGE_PX`, `__CONFIDENCE` | — (off) | | Local only, without the gateway: the model host directly, as the web app did |
 
 ## Dependencies
 
@@ -100,7 +102,7 @@ manages standard templates). Errors are RFC 9457 problem details.
 | `GET` | `/api/v1/templates/{id}/export` | `template:write` | portable JSON |
 | `DELETE` | `/api/v1/templates/{id}` | `template:write` | archives; never deletes |
 
-Not yet: suggestions (needs ai-gateway, E5), samples, test runs and the mobile bundle (E6).
+Not yet: suggestions (ai-gateway's `template-suggest` is ready), samples, test runs and the mobile bundle (E6).
 
 ## Layout
 
@@ -218,7 +220,7 @@ The Hindi fields, the address and PIN fields, the extra template keys and a few 
 ## Not here yet, and why
 
 The prototype's EasyOCR engine is not ported to `idp_ocr_engines`: it was clearly the weakest in the benchmark, and which engines fill slots A, B
-and C is open decision D-1 (IDP-00 ch. 10). Still to come, each with its build step: templates and document types with their API and tokens (E4), ai-gateway (E5), recheck, deep analysis, the template bundle, metrics and integration tests against real PostgreSQL, RabbitMQ and MinIO (E6).
+and C is open decision D-1 (IDP-00 ch. 10). Still to come, each with its build step: recheck, deep analysis, the template bundle, metrics and integration tests against real PostgreSQL, RabbitMQ and MinIO (E6).
 
 ## Operations
 

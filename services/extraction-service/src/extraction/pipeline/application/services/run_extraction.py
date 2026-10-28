@@ -41,6 +41,7 @@ from extraction.pipeline.domain.jobs import (
 )
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.ports import (
+    AiCallContext,
     DigitalTextReaderPort,
     ObjectStoragePort,
     PageImageStorePort,
@@ -137,28 +138,27 @@ class RunExtractionService:
         qualities = tuple(quality for result in prepared_files for quality in result.qualities)
         pages = tuple(_renumbered(pages))
         templates = self._pipeline.catalog.templates_for(request.context.tenant_id, request.template_id)
-        result = self._pipeline.extract_service(progress, templates).extract(
-            ExtractDocumentCommand(pages=pages, qualities=qualities, digital_page=digital)
+        stored = self._store_pages(request, pages)  # before the AI step: ai-gateway reads the pages by key
+        context = AiCallContext(
+            account_id=request.context.tenant_id, priority=request.priority, page_refs=tuple(stored)
         )
-        self._store_pages(request, pages, result)
+        result = self._pipeline.extract_service(progress, templates).extract(
+            ExtractDocumentCommand(pages=pages, qualities=qualities, digital_page=digital, ai_context=context)
+        )
+        _add_image_keys(result, pages, stored)
         result_ref = ObjectRef(bucket=self._derived_bucket, key=request.derived_key(RESULT_NAME))
         data = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()
         self._storage.write_bytes(result_ref, data, RESULT_CONTENT_TYPE)
         return _outcome(result, result_ref, len(pages))
 
-    def _store_pages(self, request: ExtractionRequest, pages: Sequence[PreparedPage], result: dict[str, Any]) -> None:
-        """Each prepared page as page-N.png, its key written into the result (``pages[].imageKey``)."""
-        for page, summary in zip(pages, result["pages"], strict=False):
+    def _store_pages(self, request: ExtractionRequest, pages: Sequence[PreparedPage]) -> list[ObjectRef]:
+        """Each prepared page as page-N.png in the derived bucket."""
+        stored = []
+        for page in pages:
             ref = ObjectRef(bucket=self._derived_bucket, key=request.derived_key(f"page-{page.page_index}.png"))
             self._pages.save_page(ref, page.clean)
-            summary["imageKey"] = ref.key
-        for index in range(len(result["pages"]), len(pages)):  # pages the reader didn't summarise (a card's back)
-            page = pages[index]
-            ref = ObjectRef(bucket=self._derived_bucket, key=request.derived_key(f"page-{page.page_index}.png"))
-            self._pages.save_page(ref, page.clean)
-            result["pages"].append(
-                {"index": page.page_index, "width": page.clean.width, "height": page.clean.height, "imageKey": ref.key}
-            )
+            stored.append(ref)
+        return stored
 
     def progress(self, item_id: UUID, stage: Stage, percent: int) -> None:
         self._transition(item_id, lambda it: it.progress(stage, percent, self._clock.now()))
@@ -210,3 +210,14 @@ def _outcome(result: dict[str, Any], result_ref: ObjectRef, pages: int) -> Extra
         pages=pages,
         ai_calls=len((result.get("provenance") or {}).get("models", [])),
     )
+
+
+def _add_image_keys(result: dict[str, Any], pages: Sequence[PreparedPage], stored: Sequence[ObjectRef]) -> None:
+    """Each page's image key in the result (``pages[].imageKey``); pages the reader didn't summarise (a card's back)
+    are added."""
+    for summary, ref in zip(result["pages"], stored, strict=False):
+        summary["imageKey"] = ref.key
+    for page, ref in list(zip(pages, stored, strict=True))[len(result["pages"]) :]:
+        result["pages"].append(
+            {"index": page.page_index, "width": page.clean.width, "height": page.clean.height, "imageKey": ref.key}
+        )

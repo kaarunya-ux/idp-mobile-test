@@ -67,6 +67,7 @@ class ExtractionRequest:
     files: tuple[ObjectRef, ...]  # the document; a second file is the back of a card
     template_id: str | None  # None: classify against the standard templates ("auto")
     options: Mapping[str, object]
+    priority: bool = False  # it came on the priority route; ai-gateway serves those first (IDP-03 ch. 4.5)
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.files) <= MAX_FILES:
