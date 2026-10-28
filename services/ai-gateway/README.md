@@ -60,6 +60,19 @@ Callers treat every 5xx as "AI unavailable": the fields stay for review, and the
 | `AUTH__ISSUERS` | `[]` | JSON list of `{issuer, jwks_url}` |
 | `AUTH__AUDIENCE`, `AUTH__ALLOWED_CLIENTS` | `ai-gateway`, `["extraction-service","conversion-service"]` | |
 
+## Without a model server: `mock-model`
+
+For laptops and CI (IDP-03 ch. 5). It answers `POST /v1/chat/completions` like the real server, with a recorded
+answer when one matches (`src/mock_model/recorded/*.json`: schema name plus a phrase of the question; made-up values
+only) and otherwise the smallest answer that fits the requested schema, so every task works.
+
+```bash
+make mock-model                                    # :4000
+MODEL__BASE_URL=http://localhost:4000/v1 make run  # the gateway, answered by the mock
+```
+
+`MOCK_MODEL__LATENCY_MS` adds a delay, to see queueing and timeouts. Never deploy it: it is not a model.
+
 ## Prompts
 
 `src/ai_gateway/prompts/<task>.v<n>.md`, with front matter (`name`, `version`, `model`, `temperature`, `max_tokens`).

@@ -1,7 +1,8 @@
 # Image layout from the Python Engineering Standard, ch. 23: build with uv, run as a non-root user. One process, the
 # HTTP API on port 8002 (IDP-03 ch. 4.1). The prompts are package files, so they ship inside the image.
 #
-#   docker build -t ai-gateway .
+#   docker build --target api -t ai-gateway .
+#   docker build --target mock-model -t mock-model .   # laptops and CI only: answers on :4000 (IDP-03 ch. 5)
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
 WORKDIR /app
@@ -19,3 +20,7 @@ COPY --from=build /app /app
 USER 10001
 EXPOSE 8002
 CMD ["uvicorn", "ai_gateway.main:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "2", "--proxy-headers", "--timeout-graceful-shutdown", "30"]
+
+FROM api AS mock-model
+EXPOSE 4000
+CMD ["uvicorn", "mock_model.main:app", "--host", "0.0.0.0", "--port", "4000"]

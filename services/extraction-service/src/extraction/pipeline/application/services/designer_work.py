@@ -19,12 +19,14 @@ from extraction.core.errors import DomainError
 from extraction.pipeline.application.commands import ExtractDocumentCommand, PrepareDocumentCommand
 from extraction.pipeline.application.services.extract_document import ExtractDocumentService
 from extraction.pipeline.application.services.prepare_document import PrepareDocumentService
+from extraction.pipeline.application.services.run_extraction import readable
 from extraction.pipeline.domain.evaluation import SampleOutcome, score_samples
 from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.domain.ports import (
     DesignerWorkStorePort,
     DigitalTextReaderPort,
     ObjectStoragePort,
+    OfficeConverterPort,
     PageImageStorePort,
     ProgressReporterPort,
     TestSample,
@@ -66,7 +68,9 @@ class DesignerWorkService:
         parse: DefinitionParser,
         templates_bucket: str,
         clock: Clock,
+        office: OfficeConverterPort | None = None,
     ) -> None:
+        self._office = office
         self._store = store
         self._storage = storage
         self._pages = pages
@@ -83,7 +87,7 @@ class DesignerWorkService:
         if work is None:
             return
         try:
-            content = self._storage.read_bytes(work.files[0])
+            content = readable(self._storage.read_bytes(work.files[0]), self._office)
             page = self._prepare(_Silent()).prepare(PrepareDocumentCommand(content=content)).pages[0].clean
             text = self._digital.read_first_page(content) or self._engine.read_page(page, _ENGLISH)
         except DomainError as error:
@@ -118,7 +122,7 @@ class DesignerWorkService:
 
     def _read(self, sample: TestSample, template: TemplateDefinition) -> SampleOutcome:
         try:
-            contents = [self._storage.read_bytes(f) for f in sample.files]
+            contents = [readable(self._storage.read_bytes(f), self._office) for f in sample.files]
             prepared = [self._prepare(_Silent()).prepare(PrepareDocumentCommand(content=c)) for c in contents]
             command = ExtractDocumentCommand(
                 pages=tuple(p for r in prepared for p in r.pages),

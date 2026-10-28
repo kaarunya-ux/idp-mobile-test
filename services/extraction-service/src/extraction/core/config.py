@@ -128,6 +128,13 @@ class StorageSettings(BaseModel):
     timeout: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
 
 
+class OfficeSettings(BaseModel):
+    """LibreOffice, which turns Office documents into PDFs in the workers (as in conversion-service)."""
+
+    binary: str = Field("soffice", min_length=1, max_length=255)
+    timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=5), le=timedelta(minutes=10))
+
+
 class TemplatesSettings(BaseModel):
     """The designer's publish gate (IDP-03 ch. 2.9). Changing it needs an evaluation report (ML-07)."""
 
@@ -224,6 +231,7 @@ class Settings(BaseSettings):
     ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
     metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     templates: TemplatesSettings = Field(default_factory=TemplatesSettings)
+    office: OfficeSettings = Field(default_factory=OfficeSettings)
     # prometheus-client's own variable for multiprocess mode (the Celery workers); read here too, never elsewhere
     prometheus_multiproc_dir: Path | None = None
     ai_fallback: AiFallbackSettings = Field(default_factory=AiFallbackSettings)

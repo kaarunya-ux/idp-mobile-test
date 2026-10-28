@@ -9,6 +9,9 @@ Business errors (an unreadable file, a blurred photo) end the item with their co
 or a bug: the item goes back to ``QUEUED`` and the exception goes up, so the task retries it (CEL-04) or, after the
 last retry, calls ``fail``.
 
+Word, Excel, PowerPoint and OpenDocument files are turned into a PDF first (``OfficeConverterPort``), so they are read
+like a digital PDF: exact text with positions, no OCR.
+
 A RECHECK item runs the same stages on the uploaded original, then keeps the device's settled fields and takes the
 server's reading for the weak ones (``merging.merge_recheck``). The pages are stored before the AI step, because
 ai-gateway reads them by key.
@@ -46,6 +49,7 @@ from extraction.pipeline.domain.ports import (
     AiCallContext,
     DigitalTextReaderPort,
     ObjectStoragePort,
+    OfficeConverterPort,
     PageImageStorePort,
     PipelineMetricsPort,
     ProgressReporterPort,
@@ -92,9 +96,11 @@ class RunExtractionService:
         stale_after: timedelta,
         review_confidence: float = 0.85,
         metrics: PipelineMetricsPort | None = None,
+        office: OfficeConverterPort | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._lifecycle = ItemLifecycle(units, clock, stale_after=stale_after, metrics=metrics)
+        self._office = office
         self._storage = storage
         self._pages = pages
         self._pipeline = pipeline
@@ -127,7 +133,7 @@ class RunExtractionService:
 
     def _extract(self, request: ExtractionRequest, progress: StageClock) -> tuple[ExtractionOutcome, dict[str, Any]]:
         prepare = self._pipeline.prepare_service(progress)
-        contents = [self._storage.read_bytes(f) for f in request.files]
+        contents = [readable(self._storage.read_bytes(f), self._office) for f in request.files]
         prepared_files = [prepare.prepare(PrepareDocumentCommand(content=content)) for content in contents]
         digital = self._pipeline.digital_reader.read_first_page(contents[0])
         pages = tuple(_renumbered([page for result in prepared_files for page in result.pages]))
@@ -163,6 +169,12 @@ class RunExtractionService:
             self._pages.save_page(ref, page.clean)
             stored.append(ref)
         return stored
+
+
+def readable(content: bytes, office: OfficeConverterPort | None) -> bytes:
+    """An Office document as a PDF (then read from its text layer, no OCR); anything else as it is."""
+    converted = office.to_pdf(content) if office is not None else None
+    return converted if converted is not None else content
 
 
 def encode_result(result: dict[str, Any]) -> bytes:
