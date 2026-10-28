@@ -14,6 +14,11 @@ dependencies = [
     "structlog>=24.4",
     # UUIDv7 ids (DB-03, standard ch. 22.3); used by core/ids.py for ids and fallback correlation ids
     "uuid-utils>=0.9",
+    # conversion-service's stack for the database, inbox and outbox (same versions, same licences)
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.13",
+    "httpx>=0.27",  # the AI fallback's model client (and ai-gateway's, later)
 ]
 
 [project.optional-dependencies]
@@ -28,6 +33,10 @@ workers = [
     "filetype>=1.2",
     "pypdfium2>=4.30",
     "pillow>=10.4",
+    # messaging, tasks and storage, as in conversion-service
+    "celery>=5.4",
+    "boto3>=1.35",
+    "faststream[rabbit,cli]>=0.5",
 ]
 
 
@@ -42,6 +51,8 @@ dev = [
     "import-linter>=2.1",
     "hypothesis>=6.100",
     "pip-audit>=2.7",
+    "boto3-stubs[s3]>=1.35",
+    "celery-types>=0.22",
 ]
 
 [build-system]
@@ -103,6 +114,7 @@ ignore_missing_imports = true
 # --- Tests (standard ch. 21) --------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]  # shared test helpers in tests/support
 asyncio_mode = "auto"
 addopts = "--strict-markers --import-mode=importlib"
 markers = [
@@ -119,6 +131,7 @@ markers = [
 [tool.importlinter]
 root_packages = ["extraction", "idp_ocr_engines"]
 include_external_packages = true
+exclude_type_checking_imports = true  # imports under TYPE_CHECKING never run
 
 [[tool.importlinter.contracts]]
 name = "core does not depend on features or entry points"
@@ -156,3 +169,27 @@ name = "API process stays slim (no CV, OCR or ML libraries in its image)"
 type = "forbidden"
 source_modules = ["extraction.main", "extraction.health"]
 forbidden_modules = ["cv2", "onnxruntime", "numpy", "PIL", "pypdfium2", "paddle", "torch", "yaml"]
+
+[[tool.importlinter.contracts]]
+name = "Pipeline domain is pure (no framework, database, broker, storage or HTTP client)"
+type = "forbidden"
+source_modules = ["extraction.pipeline.domain"]
+forbidden_modules = [
+    "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3",
+    "botocore", "httpx", "cv2", "onnxruntime", "PIL", "extraction.core.config", "extraction.pipeline.infrastructure",
+]
+
+[[tool.importlinter.contracts]]
+name = "Pipeline application depends on ports, not adapters"
+type = "forbidden"
+source_modules = ["extraction.pipeline.application"]
+forbidden_modules = [
+    "extraction.pipeline.infrastructure", "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3",
+    "botocore", "httpx", "cv2", "onnxruntime", "PIL",
+]
+
+[[tool.importlinter.contracts]]
+name = "Runtime code imports no dev-only packages (type stubs are for TYPE_CHECKING blocks)"
+type = "forbidden"
+source_modules = ["extraction", "idp_ocr_engines"]
+forbidden_modules = ["mypy_boto3_s3", "pytest", "hypothesis"]

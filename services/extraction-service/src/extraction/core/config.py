@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ByteSize, Field, model_validator
+from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,6 +87,76 @@ class ReviewSettings(BaseModel):
     confidence_threshold: float = Field(0.85, ge=0, le=1)  # below this a field needs review even if accepted
 
 
+class DatabaseSettings(BaseModel):
+    """``extraction_db`` (IDP-03 ch. 2.4): the inbox, the outbox and job item state; templates come later."""
+
+    url: SecretStr  # postgresql+psycopg://user:password@host:5432/extraction_db
+    pool_size: int = Field(5, ge=1, le=50)
+    max_overflow: int = Field(2, ge=0, le=50)
+    statement_timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(milliseconds=100))  # DB-02
+    lock_timeout: timedelta = Field(timedelta(seconds=3), ge=timedelta(milliseconds=100))
+    idle_in_transaction_timeout: timedelta = Field(timedelta(seconds=10), ge=timedelta(seconds=1))
+
+
+class RabbitSettings(BaseModel):
+    """The broker Java and Python exchange messages through (IDP-00 ch. 7.6)."""
+
+    url: SecretStr  # amqp://user:password@host:5672/vhost
+    prefetch: int = Field(10, ge=1, le=200)  # MSG-05: intake only records and enqueues, so it can take a few
+    delivery_limit: int = Field(5, ge=1, le=20)  # quorum queue x-delivery-limit before the dead-letter queue
+
+
+class CelerySettings(BaseModel):
+    """The pipeline workers (IDP-03 ch. 2.2, standard ch. 16.2)."""
+
+    broker_url: SecretStr  # amqp://..., the same RabbitMQ on its own virtual host
+    soft_time_limit: timedelta = Field(timedelta(minutes=9), ge=timedelta(seconds=30), le=timedelta(hours=1))
+    time_limit: timedelta = Field(timedelta(minutes=10), ge=timedelta(seconds=30), le=timedelta(hours=1))
+    max_retries: int = Field(3, ge=0, le=10)  # transient failures only (CEL-04)
+
+
+class StorageSettings(BaseModel):
+    """MinIO, run by the Java team; this service reads inputs and writes outputs with its own keys (IDP-00 7.7)."""
+
+    endpoint: HttpUrl
+    access_key: SecretStr
+    secret_key: SecretStr
+    region: str = Field("us-east-1", min_length=1, max_length=32)
+    bucket_derived: str = Field("idp-derived", min_length=3, max_length=63)  # page images and result.json (IDP-00 7.7)
+    max_input_size: ByteSize = ByteSize(200 * 1024 * 1024)  # FIL-05: nothing bigger is downloaded
+    timeout: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
+
+
+class OutboxSettings(BaseModel):
+    """The relay that publishes outbox rows (OBX-01, Java standard ch. 15.2)."""
+
+    batch_size: int = Field(100, ge=1, le=1000)
+    poll_interval: timedelta = Field(timedelta(seconds=1), ge=timedelta(milliseconds=50), le=timedelta(minutes=1))
+    lease: timedelta = Field(timedelta(minutes=1), ge=timedelta(seconds=5))  # CLAIMED longer -> PENDING (OBX-03)
+    max_attempts: int = Field(10, ge=1, le=100)  # then DEAD + alert (OBX-07)
+    backoff_max: timedelta = Field(timedelta(minutes=5), ge=timedelta(seconds=1))
+
+
+class AiFallbackSettings(BaseModel):
+    """The AI fallback for fields the OCR engines can't settle (IDP-03 ch. 2.6 stage 7).
+
+    Until ai-gateway exists, this calls the model host directly (an OpenAI-style server such as llama-server), as the
+    web extraction app did; then ``url`` points at ai-gateway instead. Leave ``url`` unset to turn the fallback off:
+    unsettled fields stay NEEDS_REVIEW, which is always safe.
+    """
+
+    url: HttpUrl | None = None  # e.g. http://10.0.3.66:8081 (the model host)
+    api_key: SecretStr | None = None
+    model: str | None = Field(None, max_length=128)  # sent with requests; llama-server ignores it
+    timeout: timedelta = Field(timedelta(seconds=120), ge=timedelta(seconds=1), le=timedelta(minutes=10))
+    max_edge_px: int = Field(1280, ge=256, le=4096)  # longest image side sent to the model
+    confidence: float = Field(0.9, gt=0, le=1)  # given to an AI value that passes the field's rule (ML-07)
+
+
+class MissingSettingsError(RuntimeError):
+    """A process started without settings it needs, for example a worker without ``DB__URL``."""
+
+
 class Settings(BaseSettings):
     """All configuration for one process. Built once by ``get_settings()``; invalid values stop the process."""
 
@@ -101,6 +171,31 @@ class Settings(BaseSettings):
     prepare: PrepareSettings = Field(default_factory=PrepareSettings)
     verify: VerifySettings = Field(default_factory=VerifySettings)
     review: ReviewSettings = Field(default_factory=ReviewSettings)
+    outbox: OutboxSettings = Field(default_factory=OutboxSettings)
+    ai_fallback: AiFallbackSettings = Field(default_factory=AiFallbackSettings)
+    # Needed only by the processes that use them (consumers, workers, relay); read through require_*().
+    db: DatabaseSettings | None = None
+    rabbit: RabbitSettings | None = None
+    celery: CelerySettings | None = None
+    storage: StorageSettings | None = None
+
+    def require_db(self) -> DatabaseSettings:
+        return _required(self.db, "DB__URL")
+
+    def require_rabbit(self) -> RabbitSettings:
+        return _required(self.rabbit, "RABBIT__URL")
+
+    def require_celery(self) -> CelerySettings:
+        return _required(self.celery, "CELERY__BROKER_URL")
+
+    def require_storage(self) -> StorageSettings:
+        return _required(self.storage, "STORAGE__ENDPOINT, STORAGE__ACCESS_KEY and STORAGE__SECRET_KEY")
+
+
+def _required[T](group: T | None, variables: str) -> T:
+    if group is None:
+        raise MissingSettingsError(f"This process needs {variables}; see README.md")
+    return group
 
 
 @lru_cache

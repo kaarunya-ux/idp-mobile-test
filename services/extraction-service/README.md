@@ -2,7 +2,17 @@
 
 Reads documents into structured fields: standard and organisation templates, the extraction pipeline (quality gate, preparation, dual OCR, verification, AI fallback), re-checks of on-device results and the evaluation harness for OCR engines. Specified in IDP-03 ch. 2 and built to the Python Engineering Standard. Owned by the Python team (IDP-00 ch. 3.1).
 
-This folder is being converted from a flat prototype into the service. **Status: steps EXT-001 (skeleton), EXT-002 (`rule/`), EXT-003 (OCR port, data model, registry), EXT-004 (PP-OCR engines) EXT-005 (Indra OCR engine, since parked: see docs/adr/0002) and EXT-006 (SCAN, QUALITY_CHECK, PREPARE).** It has settings, logging, error handling, the probe endpoints, the pure field rules, and the OCR engine library with the PP-OCRv5 and v6 adapters; the pipeline that uses them comes next. The prototype that the next steps migrate lives in [`ocr_test_app/`](ocr_test_app/README.md); it still works as before and is excluded from the lint run until the last of it has moved.
+**Status: it runs as a service (build steps E1 and E2, 2026-10-28; see the [build log](../../docs/extraction-service/build-log.md)).** Java's `ExtractionRequested` arrives over RabbitMQ; a Celery worker reads the file from MinIO and runs the whole pipeline (SCAN, QUALITY_CHECK, PREPARE, CLASSIFY, READ with engines A and B, VERIFY, AI_ASSIST, ASSEMBLE); the page images and `result.json` go to `idp-derived`, and `JobProgressed` / `ExtractionCompleted` / `WorkFailed` go back on `idp.events` through an outbox in `extraction_db`. Standard templates: PAN and Aadhaar. **OCR is the first layer; AI is the fallback** for fields the engines can't settle, accepted only when the field's rule passes (ported from the web extraction app; ADR 0004). Templates API, designer, DL template, two-sided cards, digital-PDF reading, recheck, deep analysis and the bundle come next (build log, steps E3-E6). The old prototype is in [`ocr_test_app/`](ocr_test_app/README.md).
+
+## Processes
+
+| Process | Command | Image (`docker build --target`) |
+|---|---|---|
+| API (templates later; probes now) | `uvicorn extraction.main:app --port 8000` | `api` |
+| `intake` (FastStream consumer) | `faststream run extraction.consumers:create_app --factory` | `service` |
+| `relay` (outbox publisher) | `python -m extraction.outbox_relay` | `service` |
+| migrations (pre-deploy job) | `alembic upgrade head` | `service` |
+| `worker-pipeline` (Celery) | `celery -A extraction.worker worker -Q pipeline -c 4 --prefetch-multiplier 1` | `worker` (mount the models at `/models`) |
 
 ## Run it
 
@@ -45,7 +55,22 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `VERIFY__NAME_SIMILARITY` | `0.95` | 0 - 1 | Default threshold for SIMILARITY fields (IDP-03 ch. 2.7) |
 | `REVIEW__CONFIDENCE_THRESHOLD` | `0.85` | 0 - 1 | Below this an accepted field still needs review |
 
-The settings in IDP-03 ch. 2.12 (`DB__*`, `RABBIT__*`, `OCR__ENGINE_A|B|C`, `QUALITY__*`, `VERIFY__*` and the rest) are added with the feature that reads each one, and are listed here at the same time (CFG-05).
+| `DB__URL` | — (required by intake, relay, workers) | `postgresql+psycopg://user:password@host:5432/extraction_db` | Inbox, outbox and job items |
+| `DB__POOL_SIZE` / `DB__MAX_OVERFLOW` | `5` / `2` | 1–50 / 0–50 | Connections per process |
+| `DB__STATEMENT_TIMEOUT` / `DB__LOCK_TIMEOUT` / `DB__IDLE_IN_TRANSACTION_TIMEOUT` | `5` / `3` / `10` s | | PostgreSQL stops anything slower (DB-02) |
+| `RABBIT__URL` | — (required by intake, relay) | `amqp://user:password@host:5672/vhost` | Where `ExtractionRequested` arrives and events are published |
+| `RABBIT__PREFETCH` / `RABBIT__DELIVERY_LIMIT` | `10` / `5` | | Messages held at once / deliveries before the dead-letter queue |
+| `CELERY__BROKER_URL` | — (required by intake, workers) | `amqp://...` | The task queue between intake and the pipeline workers |
+| `CELERY__SOFT_TIME_LIMIT` / `CELERY__TIME_LIMIT` | `540` / `600` s | 30 s – 1 h | Soft: the item fails cleanly (`EXT-504-TIMEOUT-001`); hard: the task is killed |
+| `CELERY__MAX_RETRIES` | `3` | 0–10 | Retries for passing failures (database, storage) before `EXT-500-INTERNAL-001` |
+| `STORAGE__ENDPOINT` / `STORAGE__ACCESS_KEY` / `STORAGE__SECRET_KEY` | — (required by workers) | | MinIO, run by the Java team |
+| `STORAGE__BUCKET_DERIVED` | `idp-derived` | a bucket name | Page images and `result.json` (IDP-00 ch. 7.7) |
+| `STORAGE__MAX_INPUT_SIZE` / `STORAGE__TIMEOUT` | `200MiB` / `30` s | | Larger inputs are refused before downloading |
+| `OUTBOX__BATCH_SIZE` / `OUTBOX__POLL_INTERVAL` / `OUTBOX__LEASE` / `OUTBOX__MAX_ATTEMPTS` / `OUTBOX__BACKOFF_MAX` | `100` / `1` s / `60` s / `10` / `300` s | | The relay (as in conversion-service) |
+| `AI_FALLBACK__URL` | — (off) | `http://10.0.3.66:8081` | The model host until ai-gateway exists; unset = unsettled fields stay NEEDS_REVIEW |
+| `AI_FALLBACK__API_KEY` / `AI_FALLBACK__MODEL` | — | | Must match the model host; the model id is sent with requests |
+| `AI_FALLBACK__TIMEOUT` / `AI_FALLBACK__MAX_EDGE_PX` | `120` s / `1280` | | Give up after this; longest image side sent |
+| `AI_FALLBACK__CONFIDENCE` | `0.9` | 0–1 | Given to an AI value that passes its rule (ML-07: change with an evaluation) |
 
 ## Dependencies
 
@@ -171,7 +196,7 @@ The Hindi fields, the address and PIN fields, the extra template keys and a few 
 ## Not here yet, and why
 
 The prototype's EasyOCR engine is not ported to `idp_ocr_engines`: it was clearly the weakest in the benchmark, and which engines fill slots A, B
-and C is open decision D-1 (IDP-00 ch. 10). Left out until a feature needs it (PKG-02): `security.py` (token verification arrives with the first protected route), `db.py`, `redis.py`, `outbox.py`, `observability.py` (OpenTelemetry and metrics), `bootstrap.py`, `worker.py`, `consumers.py`. Migrations, `compose.override.yaml` and the OpenAPI file are added with the first feature that has a database, workers or business routes. Framework 404/405 responses are FastAPI's default until the first business routes exist; the gateway answers unknown public paths (IDP-01 ch. 2.3).
+and C is open decision D-1 (IDP-00 ch. 10). Still to come, each with its build step: templates and document types with their API and tokens (E4), the DL template, two-sided cards and digital-PDF reading (E3), ai-gateway (E5), recheck, deep analysis, the template bundle, metrics and integration tests against real PostgreSQL, RabbitMQ and MinIO (E6).
 
 ## Operations
 

@@ -30,6 +30,7 @@ class Provenance:
     pipeline_version: str
     engines: Sequence[tuple[str, str]]  # (slot, version) such as ("ocr-a", "ppocrv6-small-det@...")
     duration_ms: int
+    models: Sequence[tuple[str, str]] = ()  # (model id, prompt version) of every AI model the run asked
 
 
 def build_result(
@@ -57,7 +58,7 @@ def build_result(
         "provenance": {
             "pipelineVersion": provenance.pipeline_version,
             "engines": [{"id": slot, "version": version} for slot, version in provenance.engines],
-            "models": [],
+            "models": [{"id": model, "promptVersion": prompt} for model, prompt in provenance.models],
             "durationMs": provenance.duration_ms,
         },
     }

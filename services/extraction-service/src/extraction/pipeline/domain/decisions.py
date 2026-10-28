@@ -1,5 +1,6 @@
 """Field acceptance: from what each engine read to one decision per field (IDP-03 ch. 2.6 stage 6, ch. 2.7)."""
 
+import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -23,10 +24,11 @@ class FieldStatus(StrEnum):
 
 
 class FieldSource(StrEnum):
-    """``source`` of IDP-00 ch. 7.8 that OCR can produce."""
+    """``source`` of IDP-00 ch. 7.8 that the pipeline can produce."""
 
     OCR_AGREE = "OCR_AGREE"
     OCR_2_OF_3 = "OCR_2_OF_3"
+    AI = "AI"  # the AI fallback read it and the field's rule passed
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -158,7 +160,8 @@ def _agreement(
     return None
 
 
-def _decision(  # noqa: PLR0913 - one constructor for the three shapes of outcome
+# one constructor for the three shapes of outcome
+def _decision(  # noqa: PLR0913
     definition: FieldDefinition,
     *,
     status: FieldStatus,
@@ -188,4 +191,34 @@ def _decision(  # noqa: PLR0913 - one constructor for the three shapes of outcom
     return apply_mask(decision, definition.mask) if definition.mask else decision
 
 
-__all__ = ["FieldDecision", "FieldSource", "FieldStatus", "Thresholds", "apply_mask", "decide_field"]
+def decide_with_ai(
+    definition: FieldDefinition, decision: FieldDecision, ai_value: str | None, *, confidence: float, today: date
+) -> FieldDecision:
+    """Stage 7 (IDP-03 ch. 2.6): an unsettled field, read again by AI. The AI value is accepted only when the field's
+    rule passes, the same rule OCR readings must pass; otherwise the field stays NEEDS_REVIEW with the AI reading kept
+    for the reviewer. The engines' readings are kept either way."""
+    readings = {**decision.readings, "ai": ai_value}
+    if not ai_value:
+        return dataclasses.replace(decision, readings=readings)
+    normalized = normalize_value(ai_value, definition.normalize, pattern=definition.rule.pattern)
+    outcome = apply_rule(definition.rule, normalized, today=today)
+    if not outcome.passed:
+        return dataclasses.replace(decision, readings=readings)
+    accepted = FieldDecision(
+        key=definition.key,
+        label=definition.label,
+        type=definition.type,
+        value=ai_value,
+        normalized_value=normalized,
+        confidence=round(confidence, 4),
+        source=FieldSource.AI,
+        status=FieldStatus.ACCEPTED,
+        box=None,  # the AI reads the whole page, so there is no box for the value
+        readings=readings,
+        rule=outcome,
+        masked=False,
+    )
+    return apply_mask(accepted, definition.mask) if definition.mask else accepted
+
+
+__all__ = ["FieldDecision", "FieldSource", "FieldStatus", "Thresholds", "apply_mask", "decide_field", "decide_with_ai"]

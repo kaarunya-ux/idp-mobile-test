@@ -53,3 +53,65 @@ make check     # 376 tests, 97 % coverage; 26 skipped without the model files in
 | History on GitHub | Removing files from tracking doesn't remove them from history. Plan: push to the official GitLab without the GitHub history |
 | CI and models | Tests that need models are skipped in CI until a step fetches them |
 | Second Hindi engine | Part of D-1 |
+
+## Entry 2: The service runs: messaging, storage, the database and the pipeline (steps E1 and E2, 2026-10-28)
+
+**Goal:** extraction-service takes jobs from Java and returns results, as conversion-service does. The pipeline
+Sumukh standardized now runs inside a worker.
+
+### What we did
+
+```
+core/                db.py, inbox.py, outbox.py (copied from conversion-service); config: DB__, RABBIT__, CELERY__,
+                     STORAGE__, OUTBOX__, AI_FALLBACK__; errors gain `retryable`; EXT-504-TIMEOUT-001
+pipeline/domain/     jobs.py (request, item and its rules, events); ports for storage, page images, the unit of
+                     work, the task queue and the AI reader; decisions: FieldSource.AI and decide_with_ai
+pipeline/application accept_extraction.py (intake), run_extraction.py (the worker); extract_document.py gains the
+                     AI step (AiAssist)
+pipeline/infrastructure/
+  ai/                card_prompts.py, vision_reader.py: the web extraction app's prompts and model client, ported
+  messaging/         ExtractionRequested in; JobProgressed / ExtractionCompleted / WorkFailed out (IDP-00 ch. 7.6)
+  persistence/       extraction_item table, repository, unit of work
+  storage/           MinIO: read inputs, write page images and result.json to idp-derived
+  tasks.py           Celery: one task on the `pipeline` queue
+bootstrap.py, consumers.py, worker.py, outbox_relay.py   the processes
+migrations/          0001_baseline: inbox_message, outbox_event, extraction_item
+Dockerfile           targets api, service, worker (models mounted at /models)
+tests/               about 55 new unit tests; tests/support/job_fakes.py
+```
+
+### How a job runs
+
+```
+Java ─ExtractionRequested─▶ idp.commands ─▶ intake ─▶ extraction_db (inbox + item) ─▶ Celery `pipeline` queue
+worker ─▶ MinIO (the file) ─▶ SCAN · QUALITY_CHECK · PREPARE ─▶ CLASSIFY ─▶ READ (A ∥ B) ─▶ VERIFY
+       ─▶ AI_ASSIST (unsettled fields only) ─▶ ASSEMBLE ─▶ idp-derived/<account>/<document>/<item>/{page-N.png,result.json}
+relay  ─▶ idp.events: JobProgressed per stage, then ExtractionCompleted {resultKey, documentType, templateRef, summary, usage}
+```
+
+Duplicate, retry and stale-worker rules are conversion-service's (agreed with Java): the same `eventId` is recorded
+once; a completed item asked again gets its stored result; a failed one is queued again.
+
+### OCR first, AI as fallback
+
+The pipeline's decision per field doesn't change: A and B must agree and the rule must pass. Fields still unsettled
+go to the AI reader **in one request per document**. An AI value is accepted only if the same rule passes (PAN
+format, Aadhaar checksum, date, ...), with source `AI`; otherwise the field stays NEEDS_REVIEW and keeps the AI's
+reading for the reviewer. If the model host is down, the job still succeeds with those fields for review.
+
+The AI reader is the web extraction app's code (prompts, JSON schemas, answer checks), ported: synchronous, settings
+instead of environment reads, its field names mapped onto the templates' (`parent_name` -> `father_name`, `F` ->
+`FEMALE`). It calls the model host directly until ai-gateway exists (ADR 0004).
+
+### Decisions and open questions
+
+| Topic | Decision |
+|---|---|
+| AI fallback | Through a port; today the model host directly (ADR 0004), ai-gateway later. Off unless `AI_FALLBACK__URL` is set |
+| AI confidence | 0.9 for a value that passes its rule (`AI_FALLBACK__CONFIDENCE`). **Open:** set from an evaluation (ML-07) |
+| One task, not a canvas | The pipeline runs in one Celery task; A and B read in threads (ADR 0003 item 10). A canvas is a scaling change |
+| Second file | Prepared and stored as page 1; fields are read from the front. Two-sided reading is step E3 |
+| `templateId` | Accepted and stored; classification picks among the standard templates until templates exist (E4) |
+| `accountPolicy.masking` | The standard Aadhaar template always masks; per-account policy comes with templates |
+| Models | Not in the image: mounted at `/models`; `models.yaml` in the image pins their checksums |
+| Not tested end to end | As agreed for today; integration tests against real services come with E6 |

@@ -23,6 +23,7 @@ class ErrorCode(StrEnum):
     QUALITY_EDGES_NOT_FOUND = "EXT-422-QUALITY-005"
     DEFINITION_INVALID = "EXT-422-DEFINITION-001"  # IDP-03 ch. 2.12: a template definition is not valid
     INTERNAL_ERROR = "EXT-500-INTERNAL-001"  # new, not in IDP-03 ch. 2.12: an unexpected failure (ERR-06)
+    TIMEOUT = "EXT-504-TIMEOUT-001"  # new, not in IDP-03 ch. 2.12: the item ran past its time limit
 
     @property
     def http_status(self) -> int:
