@@ -41,9 +41,20 @@ make reset        # stop and delete the data: databases, buckets, queues
 | `keycloak` (mode B) | 8080, admin console (admin / admin) | realm `idp`: test users and the service clients |
 | `rabbit-setup` (mode B) | — | one-time job: the exchanges, and the queue `local.events-tap` that keeps the last 1,000 events |
 
-## Two modes
+## What runs here, and what is the backend's
 
-**Mode B (the default): everything here.** The Java services point at this machine:
+`COMPOSE_PROFILES` in `.env` chooses it; then `make down && make up`.
+
+| Setup | `COMPOSE_PROFILES` | Here | The backend's |
+|---|---|---|---|
+| **B** (default) | `infra` | RabbitMQ, MinIO, Keycloak | nothing |
+| **Mixed** | `rabbitmq,keycloak` | Keycloak, and a RabbitMQ for our Celery tasks only | RabbitMQ for the IDP messages, MinIO |
+| **A** | empty | nothing | RabbitMQ, MinIO, Keycloak |
+
+In every setup, our PostgreSQL, Redis and the services run here. Set `PUBLIC_HOST` in `.env` to this machine's
+address (`hostname -I`) before the backend connects: it is the issuer in every token.
+
+**Setup B.** The Java services point at this machine:
 
 | They need | Value |
 |---|---|
@@ -52,15 +63,14 @@ make reset        # stop and delete the data: databases, buckets, queues
 | Keycloak (issuer) | `http://<this machine>:8080/realms/idp` |
 | extraction API (their gateway's upstream) | `http://<this machine>:8000` |
 
-Set `PUBLIC_HOST` in `.env` to this machine's address (`hostname -I`) before they connect: it is the issuer in
-every token, and it must be the address they use.
-
-**Mode A: the backend's RabbitMQ, MinIO and Keycloak.** In `.env`, clear `COMPOSE_PROFILES` and fill in the
-mode A block (addresses, keys, the `extraction-service` client secret). Our PostgreSQL, Redis and services still run
-here. The backend team then needs:
-- the four buckets;
-- a queue bound to every event we publish;
-- the Keycloak clients `extraction-service` and `conversion-service`, with audience `ai-gateway`.
+**Mixed, and A.** In `.env`, fill in the backend's RabbitMQ (`RABBIT_URL`) and MinIO (`STORAGE_*`); in A also their
+Keycloak and the `extraction-service` client secret. On their side they need:
+- the four buckets: `idp-originals`, `idp-derived`, `idp-outputs`, `idp-templates`;
+- the exchanges `idp.commands` and `idp.events` (topic);
+- **a queue bound to every event we publish** (`job.progressed`, `extraction.completed`, `conversion.completed`,
+  `work.failed`): an event nobody receives holds back that item's later events. The `local.events-tap` queue only
+  exists on our local RabbitMQ.
+- in A only: the Keycloak clients `extraction-service` and `conversion-service`, with audience `ai-gateway`.
 
 Integration readiness doc, section 4.
 

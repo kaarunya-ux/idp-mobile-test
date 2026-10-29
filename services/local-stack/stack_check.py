@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -23,6 +24,7 @@ from uuid import UUID, uuid4
 import aio_pika
 import boto3
 import httpx
+from botocore.exceptions import BotoCoreError, ClientError
 from PIL import Image, ImageDraw, ImageFont
 
 ACCOUNT = UUID("0192f0aa-0000-7000-8000-00000000a001")  # the test account in keycloak/idp-realm.json
@@ -209,11 +211,20 @@ def check_conversion() -> None:
     step("conversion end to end", passed, detail)
 
 
+def guarded(name: str, check: Callable[[], None]) -> None:
+    """A storage or broker problem (wrong address, port or key) is a failed check with its reason, not a crash."""
+    try:
+        check()
+    except (BotoCoreError, ClientError, aio_pika.exceptions.AMQPError, OSError) as exc:
+        reason = exc.response["Error"].get("Message", "") if isinstance(exc, ClientError) else type(exc).__name__
+        step(name, False, f"{type(exc).__name__}: {reason}"[:200])
+
+
 if __name__ == "__main__":
     check_health()
     check_api()
-    check_extraction()
-    check_conversion()
+    guarded("extraction end to end", check_extraction)
+    guarded("conversion end to end", check_conversion)
     failed = [name for name, passed, _ in results if not passed]
     summary = f"\n{len(results) - len(failed)} of {len(results)} checks passed"
     print(summary + (f"; failed: {', '.join(failed)}" if failed else ""))  # noqa: T201

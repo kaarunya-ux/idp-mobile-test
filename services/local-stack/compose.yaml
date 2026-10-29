@@ -4,8 +4,8 @@
 #   make up        # start (no building), wait until everything is healthy
 #   make check     # the readiness check: one extraction and one conversion end to end
 #
-# Mode B (default): RabbitMQ, MinIO and Keycloak run here too (profile "infra"). Mode A: point the *_URL / *_ENDPOINT
-# values in .env at the backend's instances and clear COMPOSE_PROFILES; see README.md.
+# What runs here is chosen in .env with COMPOSE_PROFILES: "infra" = RabbitMQ, MinIO and Keycloak all here (mode B);
+# or any of "rabbitmq", "minio", "keycloak" one by one, with the backend's instances for the rest; see README.md.
 name: idp-python
 
 x-extraction-build: &extraction-build
@@ -66,9 +66,10 @@ services:
       interval: 2s
       retries: 30
 
-  # --- Shared infrastructure: here in mode B, the backend's in mode A (profile "infra") ------------------------
+  # --- Shared infrastructure: here, or the backend's (profiles "infra", or "rabbitmq" / "minio" / "keycloak") ----
+  # The local RabbitMQ also carries our Celery tasks when the IDP messages use the backend's broker.
   rabbitmq:
-    profiles: [infra]
+    profiles: [infra, rabbitmq]
     image: rabbitmq:4.1-management-alpine
     ports: ["5672:5672", "15672:15672"]  # 15672: management UI, guest/guest
     environment:
@@ -79,7 +80,7 @@ services:
       retries: 30
 
   minio:
-    profiles: [infra]
+    profiles: [infra, minio]
     image: bitnamilegacy/minio:2025.4.22
     environment:
       MINIO_ROOT_USER: local-access-key
@@ -92,7 +93,7 @@ services:
       retries: 30
 
   keycloak:
-    profiles: [infra]
+    profiles: [infra, keycloak]
     image: quay.io/keycloak/keycloak:26.0.7
     command: ["start-dev", "--import-realm"]
     environment:
@@ -109,14 +110,15 @@ services:
       interval: 5s
       retries: 40
 
-  # Exchanges, plus a capped queue that keeps the last 1,000 events, so nothing waits unrouted before Java binds its
-  # own queues (an unrouted event holds back that item's later events).
+  # On the local RabbitMQ: the exchanges, plus a capped queue that keeps the last 1,000 events, so nothing waits
+  # unrouted before Java binds its own queues (an unrouted event holds back that item's later events).
   rabbit-setup:
-    profiles: [infra]
+    profiles: [infra, rabbitmq]
     image: idp-local/extraction-service:service
     build: {<<: *extraction-build, target: service}
     command: ["python", "/stack/rabbit_setup.py"]
-    environment: *extraction-env
+    environment:
+      RABBIT__URL: amqp://guest:guest@rabbitmq:5672/  # always the local broker: never touch the backend's
     volumes: ["./rabbit_setup.py:/stack/rabbit_setup.py:ro"]
     depends_on:
       rabbitmq: {condition: service_healthy}
