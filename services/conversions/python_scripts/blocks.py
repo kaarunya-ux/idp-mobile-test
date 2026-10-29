@@ -753,6 +753,59 @@ def merge_nested_tables(page: Page):
     return Page(analysis=page.analysis, blocks=blocks), merges
 
 
+
+TRIM_TABLE_SHARE = 0.9          # the tail of a text block must be this share table words to be cut off as a copy of it
+
+
+def trim_table_text(page: Page):
+    """Return (new_page, notes). A text block that holds a table's words as well as its own (a heading followed by
+    the whole table flattened to text) is cut back to the text before the table; dropped when nothing is left.
+    The model does this on some pages: the real table is written too, so the table's content appeared twice."""
+    tables = [b for b in page.blocks if isinstance(b, TableBlock)]
+    if not tables:
+        return page, []
+    out, notes = [], []
+    for block in page.blocks:
+        if isinstance(block, TableBlock) or not tables:
+            out.append(block)
+            continue
+        words = [(m.start(), normalize(m.group())) for m in re.finditer(r"\S+", block.text)]
+        cut = None
+        for table in tables:
+            cells = [normalize(w) for c in list(table.header) + [c for r in table.rows for c in r] for w in c.split()]
+            cells = [c for c in cells if c]
+            if len(cells) < 6 or not table.header:
+                continue
+            first = normalize(table.header[0].split()[0]) if table.header[0].split() else None
+            pool = {}
+            for c in cells:
+                pool[c] = pool.get(c, 0) + 1
+            for i, (_pos, w) in enumerate(words):
+                if w != first:
+                    continue
+                tail = [t for _p, t in words[i:] if t and not re.fullmatch(r"[|\-:]+", t)]
+                if len(tail) < 0.8 * len(cells):
+                    continue
+                left = dict(pool)
+                hit = 0
+                for t in tail:
+                    if left.get(t, 0) > 0:
+                        left[t] -= 1
+                        hit += 1
+                if hit / len(tail) >= TRIM_TABLE_SHARE:
+                    cut = words[i][0] if cut is None else min(cut, words[i][0])
+                    break
+        if cut is None:
+            out.append(block)
+            continue
+        kept = block.text[:cut].rstrip(" \n|")
+        if kept.strip():
+            out.append(block.model_copy(update={"text": kept}))
+            notes.append(f"cut the table's text out of {kept[:30]!r} (the table block already holds it)")
+        else:
+            notes.append(f"dropped {block.text[:30]!r}: a flattened copy of a table block")
+    return Page(analysis=page.analysis, blocks=out), notes
+
 def check_structure(page: Page):
     """Self-consistency: did the model contradict itself?
 
@@ -1008,6 +1061,36 @@ def ungrounded_text_blocks(page: Page, source_text: str) -> List[int]:
     return out
 
 
+def strip_picture_text(page: Page, source_text: str):
+    """Return (new_page, notes). A text block that mixes real page text with words read out of a picture keeps the
+    real part. The model sometimes writes a heading, the paragraph under it and a chart's axis labels as ONE block;
+    the labels are not in the text layer, so the whole block was dropped as "read from the image", paragraph included.
+    Here the lines the PDF's text holds are kept and only the lines it does not hold are cut. A block with no line
+    the PDF holds is left for ungrounded_text_blocks to drop; one that is wholly real is untouched."""
+    source = normalize(source_text)
+    source_squashed = squash(source_text)
+    if not source:
+        return page, []
+    out, notes = [], []
+    for block in page.blocks:
+        if isinstance(block, TableBlock) or "\n" not in block.text.strip():
+            out.append(block)
+            continue
+        if normalize(block.text) in source or squash(block.text) in source_squashed:
+            out.append(block)
+            continue
+        lines = [ln for ln in block.text.split("\n") if ln.strip()]
+        real = [ln for ln in lines if normalize(ln) in source or squash(ln) in source_squashed]
+        if not real or len(real) == len(lines):
+            out.append(block)
+            continue
+        gone = [ln for ln in lines if ln not in real]
+        out.append(block.model_copy(update={"text": "\n".join(real)}))
+        notes.append(f"kept the page text of {real[0][:30]!r} and cut {len(gone)} line(s) read from a picture: "
+                     f"{gone[0][:40]!r}")
+    return Page(analysis=page.analysis, blocks=out), notes
+
+
 def ungrounded_table_blocks(page: Page, source_text: str) -> List[int]:
     """Indices of tables whose cells are ALL absent from the PDF's text layer.
 
@@ -1209,6 +1292,10 @@ def snap_to_text_layer(page: Page, source_text: str,
             return None
         found = line_by_norm[hit[0]]
         if not 0.6 <= len(found) / max(len(text), 1) <= 1.6:
+            return None
+        # A cell that is only PART of a longer line is already exact: the text layer joins neighbouring cells
+        # ("101 Aarav Sharma"), and replacing the cell "Aarav Sharma" with that line copied the ID into the Name column.
+        if re.search(r"(?<!\w)" + re.escape(key) + r"(?!\w)", normalize(found)):
             return None
         return found
 

@@ -28,6 +28,8 @@ import ocr_layout
 from blocks import LayoutAnalysis, Page, TableBlock, extract_page, normalize, squash
 
 MIN_LINE = 8      # same rule as blocks.check_coverage: shorter lines are page numbers and cell fragments
+MIN_CROP_LINES = 0.6                        # a strip shorter than this many median line heights is a sliver, not a line
+TOKENS_BASE, TOKENS_PER_LINE = 300, 120      # a crop of n lines never needs more output than this (not the 4000 a page may)
 MAX_RUNS = 3      # at most this many extra model calls per pass
 MAX_ROUNDS = 2    # passes per page: the second picks up what the first left behind
 EDGE_PAD = 1.0    # crop margin, in median line heights, never reaching into a neighbouring line the model wrote
@@ -190,8 +192,15 @@ def _round(page, lines, image_path, model, base_url, include_look, reader, missi
         path, top, bottom = _crop(image_path, lines, run, n + 1)
         started = time.time()
         label = f"run {n + 1} ({len(run)} line(s), pixel rows {top}-{bottom})"
+        median = sorted(l["h"] for l in lines)[len(lines) // 2]
+        if bottom - top < MIN_CROP_LINES * median:
+            # a 2-pixel strip is an OCR speck, not a line: the model given a blank crop wrote until its token limit
+            # (4000 tokens, about 150 s) and read nothing
+            notes.append(f"{label}: skipped, the strip is only {bottom - top}px high (a line is about {median}px)")
+            continue
         try:
-            got = reader(path, model=model, base_url=base_url, include_look=include_look)
+            extra = {"num_predict": TOKENS_BASE + TOKENS_PER_LINE * len(run)} if reader is extract_page else {}
+            got = reader(path, model=model, base_url=base_url, include_look=include_look, **extra)
         except Exception as exc:
             notes.append(f"{label}: the model could not read the crop ({exc}); left as is")
             continue

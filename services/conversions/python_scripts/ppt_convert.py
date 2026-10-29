@@ -173,13 +173,69 @@ def have_impress() -> bool:
     return os.path.exists(os.path.join(folder, "libsdlo.so"))
 
 
+MIN_CONTRAST = 4.5          # WCAG contrast ratio below which a table header's text counts as unreadable
+DARK_TEXT = "1F1F1F"
+
+
+def _luminance(hex_rgb: str) -> float:
+    def lin(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(hex_rgb[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+def _contrast(a: str, b: str) -> float:
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def readable_headers(src: str, dst: str) -> int:
+    """Copy a deck to dst, turning near-invisible table-header text dark; returns the cells changed.
+    A header cell with its own light fill keeps the table style's white text, which LibreOffice (and PowerPoint)
+    draws as white on pale blue. Only that case is changed: the first row of a table whose cell has an explicit
+    fill and whose text colour (explicit or the style's white) is below MIN_CONTRAST against it."""
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.oxml.ns import qn
+
+    prs = Presentation(src)
+    changed = 0
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if not shape.has_table or not shape.table.first_row:
+                continue
+            for cell in shape.table.rows[0].cells:
+                tc_pr = cell._tc.tcPr
+                fill = tc_pr.find(qn("a:solidFill")) if tc_pr is not None else None
+                bg = fill.find(qn("a:srgbClr")) if fill is not None else None
+                if bg is None:                       # the fill comes from the table style: leave it
+                    continue
+                for para in cell.text_frame.paragraphs:
+                    for run in para.runs:
+                        r_pr = run._r.find(qn("a:rPr"))
+                        own = r_pr.find(qn("a:solidFill")) if r_pr is not None else None
+                        text = "FFFFFF" if own is None else (own.find(qn("a:srgbClr")).get("val")
+                                                             if own.find(qn("a:srgbClr")) is not None else None)
+                        if text and _contrast(text, bg.get("val")) < MIN_CONTRAST:
+                            run.font.color.rgb = RGBColor.from_string(DARK_TEXT)
+                            changed += 1
+    prs.save(dst)
+    return changed
+
+
 def to_pdf(pptx: str, out_dir: str, timeout: int = 300) -> str:
     """The deck as a PDF, a page per visible slide. Throwaway profile, so an open
-    LibreOffice window cannot swallow the call."""
+    LibreOffice window cannot swallow the call. A deck whose table headers are white on a pale fill is drawn
+    from a copy with that text made dark (the original is never changed)."""
     os.makedirs(out_dir, exist_ok=True)
-    with tempfile.TemporaryDirectory() as profile:
+    with tempfile.TemporaryDirectory() as profile, tempfile.TemporaryDirectory() as copy_dir:
+        drawn = os.path.join(copy_dir, os.path.basename(pptx))
+        if readable_headers(pptx, drawn):
+            print("  table header text was white on a light fill: drawn dark in the copy that is converted")
+        else:
+            drawn = pptx
         proc = subprocess.run([find_soffice(), f"-env:UserInstallation=file://{profile}", "--headless",
-                               "--norestore", "--convert-to", "pdf:impress_pdf_Export", "--outdir", out_dir, pptx],
+                               "--norestore", "--convert-to", "pdf:impress_pdf_Export", "--outdir", out_dir, drawn],
                               capture_output=True, text=True, timeout=timeout)
     pdf = os.path.join(out_dir, os.path.splitext(os.path.basename(pptx))[0] + ".pdf")
     if not os.path.exists(pdf):

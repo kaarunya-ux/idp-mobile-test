@@ -198,6 +198,8 @@ def restore_missing_lines(page, pdf_page, missing_lines, scan_all=False):
                           size="large" if kind == "heading" else "small" if kind == "caption" else "normal",
                           bold=False, text=text)
         after = bp if bp is not None else (bq - 1 if bq is not None else len(page.blocks) - 1)
+        if lines[first]["bbox"][3] > EDGE_BOTTOM * pdf_page.rect.height:       # a footer goes last, not where the
+            after = len(page.blocks) - 1                                         # text layer happens to list it
         inserts.append((after, first, block))
         repairs.append(f"{note_head} -> {kind}, new block after block {after})")
 
@@ -223,6 +225,8 @@ def restore_missing_lines(page, pdf_page, missing_lines, scan_all=False):
 # ---------------------------------------------------------------------------------------------------------------
 # Putting blocks the model wrote in the wrong ORDER back in the PDF's order
 # ---------------------------------------------------------------------------------------------------------------
+EDGE_BOTTOM = 0.90               # a whole-line block whose text sits below this share of the page height is a footer
+EDGE_TOP = 0.05                  # ... above this share, a running header
 SHINGLE = 6                     # a block is located by its first words; this many must match to count
 
 
@@ -247,22 +251,28 @@ def reorder_blocks(page, pdf_page):
     if len(pdf_norm) < SHINGLE or len(page.blocks) < 2:
         return page, []
 
-    # where each whole PDF line starts in the word stream
-    whole_lines, pos = {}, 0
+    # where each whole PDF line starts in the word stream, and which lines sit in the page's top / bottom margin
+    whole_lines, pos, edge_of = {}, 0, {}
+    height = pdf_page.rect.height
     for line in lines:
         ws = [w for w in (normalize(t) for t in line["text"].split()) if w]
         if ws:
             whole_lines.setdefault(tuple(ws), []).append(pos)
             pos += len(ws)
+            if line["bbox"][3] > EDGE_BOTTOM * height:
+                edge_of[tuple(ws)] = 1                  # a footer: stays last, whatever the text layer's order
+            elif line["bbox"][1] < EDGE_TOP * height:
+                edge_of[tuple(ws)] = -1                 # a running header: stays first
 
     # where each run of SHINGLE consecutive words starts in the PDF
     where = {}
     for i in range(len(pdf_norm) - SHINGLE + 1):
         where.setdefault(tuple(pdf_norm[i:i + SHINGLE]), []).append(i)
 
-    anchors = []
+    anchors, edges = [], []
     for block in page.blocks:
         words = [w for w in (normalize(t) for t in _block_text(block).split()) if w]
+        edges.append(edge_of.get(tuple(words), 0) if not isinstance(block, TableBlock) else 0)
         anchor = None
         if len(words) >= SHINGLE:
             hits = where.get(tuple(words[:SHINGLE]), [])
@@ -279,6 +289,9 @@ def reorder_blocks(page, pdf_page):
     # a block with no anchor sorts right behind the block before it
     keys, last = [], -1.0
     for n, anchor in enumerate(anchors):
+        if edges[n]:                                     # header / footer: pinned to the page edge
+            keys.append((edges[n] * 1e9, n))
+            continue
         last = float(anchor) if anchor is not None else last + 1e-6
         keys.append((last, n))
     order = [n for _, n in sorted(keys)]

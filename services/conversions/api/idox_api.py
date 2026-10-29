@@ -200,6 +200,23 @@ ROUTES = {
     "jpg_pdf_search": dict(script="tiff_to_pdf.py", model=False, needs=("tesseract",), extra=["--fit-a4"]),
 }
 
+# Model-first routes (office_model_convert.py): LibreOffice draws the pages, the big model reads them, and the
+# libraries check the result against the source file. They sit beside the library-first routes above so the
+# two can be compared on the same file. A PDF is LibreOffice alone, so that one needs no model.
+MODEL_FIRST = (("ppt", "PowerPoint", "powerpoint", "impress", ("docx", "xlsx", "csv", "pdf")),
+               ("xlsx", "Excel", "excel", "calc", ("docx", "pptx", "csv", "pdf")),
+               ("csv", "CSV", "csv", "calc", ("docx", "xlsx", "pptx", "pdf")),
+               ("pdf", "PDF", "pdf", None, ("docx", "xlsx", "pptx", "csv", "image")),
+               ("docx", "Word", "word", "soffice", ("pdf", "pptx", "csv", "image", "xlsx")),
+               ("img", "Image", "image", "tesseract", ("docx", "pdf", "csv", "pptx", "xlsx")))
+TARGET_NAMES = {"docx": "Word", "xlsx": "Excel", "pptx": "PowerPoint", "csv": "CSV", "pdf": "PDF", "image": "Images"}
+for _src, _name, _slug, _tool, _targets in MODEL_FIRST:
+    for _to in _targets:
+        # a page image set is many files, so no one file must exist; Word -> PDF and anything -> image have no model
+        ROUTES[f"mm_{_src}_{_to}"] = dict(script="office_model_convert.py", model=not (_to == "image" or (_to == "pdf" and _src == "docx")),
+                                          needs=(_tool,) if _tool else (), extra=["--to", _to],
+                                          result="" if _to == "image" else f"{{stem}}.{_to}")
+
 # The start of a valid file of each type, so a renamed file is refused at upload
 # rather than failing inside the script.
 MAGIC = {".pdf": (b"%PDF-",),
@@ -287,6 +304,7 @@ PROBLEMS = [
     (re.compile(r"COULD NOT OPEN|SKIPPED:"), "The file could not be processed."),
     (re.compile(r"Traceback \(most recent call last\)"), "The script crashed."),
     (re.compile(r"EXTRACTION FAILED"), "The model could not read the file."),
+    (re.compile(r"^\s+REVIEW:", re.M), "Words of the source file are missing from the output (see 'source check')."),
     (re.compile(r"NO TABLE DETECTED"), "No table was found in the image."),
     (re.compile(r"CONVERSION FAILED|COULD NOT READ|COULD NOT WRITE"), "The file could not be converted."),
     # word_to_pdf.py prints its verdict as "  verdict            FAIL"
@@ -329,8 +347,8 @@ def list_outputs(jid: str) -> list:
 
 def progress_of(job: dict, text: str):
     """{done, total} pages, read from the converter's own progress lines, or None."""
-    script = ROUTES[job["route"]]["script"]
-    if script == "test_pdf.py":
+    script = ROUTES.get(job["route"], {}).get("script")
+    if script in ("test_pdf.py", "office_model_convert.py"):
         m = re.search(r"testing (\d+):", text)
         done = len(re.findall(r"^Tier 1 (?:--|FAILED)", text, re.M))
     elif script in ("pdf_to_jpg.py", "pdf_to_png.py"):
@@ -767,6 +785,12 @@ class PptFile(Conversion):
         "all", description="all, or the slides to convert by number, e.g. 1, 1-3 or 2,4. Hidden slides are left out.")
 
 
+class PptDeck(Conversion):
+    """A deck with no options, for the model-first routes."""
+    EXTS = (".pptx",)
+    file: UploadFile = Field(description="The PowerPoint deck (.pptx) to convert.")
+
+
 class PptToImage(PptFile):
     format: Literal["png", "jpg", "jpeg"] = Field(
         "png", description="Picture format: png is lossless (sharp text, bigger files); jpg and jpeg are the same "
@@ -1133,6 +1157,19 @@ conversion(PPT, "powerpoint-to-csv", "ppt_csv", PptFile, "PowerPoint → CSV",
            "CSV is read back and compared cell by cell." + PPT_OFFICE)
 conversion(PPT, "powerpoint-to-image", "ppt_img", PptToImage, "PowerPoint → Image",
            "PowerPoint (.pptx) -> PNG, JPG or JPEG, one picture per slide: <name>/slide_01_<title>.png, ..." + PPT_HOW)
+MM_HOW = (" Model-first: LibreOffice draws the file as pages, the model server reads every page, and the page is "
+          "checked against the drawn page's own text. The source file is then read with the libraries "
+          "(python-pptx, openpyxl, csv) and every word it holds that the output lost is listed under 'source check'; "
+          "below 95% the job is 'review'. Slower than the library-first route (about 20-40 s a page). PDF is "
+          "LibreOffice alone, with no model. Needs LibreOffice.")
+MM_GROUPS = {"ppt": (PPT, PptDeck), "xlsx": (EXCEL, ExcelFile), "csv": (CSV, CsvFile),
+             "pdf": (PDF, PdfFile), "docx": (OTHER, WordFile), "img": (IMAGE, ImageFile)}
+for _src, _name, _slug, _tool, _targets in MODEL_FIRST:
+    for _to in _targets:
+        conversion(MM_GROUPS[_src][0], f"{_slug}-to-{TARGET_NAMES[_to].lower()}-model-first", f"mm_{_src}_{_to}",
+                   MM_GROUPS[_src][1], f"{_name} → {TARGET_NAMES[_to]} (model-first)",
+                   f"{_name} -> {TARGET_NAMES[_to]}, read by the model with the libraries checking it." + MM_HOW)
+
 conversion(OTHER, "word-to-pdf", "docx_pdf", WordFile, "Word → PDF",
            "Word (.docx) -> PDF, rendered by LibreOffice. No model. The PDF is then checked "
            "against the Word file: word coverage, paragraphs and table cells kept.")

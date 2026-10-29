@@ -38,6 +38,7 @@ Usage:
 import paths
 import argparse
 import hashlib
+import json
 import os
 import sys
 import time
@@ -55,6 +56,8 @@ from blocks import (
     split_table_problems,
     check_structure,
     drop_duplicate_blocks,
+    trim_table_text,
+    strip_picture_text,
     extract_page,
     fix_trailing_heading_after_table,
     merge_nested_tables,
@@ -478,9 +481,14 @@ def repair_table_rows(page, pdf_page):
     def cell_text(rect):
         if rect is None:
             return ""
-        return " ".join(
-            pdf_page.get_text("text", clip=pymupdf.Rect(rect)).split()
-        )
+        # Whole words whose centre lies in the cell. A clip rectangle also catches the descenders of the row above
+        # (the y of "Iyer", the g of "Marketing"), which came out as stray letters in front of the cell's text and
+        # made a correct row look missing, so a second, garbled copy of it was inserted.
+        box = pymupdf.Rect(rect)
+        words = [w for w in pdf_page.get_text("words")
+                 if box.contains(pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
+        words.sort(key=lambda w: (round(w[1] / 3), w[0]))
+        return " ".join(w[4] for w in words)
 
     blocks = list(page.blocks)
     repairs = []
@@ -927,6 +935,8 @@ parser.add_argument("--csv", metavar="FILE.csv",
 parser.add_argument("--no-ocr", action="store_true",
                     help="skip OCR verification on scanned pages, leaving "
                          "checks 2 and 4 reporting N/A as before")
+parser.add_argument("--ocr-dump", metavar="FILE.json",
+                    help="write the OCR reading of each scanned page here (page number -> text), so a caller can reuse it")
 parser.add_argument("--no-layout", action="store_true",
                     help="scanned pages only: skip the OCR layout step and keep the model's own "
                          "alignment and sizes (the old behaviour)")
@@ -987,6 +997,7 @@ total_generate_time = 0.0
 total_prefill_tokens = 0
 total_generate_tokens = 0
 
+ocr_pages = {}                  # page number -> Tesseract's reading, for --ocr-dump
 for pno in targets:
     pdf_page = doc[pno]
 
@@ -1036,6 +1047,10 @@ for pno in targets:
             verify_text = ocr.ocr_page(pdf_page)
             if verify_text.strip():
                 verify_trust = "ocr"
+                if args.ocr_dump:
+                    ocr_pages[pno] = verify_text
+                    with open(args.ocr_dump, "w", encoding="utf-8") as fh:
+                        json.dump(ocr_pages, fh)
                 print(f"           OCR: {len(verify_text)} chars read in "
                       f"{time.time() - ocr_started:.1f}s "
                       f"-- used to CHECK the model, not to replace it")
@@ -1125,6 +1140,9 @@ for pno in targets:
     # array. repeat_penalty (in extract_page()) fixes this at the source; this
     # is the deterministic backstop in case that ever isn't enough.
     page, dupes = drop_duplicate_blocks(page, source_text=source_text)
+    page, trimmed = trim_table_text(page)
+    for t in trimmed:
+        print(f"       ~ {t}")
     for d in dupes:
         print(f"       ! dropped duplicate block (model repeated itself): "
               f"{d!r}")
@@ -1338,6 +1356,9 @@ for pno in targets:
         # picture, and wrong. Only considered when images exist on the page --
         # an ungrounded block on a page with no pictures is a misread to
         # report, not something to quietly delete.
+        page, kept = strip_picture_text(page, source_text)
+        for k in kept:
+            print(f"       ~ {k}")
         bogus = ungrounded_text_blocks(page, source_text)
         for i in bogus:
             print(f"       - dropping block[{i}] "
@@ -1462,6 +1483,12 @@ if args.docx and extracted_pages:
             ocr_layout.apply_sizes_pages(
                 args.docx, [(extracted_pages[i], r) for i, r in sorted(layout_ratios.items())],
                 body_pt=(source_layout or {}).get("body_pt", 11))
+        try:                                    # layout fixes on top of the copied appearance: footer, page breaks
+            import output_layout
+            for note in output_layout.fix_docx_layout(args.docx):
+                print(f"  layout: {note}")
+        except Exception as exc:
+            print(f"  ! layout fixes skipped ({type(exc).__name__}: {exc})")
     total_conversion_time += time.time() - conversion_started
     print(f"Word document written to {args.docx}")
     if source_layout:
@@ -1529,6 +1556,12 @@ if args.xlsx and extracted_pages:
                              image_sets=page_image_sets)
     print(f"Excel file written to {args.xlsx}  "
           f"(one sheet, all pages, values kept as text)")
+    try:
+        import output_layout
+        for note in output_layout.fix_xlsx_layout(args.xlsx):
+            print(f"  layout: {note}")
+    except Exception as exc:
+        print(f"  ! layout fixes skipped ({type(exc).__name__}: {exc})")
     for p in xl_problems:
         print(f"    - {p}")
 
