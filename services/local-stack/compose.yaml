@@ -1,0 +1,252 @@
+# The three IDP Python services on one machine, for integration testing with the Java backend. Not for production.
+#
+#   make prepare   # once, ahead of time: models, infrastructure images, our images
+#   make up        # start (no building), wait until everything is healthy
+#   make check     # the readiness check: one extraction and one conversion end to end
+#
+# Mode B (default): RabbitMQ, MinIO and Keycloak run here too (profile "infra"). Mode A: point the *_URL / *_ENDPOINT
+# values in .env at the backend's instances and clear COMPOSE_PROFILES; see README.md.
+name: idp-python
+
+x-extraction-build: &extraction-build
+  context: ../extraction-service
+x-gateway-build: &gateway-build
+  context: ../ai-gateway
+x-conversion-build: &conversion-build
+  context: ../conversion-service
+
+x-infra-dependencies: &infra-dependencies
+  rabbitmq: {condition: service_healthy, required: false}
+  minio: {condition: service_healthy, required: false}
+  keycloak: {condition: service_healthy, required: false}
+
+x-common-env: &common-env
+  ENVIRONMENT: local
+  LOGGING__FORMAT: console
+  LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
+  RABBIT__URL: ${RABBIT_URL:-amqp://guest:guest@rabbitmq:5672/}
+  CELERY__BROKER_URL: ${CELERY_BROKER_URL:-amqp://guest:guest@rabbitmq:5672/}
+  STORAGE__ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
+  STORAGE__ACCESS_KEY: ${STORAGE_ACCESS_KEY:-local-access-key}
+  STORAGE__SECRET_KEY: ${STORAGE_SECRET_KEY:-local-secret-key}
+
+x-extraction-env: &extraction-env
+  <<: *common-env
+  DB__URL: postgresql+psycopg://extraction:extraction@postgres:5432/extraction_db
+  AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
+  AI_GATEWAY__URL: http://ai-gateway:8002
+  SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
+  SERVICE_AUTH__CLIENT_ID: extraction-service
+  SERVICE_AUTH__CLIENT_SECRET: ${EXTRACTION_CLIENT_SECRET:-local-extraction-secret}
+
+x-conversion-env: &conversion-env
+  <<: *common-env
+  DB__URL: postgresql+psycopg://conversion:conversion@postgres:5432/conversion_db
+
+services:
+  # --- Our own infrastructure (always) ------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: idp
+      POSTGRES_PASSWORD: idp-local
+    volumes:
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    ports: ["127.0.0.1:15432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U idp && psql -U idp -lqt | grep -q extraction_db"]
+      interval: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  # --- Shared infrastructure: here in mode B, the backend's in mode A (profile "infra") ------------------------
+  rabbitmq:
+    profiles: [infra]
+    image: rabbitmq:4.1-management-alpine
+    ports: ["5672:5672", "15672:15672"]  # 15672: management UI, guest/guest
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbit loopback_users []  # guest may connect from other machines
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      retries: 30
+
+  minio:
+    profiles: [infra]
+    image: bitnamilegacy/minio:2025.4.22
+    environment:
+      MINIO_ROOT_USER: local-access-key
+      MINIO_ROOT_PASSWORD: local-secret-key
+      MINIO_DEFAULT_BUCKETS: idp-originals,idp-derived,idp-outputs,idp-templates
+    ports: ["9000:9000", "9001:9001"]  # 9001: console
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/9000'"]
+      interval: 3s
+      retries: 30
+
+  keycloak:
+    profiles: [infra]
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://${PUBLIC_HOST:-localhost}:8080  # the issuer in every token
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"  # services inside Docker reach it as keycloak:8080
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      retries: 40
+
+  # Exchanges, plus a capped queue that keeps the last 1,000 events, so nothing waits unrouted before Java binds its
+  # own queues (an unrouted event holds back that item's later events).
+  rabbit-setup:
+    profiles: [infra]
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    command: ["python", "/stack/rabbit_setup.py"]
+    environment: *extraction-env
+    volumes: ["./rabbit_setup.py:/stack/rabbit_setup.py:ro"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+    restart: "no"
+
+  # --- ai-gateway -------------------------------------------------------------------------------------------
+  mock-model:
+    image: idp-local/ai-gateway:mock-model
+    build: {<<: *gateway-build, target: mock-model}
+    environment:
+      MOCK_MODEL__LATENCY_MS: ${MOCK_MODEL_LATENCY_MS:-300}
+
+  ai-gateway:
+    image: idp-local/ai-gateway:api
+    build: {<<: *gateway-build, target: api}
+    environment:
+      <<: *common-env
+      MODEL__BASE_URL: ${MODEL_BASE_URL:-http://mock-model:4000/v1}
+      REDIS__URL: redis://redis:6379/0
+      AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
+    ports: ["127.0.0.1:8002:8002"]  # internal service: only this machine, for debugging
+    depends_on:
+      <<: *infra-dependencies
+      redis: {condition: service_healthy}
+      mock-model: {condition: service_started}
+    healthcheck: &python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/ready')"]
+      interval: 5s
+      retries: 30
+
+  # --- extraction-service ------------------------------------------------------------------------------------
+  extraction-migrate:
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    command: ["sh", "-c", "alembic upgrade head && python -m extraction.seed"]
+    environment: *extraction-env
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  extraction-api:
+    image: idp-local/extraction-service:api
+    build: {<<: *extraction-build, target: api}
+    environment: *extraction-env
+    ports: ["8000:8000"]
+    depends_on:
+      <<: *infra-dependencies
+      extraction-migrate: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+
+  extraction-intake:
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    environment: *extraction-env
+    depends_on: &extraction-ready
+      <<: *infra-dependencies
+      extraction-migrate: {condition: service_completed_successfully}
+
+  extraction-relay:
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    command: ["python", "-m", "extraction.outbox_relay"]
+    environment: *extraction-env
+    depends_on: *extraction-ready
+
+  extraction-worker:
+    image: idp-local/extraction-service:worker
+    build: {<<: *extraction-build, target: worker}
+    command: ["celery", "-A", "extraction.worker", "worker", "-Q", "pipeline", "-c", "2", "--prefetch-multiplier", "1", "-n", "pipeline@%h"]
+    environment: *extraction-env
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]
+    depends_on: *extraction-ready
+
+  extraction-worker-ai:
+    image: idp-local/extraction-service:worker
+    build: {<<: *extraction-build, target: worker}
+    command: ["celery", "-A", "extraction.worker", "worker", "-Q", "ai", "-c", "4", "--prefetch-multiplier", "1", "-n", "ai@%h"]
+    environment: *extraction-env
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]
+    depends_on: *extraction-ready
+
+  # --- conversion-service ------------------------------------------------------------------------------------
+  conversion-migrate:
+    image: idp-local/conversion-service:service
+    build: {<<: *conversion-build, target: service}
+    command: ["alembic", "upgrade", "head"]
+    environment: *conversion-env
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  conversion-intake:
+    image: idp-local/conversion-service:service
+    build: {<<: *conversion-build, target: service}
+    environment: *conversion-env
+    depends_on: &conversion-ready
+      <<: *infra-dependencies
+      conversion-migrate: {condition: service_completed_successfully}
+
+  conversion-relay:
+    image: idp-local/conversion-service:service
+    build: {<<: *conversion-build, target: service}
+    command: ["python", "-m", "conversion.outbox_relay"]
+    environment: *conversion-env
+    depends_on: *conversion-ready
+
+  conversion-worker:
+    image: idp-local/conversion-service:worker
+    build: {<<: *conversion-build, target: worker}
+    environment: *conversion-env
+    depends_on: *conversion-ready
+
+  conversion-health:
+    image: idp-local/conversion-service:health
+    build: {<<: *conversion-build, target: health}
+    environment: *conversion-env
+    ports: ["8001:8001"]
+
+  # --- The readiness check (make check): not started by `up` -------------------------------------------------
+  stack-check:
+    profiles: [check]
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    command: ["python", "/stack/stack_check.py"]
+    environment:
+      <<: *extraction-env
+      CHECK_TOKEN_URL: ${CHECK_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
+    volumes: ["./stack_check.py:/stack/stack_check.py:ro"]
+
+volumes:
+  postgres-data:
