@@ -69,9 +69,9 @@ def pdf_to_pngs(pdf_path: str, out_dir: str, dpi: int = 150):
     return written
 
 
-def _run_model_pipeline(pdf_path, flag, out_path, md_path, base_url, model, pages):
+def _run_model_pipeline(pdf_path, flag, out_path, md_path, base_url, model, pages, extra=()):
     cmd = [sys.executable, "-u", str(REPO / "test_pdf.py"), pdf_path, f"--{flag}", out_path, "--out", md_path,
-           "--base-url", base_url, "--model", model, "--pages", pages]
+           "--base-url", base_url, "--model", model, "--pages", pages, *extra]
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     started = time.time()
     rc = subprocess.run(cmd, cwd=REPO, env=env).returncode

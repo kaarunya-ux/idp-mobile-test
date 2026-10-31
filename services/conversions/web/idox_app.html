@@ -183,6 +183,7 @@ dialog::backdrop { background: rgba(8, 16, 15, .55); }
     <div class="row">
       <span class="note" style="font-weight:600">Model used for reading pages</span>
       <div class="seg">
+        <label><input type="radio" name="backend" value="llama"> llama.cpp server (no key)</label>
         <label><input type="radio" name="backend" value="tuhin"> tuhin-ai API</label>
         <label><input type="radio" name="backend" value="local"> Local model</label>
       </div>
@@ -263,6 +264,7 @@ const srcOf = name => {
 function paintEngine() {
   const c = config, remote = c.backend === "tuhin";
   let text = "Local model", cls = "ok";
+  if (c.backend === "llama") text = `llama.cpp (${c.endpoint.replace(/^https?:\/\//, "")})`;
   if (remote) {
     const host = c.endpoint.replace(/^https?:\/\//, "");
     text = `tuhin-ai (${host}) · thinking ${c.thinking ? "on" : "off"}` + (c.key_set ? "" : " · no key");
@@ -482,8 +484,9 @@ function paintSettings() {
 }
 /* Show the key fields only for the remote API. Reads the radio as it is now, not the saved setting. */
 function toggleFields() {
-  const remote = document.querySelector("input[name=backend]:checked").value === "tuhin";
+  const backend = document.querySelector("input[name=backend]:checked").value, remote = backend !== "local";
   $("#remoteFields").hidden = !remote; $("#localNote").hidden = remote;
+  $("#key").closest("label").hidden = $("#keyNote").hidden = backend !== "tuhin";
 }
 function openSettings() { paintSettings(); $("#tests").textContent = ""; dlg.showModal(); }
 document.querySelectorAll("input[name=backend]").forEach(r => (r.onchange = toggleFields));

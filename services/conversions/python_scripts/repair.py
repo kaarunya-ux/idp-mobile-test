@@ -198,6 +198,8 @@ def restore_missing_lines(page, pdf_page, missing_lines, scan_all=False):
                           size="large" if kind == "heading" else "small" if kind == "caption" else "normal",
                           bold=False, text=text)
         after = bp if bp is not None else (bq - 1 if bq is not None else len(page.blocks) - 1)
+        if lines[first]["bbox"][3] > EDGE_BOTTOM * pdf_page.rect.height:       # a footer goes last, not where the
+            after = len(page.blocks) - 1                                         # text layer happens to list it
         inserts.append((after, first, block))
         repairs.append(f"{note_head} -> {kind}, new block after block {after})")
 
@@ -223,6 +225,8 @@ def restore_missing_lines(page, pdf_page, missing_lines, scan_all=False):
 # ---------------------------------------------------------------------------------------------------------------
 # Putting blocks the model wrote in the wrong ORDER back in the PDF's order
 # ---------------------------------------------------------------------------------------------------------------
+EDGE_BOTTOM = 0.90               # a whole-line block whose text sits below this share of the page height is a footer
+EDGE_TOP = 0.05                  # ... above this share, a running header
 SHINGLE = 6                     # a block is located by its first words; this many must match to count
 
 
@@ -247,22 +251,28 @@ def reorder_blocks(page, pdf_page):
     if len(pdf_norm) < SHINGLE or len(page.blocks) < 2:
         return page, []
 
-    # where each whole PDF line starts in the word stream
-    whole_lines, pos = {}, 0
+    # where each whole PDF line starts in the word stream, and which lines sit in the page's top / bottom margin
+    whole_lines, pos, edge_of = {}, 0, {}
+    height = pdf_page.rect.height
     for line in lines:
         ws = [w for w in (normalize(t) for t in line["text"].split()) if w]
         if ws:
             whole_lines.setdefault(tuple(ws), []).append(pos)
             pos += len(ws)
+            if line["bbox"][3] > EDGE_BOTTOM * height:
+                edge_of[tuple(ws)] = 1                  # a footer: stays last, whatever the text layer's order
+            elif line["bbox"][1] < EDGE_TOP * height:
+                edge_of[tuple(ws)] = -1                 # a running header: stays first
 
     # where each run of SHINGLE consecutive words starts in the PDF
     where = {}
     for i in range(len(pdf_norm) - SHINGLE + 1):
         where.setdefault(tuple(pdf_norm[i:i + SHINGLE]), []).append(i)
 
-    anchors = []
+    anchors, edges = [], []
     for block in page.blocks:
         words = [w for w in (normalize(t) for t in _block_text(block).split()) if w]
+        edges.append(edge_of.get(tuple(words), 0) if not isinstance(block, TableBlock) else 0)
         anchor = None
         if len(words) >= SHINGLE:
             hits = where.get(tuple(words[:SHINGLE]), [])
@@ -279,6 +289,9 @@ def reorder_blocks(page, pdf_page):
     # a block with no anchor sorts right behind the block before it
     keys, last = [], -1.0
     for n, anchor in enumerate(anchors):
+        if edges[n]:                                     # header / footer: pinned to the page edge
+            keys.append((edges[n] * 1e9, n))
+            continue
         last = float(anchor) if anchor is not None else last + 1e-6
         keys.append((last, n))
     order = [n for _, n in sorted(keys)]
@@ -290,6 +303,266 @@ def reorder_blocks(page, pdf_page):
         if n != new_pos:
             moves.append(f"{_block_text(page.blocks[n])[:40]!r} moved from position {n} to {new_pos}")
     return Page(analysis=page.analysis, blocks=[page.blocks[n] for n in order]), moves
+
+
+RESEGMENT_MIN_LINES = 3          # a block must hold at least this many PDF lines in order to be split up
+
+
+def _styled_lines(pdf_page):
+    """Every text line of the page in reading order: text, bbox, size, bold."""
+    out = []
+    for block in pdf_page.get_text("dict")["blocks"]:
+        if block["type"] != 0:
+            continue
+        for line in block["lines"]:
+            text = "".join(s["text"] for s in line["spans"]).strip()
+            if text:
+                first = next((s for s in line["spans"] if s["text"].strip()), line["spans"][0])
+                out.append({"text": text, "bbox": line["bbox"], "font": first["font"], "color": first["color"],
+                            "size": max(s["size"] for s in line["spans"]),
+                            "bold": all(s["flags"] & 16 or "bold" in s["font"].lower() for s in line["spans"] if s["text"].strip())})
+    out.sort(key=lambda l: (round(l["bbox"][1]), l["bbox"][0]))
+    return out
+
+
+def resegment_blocks(page, pdf_page):
+    """Return (new_page, notes). A text block that holds several of the page's paragraphs (a heading, the paragraph under
+    it, a caption, even a whole table flattened to words) is split back into the PDF's own headings, paragraphs and
+    tables, in the PDF's order. The model sometimes writes a page as one block; the repair steps that follow only splice
+    lines into it, so a table was lost to prose and a figure caption landed far from its figure.
+
+    The PDF's lines must run one after another through the block's text (a chain); a block they do not cover is left
+    alone. Table cells come from the detected table, never from the flattened words."""
+    from blocks import TableBlock, TextBlock
+    lines = _styled_lines(pdf_page)
+    if len(lines) < RESEGMENT_MIN_LINES:
+        return page, []
+    try:
+        detected = [(t.bbox, [[" ".join(w[4] for w in sorted(
+                        (w for w in pdf_page.get_text("words")
+                         if pymupdf.Rect(c).contains(pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))),
+                        key=lambda w: (round(w[1] / 3), w[0]))) if c else "" for c in row.cells] for row in t.rows])
+                    for t in pdf_page.find_tables().tables]
+    except Exception:
+        detected = []
+    detected = [(bb, [r for r in g if any(r)]) for bb, g in detected]
+    detected = [(bb, g) for bb, g in detected if len(g) >= 2 and len(g[0]) >= 2]
+    model_tables = [b for b in page.blocks if isinstance(b, TableBlock)]
+    body = _pdf_lines(pdf_page)[1]
+
+    def in_table(line):
+        x0, y0, x1, y1 = line["bbox"]
+        for k, (bb, _g) in enumerate(detected):
+            if bb[0] - 2 <= x0 and x1 <= bb[2] + 2 and bb[1] - 2 <= y0 and y1 <= bb[3] + 2:
+                return k
+        return None
+
+    def sq(t):
+        return re.sub(r"\W+", "", normalize(t))
+
+    new_blocks, notes, used, emitted = [], [], set(), set()
+    for block in page.blocks:
+        if isinstance(block, TableBlock) or not isinstance(block, TextBlock) or block.kind == "image":
+            new_blocks.append(block)
+            continue
+        if not block.text.strip():
+            continue                                       # an empty block says nothing
+        covered, best_len = _lines_in_block(block.text, lines, used)
+        k = len(covered)
+        text = sq(block.text)
+        if k < RESEGMENT_MIN_LINES or best_len < 0.6 * len(text):
+            new_blocks.append(block)
+            continue
+        # group the covered lines: a heading is its own block, a paragraph is a run of same-size lines close together
+        groups, tables_done = [], set(emitted)
+        for i in covered:
+            ln = lines[i]
+            t = in_table(ln)
+            if t is not None:
+                if t not in tables_done and not any(_cells_overlap(mt, detected[t][1]) for mt in model_tables):
+                    groups.append(("table", t))
+                tables_done.add(t)
+                emitted.add(t)
+                continue
+            heading = ln["size"] >= body * 1.15 or (ln["bold"] and len(ln["text"]) < 90)
+            prev = groups[-1] if groups else None
+            if (prev and prev[0] == "text" and not heading and not prev[3] and
+                    _same_paragraph(lines[prev[2][-1]], ln)):
+                prev[2].append(i)
+            else:
+                groups.append(("text", None, [i], heading))
+        for g in groups:
+            if g[0] == "table":
+                grid = detected[g[1]][1]
+                new_blocks.append(TableBlock(kind="table", has_header=True, n_data_rows=len(grid) - 1,
+                                             n_cols=len(grid[0]), header=grid[0], rows=grid[1:]))
+            else:
+                idx, heading = g[2], g[3]
+                first = lines[idx[0]]
+                kind = "heading" if heading else "paragraph"
+                size = "large" if first["size"] >= body * 1.25 else "normal"
+                new_blocks.append(TextBlock(kind=kind, align="left", size=size, bold=bool(first["bold"] and heading),
+                                            text=" ".join(lines[i]["text"] for i in idx)))
+        used.update(covered)
+        notes.append(f"split one block of {k} PDF lines back into {len(groups)} block(s) "
+                     f"({sum(1 for g in groups if g[0] == 'table')} table(s))")
+    if not notes:
+        return page, []
+    return Page(analysis=page.analysis, blocks=new_blocks), notes
+
+
+def _word_list(text: str) -> list:
+    return re.findall(r"\w+", text.lower())
+
+
+def _find_run(words: list, run: list) -> list:
+    """Every index where `run` occurs inside `words` as consecutive words."""
+    n = len(run)
+    return [i for i in range(len(words) - n + 1) if words[i:i + n] == run] if n else []
+
+
+def _lines_in_block(block_text: str, lines: list, used: set):
+    """(indexes of the PDF lines the block was written from, in PDF order; their total length).
+
+    A line counts when its words occur in the block as one consecutive run. A line of one or two words is too easy to
+    find by accident ("work." inside some other sentence), so it counts only when it sits right beside a line that
+    already counts, in the block as well as on the page. The block's own order does not matter: the model sometimes
+    writes a page's paragraphs in another order, and the lines are written out in the PDF's order."""
+    words = _word_list(block_text)
+    found = {}                                        # line index -> (start in the block, length in words)
+    for i, ln in enumerate(lines):
+        w = _word_list(ln["text"])
+        if i in used or len(w) < 3:
+            continue
+        at = _find_run(words, w)
+        if len(at) == 1:
+            found[i] = (at[0], len(w))
+    for _ in range(2):                                # short lines: beside a counted line, in both orders
+        for i, ln in enumerate(lines):
+            w = _word_list(ln["text"])
+            if i in used or i in found or not w or len(w) >= 3:
+                continue
+            at = _find_run(words, w)
+            for j in (i - 1, i + 1):
+                if j in found and any((found[j][0] + found[j][1] == p) if j < i else (p + len(w) == found[j][0]) for p in at):
+                    found[i] = (next(p for p in at if ((found[j][0] + found[j][1] == p) if j < i else (p + len(w) == found[j][0]))), len(w))
+                    break
+    covered = sorted(found)
+    return covered, sum(len("".join(_word_list(lines[i]["text"]))) for i in covered)
+
+
+RUNNING_FOOTER_FROM = 0.92       # a line whose bottom is below this share of the page height is in the footer margin
+RUNNING_HEADER_TO = 0.06         # ... one whose top is above this share is in the header margin
+RUNNING_SHARE = 0.6              # a line is "running" when it repeats on this share of the pages (and on at least two)
+
+
+def _running_key(text: str) -> str:
+    return re.sub(r"\d+", "#", " ".join(text.lower().split()))
+
+
+def find_running_lines(pdf_pages):
+    """Per page, the lines of the footer / header margin that repeat across pages, as rows: lines at one height, left to
+    right, each (text, x0, x1, font, size, bold, rgb). Repetition is judged with the numbers blanked, so "Page 2" and
+    "Page 3" are one running line. Returns (footer_rows_per_page, header_rows_per_page)."""
+    if len(pdf_pages) < 2:
+        return [[] for _ in pdf_pages], [[] for _ in pdf_pages]
+    margin = []
+    for pg in pdf_pages:
+        H = pg.rect.height
+        rows = {"footer": [], "header": []}
+        for ln in _styled_lines(pg):
+            where = "footer" if ln["bbox"][3] > RUNNING_FOOTER_FROM * H else "header" if ln["bbox"][1] < RUNNING_HEADER_TO * H else None
+            if where:
+                rows[where].append(ln)
+        margin.append(rows)
+    seen = {}
+    for rows in margin:
+        for k in {_running_key(l["text"]) for side in rows.values() for l in side}:
+            seen[k] = seen.get(k, 0) + 1
+    need = max(2, -(-len(pdf_pages) * 6 // 10))
+    out = {"footer": [], "header": []}
+    for rows in margin:
+        for side in ("footer", "header"):
+            lines = [l for l in rows[side] if seen.get(_running_key(l["text"]), 0) >= need]
+            lines.sort(key=lambda l: (round(l["bbox"][1] / 3), l["bbox"][0]))
+            grouped = []
+            for l in lines:
+                if grouped and abs(grouped[-1][0]["bbox"][1] - l["bbox"][1]) <= 3:
+                    grouped[-1].append(l)
+                else:
+                    grouped.append([l])
+            out[side].append([[(l["text"], l["bbox"][0], l["bbox"][2], l["font"], l["size"], l["bold"], l["color"]) for l in g]
+                              for g in grouped])
+    return out["footer"], out["header"]
+
+
+def strip_running_lines(pages, footer_rows, header_rows):
+    """Return (new_pages, count). The running lines are cut out of each page's text blocks (from the end for a footer,
+    the start for a header); a block left empty is dropped. They go into the file's real footer / header instead."""
+    from blocks import TableBlock, TextBlock
+    out, count = [], 0
+    for page, frows, hrows in zip(pages, footer_rows, header_rows):
+        blocks = list(page.blocks)
+        for rows, at_end in ((frows, True), (hrows, False)):
+            for row in (reversed(rows) if at_end else rows):
+                for part in (reversed(row) if at_end else row):
+                    tokens = part[0].split()
+                    if not tokens:
+                        continue
+                    pattern = r"\s*".join(re.escape(t) for t in tokens)
+                    pattern = (pattern + r"\s*$") if at_end else (r"^\s*" + pattern)
+                    for i in (range(len(blocks) - 1, -1, -1) if at_end else range(len(blocks))):
+                        b = blocks[i]
+                        if isinstance(b, TableBlock) or not isinstance(b, TextBlock):
+                            continue
+                        new = re.sub(pattern, "", b.text, count=1, flags=re.I)
+                        if new != b.text:
+                            count += 1
+                            blocks[i] = b.model_copy(update={"text": new.strip()}) if new.strip() else None
+                            break
+                    blocks = [b for b in blocks if b is not None]
+        out.append(Page(analysis=page.analysis, blocks=blocks))
+    return out, count
+
+
+def merge_continued_tables(pages, pdf_pages):
+    """Return (new_pages, notes). A table that runs from the bottom of one page onto the top of the next is one table:
+    the model read the two halves as two tables, and took the first data row of the second half for its header.
+    Joined when both pages' tables have the same number of columns and the PDF's own tables sit at the page bottom and
+    the next page's top. A second half that repeats the first half's header loses the repeat."""
+    from blocks import TableBlock
+    pages, notes = list(pages), []
+    for i in range(len(pages) - 1):
+        a, b = pages[i].blocks, pages[i + 1].blocks
+        if not a or not b or not isinstance(a[-1], TableBlock) or not isinstance(b[0], TableBlock):
+            continue
+        ta, tb = a[-1], b[0]
+        if ta.n_cols != tb.n_cols:
+            continue
+        try:
+            ends = max(t.bbox[3] for t in pdf_pages[i].find_tables().tables) / pdf_pages[i].rect.height
+            starts = min(t.bbox[1] for t in pdf_pages[i + 1].find_tables().tables) / pdf_pages[i + 1].rect.height
+        except Exception:
+            continue
+        if ends < 0.8 or starts > 0.2:
+            continue
+        second = list(tb.rows)
+        if [normalize(c) for c in tb.header] != [normalize(c) for c in ta.header]:
+            second = [list(tb.header)] + second          # its "header" was a data row
+        rows = [row for row in list(ta.rows) + second if any(str(c).strip() for c in row)]   # no blank rows
+        merged = TableBlock(kind="table", has_header=ta.has_header, n_data_rows=len(rows), n_cols=ta.n_cols,
+                            header=list(ta.header), rows=rows)
+        pages[i] = Page(analysis=pages[i].analysis, blocks=list(a[:-1]) + [merged])
+        pages[i + 1] = Page(analysis=pages[i + 1].analysis, blocks=list(b[1:]))
+        notes.append(f"the table at the end of page {i + 1} continues on page {i + 2}: joined into one ({len(rows)} rows)")
+    return pages, notes
+
+
+def _cells_overlap(model_table, grid) -> bool:
+    """True when the model's table block shares at least 30% of its cells with the detected grid."""
+    cells = {normalize(c) for r in grid for c in r if c}
+    mine = [normalize(c) for c in list(model_table.header) + [c for r in model_table.rows for c in r] if c]
+    return bool(mine) and sum(1 for c in mine if c in cells) / len(mine) >= 0.3
 
 
 # ---------------------------------------------------------------------------------------------------------------

@@ -193,13 +193,36 @@ ROUTES = {
                          note="Each frame becomes a page, unchanged. No text layer."),
 }
 
+# Model-first routes (office_model_convert.py): LibreOffice draws the pages, the model reads them, and the
+# libraries check the result against the source file. Listed beside the library-first routes so the two can be
+# compared on the same file. A PDF is LibreOffice alone, so that one needs no model.
+MODEL_FIRST = (("pptx", "ppt", "impress", ("docx", "xlsx", "csv", "pdf")),
+               ("excel", "xlsx", "calc", ("docx", "pptx", "csv", "pdf")),
+               ("csv", "csv", "calc", ("docx", "xlsx", "pptx", "pdf")),
+               ("pdf", "pdf", None, ("docx", "xlsx", "pptx", "csv", "image")),
+               ("docx", "word", "soffice", ("pdf", "pptx", "csv", "image", "xlsx")),
+               ("image", "img", "tesseract", ("docx", "pdf", "csv", "pptx", "xlsx")))
+MODEL_FIRST_LABELS = {"docx": "Word (.docx)", "xlsx": "Excel (.xlsx)", "pptx": "PowerPoint (.pptx)",
+                      "csv": "CSV", "pdf": "PDF", "image": "Images (PNG, one per page)"}
+MODEL_FIRST_NOTE = ("Model-first: LibreOffice draws the pages, the model reads each one (about 20-40 s a page), and "
+                    "the page is checked against the drawn text. The source file is then read with the libraries and "
+                    "every word the output lost is listed under 'source check'; below 95% the job is 'review'.")
+for _src, _key, _tool, _targets in MODEL_FIRST:
+    for _to in _targets:
+        ROUTES[f"mm_{_key}_{_to}"] = dict(
+            src=_src, label=f"{MODEL_FIRST_LABELS[_to]} - model-first",
+            model=not (_to == "image" or (_to == "pdf" and _src == "docx")),
+            script="office_model_convert.py", needs=[_tool] if _tool else [], extra=["--to", _to], opts=[],
+            note=MODEL_FIRST_NOTE if not (_to == "image" or (_to == "pdf" and _src == "docx"))
+            else "The drawn pages themselves (LibreOffice / PyMuPDF). No model: there is nothing to read.")
+
 # ---------------------------------------------------------------------------
 # settings (in memory only)
 # ---------------------------------------------------------------------------
 
 CONFIG = {
-    "backend": "local",                       # "local" (the llama-server on port 8090) or "tuhin" (remote API)
-    "endpoint": "http://10.0.3.2:8080",       # tuhin-ai.local does not resolve on every machine
+    "backend": "llama",                       # "llama" (a llama.cpp server at the address below, no key), "local" (port 8090) or "tuhin" (remote API)
+    "endpoint": "http://10.0.3.66:8080",      # the Qwen3.6-35B on llama.cpp; tuhin-ai.local does not resolve everywhere
     "key": os.environ.get("TUHIN_AI_KEY", "").strip(),
     "thinking": False,
     "max_image_side": 1600,
@@ -249,8 +272,8 @@ def job_env(model: bool) -> dict:
     env["PYTHONPATH"] = str(SCRIPTS)
     if model:
         with CONFIG_LOCK:
-            if CONFIG["backend"] == "tuhin":
-                if CONFIG["key"]:
+            if CONFIG["backend"] in ("tuhin", "llama"):
+                if CONFIG["key"] and CONFIG["backend"] == "tuhin":
                     env["IDOX_API_KEY"] = CONFIG["key"]
                 env["IDOX_THINKING"] = "on" if CONFIG["thinking"] else "off"
                 env["IDOX_MAX_IMAGE_SIDE"] = str(CONFIG["max_image_side"])
@@ -426,9 +449,9 @@ def read_tail(path: Path, nbytes: int = 65536) -> str:
 
 def progress_of(job: dict, text: str):
     """(done, total) pages, read from the script's own progress lines, or None."""
-    script = ROUTES[job["route"]]["script"]
+    script = ROUTES.get(job["route"], {}).get("script")
     total = None
-    if script == "test_pdf.py":
+    if script in ("test_pdf.py", "office_model_convert.py"):
         m = re.search(r"testing (\d+):", text)
         done = len(re.findall(r"^Tier 1 (?:--|FAILED)", text, re.M))
     elif script == "csv_convert.py":
@@ -546,7 +569,7 @@ def dispatcher() -> None:
             running = [j for j in JOBS.values() if j["state"] == "running"]
             n_model = sum(1 for j in running if j["model"])
             n_other = len(running) - n_model
-            model_limit = LIMITS["local"] if CONFIG["backend"] == "local" else LIMITS["tuhin"]
+            model_limit = LIMITS["tuhin"] if CONFIG["backend"] == "tuhin" else LIMITS["local"]
             for j in sorted((j for j in JOBS.values() if j["state"] == "queued"),
                             key=lambda j: j["created"]):
                 if j["model"]:
@@ -567,8 +590,9 @@ def dispatcher() -> None:
 
 def public_job(job: dict, with_log: bool = True) -> dict:
     out = {k: v for k, v in job.items() if k not in ("cancel", "pid", "base_url")}
-    out["label"] = ROUTES[job["route"]]["label"]
-    out["src_name"] = TYPE_NAMES[ROUTES[job["route"]]["src"]]
+    route = ROUTES.get(job["route"])                  # a job saved by a route that has since been removed still lists
+    out["label"] = route["label"] if route else f"{job['route']} (route removed)"
+    out["src_name"] = TYPE_NAMES[route["src"]] if route else ""
     if job["state"] in ("running", "queued") or with_log:
         text = read_tail(job_dir(job["id"]) / "log.txt")
         out["progress"] = progress_of(job, text) if job["state"] == "running" else None
@@ -833,7 +857,7 @@ class Handler(BaseHTTPRequestHandler):
     def post_config(self):
         data = self.body_json()
         with CONFIG_LOCK:
-            if data.get("backend") in ("tuhin", "local"):
+            if data.get("backend") in ("tuhin", "local", "llama"):
                 CONFIG["backend"] = data["backend"]
             if "endpoint" in data:
                 CONFIG["endpoint"] = clean_endpoint(str(data["endpoint"]))
@@ -983,7 +1007,7 @@ def main() -> None:
         print(f"and on this laptop: http://127.0.0.1:{args.port}", flush=True)
         print(f"NOTE: reachable by anyone who can reach {args.host}; there is no login.", flush=True)
     print(f"engine: {'local model' if CONFIG['backend'] == 'local' else CONFIG['endpoint']}"
-          f"   key: {'set from TUHIN_AI_KEY' if CONFIG['key'] else 'not set (add it in Settings)'}")
+          f"   key: {'not needed' if CONFIG['backend'] == 'llama' else 'set from TUHIN_AI_KEY' if CONFIG['key'] else 'not set (add it in Settings)'}")
     print(f"jobs kept in {JOBS_DIR}" + (f"  ({removed} old ones removed)" if removed else ""))
     print("Press Ctrl+C to stop.", flush=True)
     try:
