@@ -1,0 +1,18 @@
+# Local run of the service's own process (standard ch. 3.2). The model server it will call is outside this file: set
+# MODEL__BASE_URL in .env to where llama.cpp runs.
+services:
+  api:
+    build:
+      context: .
+      target: api
+    image: idox-conversion-api:local
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/live')"]
+      interval: 15s
+      timeout: 3s
+      retries: 3

@@ -46,6 +46,7 @@ def ocr_lines(image_path):
         lines.append({"x0": min(w[0] for w in ws), "x1": max(w[0] + w[2] for w in ws),
                       "top": min(w[1] for w in ws), "bottom": max(w[1] + w[3] for w in ws),
                       "h": hs[int(0.75 * (len(hs) - 1))],
+                      "words": [(w[0], w[1], w[0] + w[2], w[1] + w[3]) for w in ws],
                       "text": " ".join(w[4] for w in ws)})
     lines.sort(key=lambda l: (l["top"], l["x0"]))
     return img.size, lines
@@ -55,15 +56,15 @@ def text_area(lines):
     # lines and shifted the centre by 10 px, which made a centred title look right-aligned.
     return min(l["x0"] for l in lines), max(l["x1"] for l in lines)
 
-def classify(line, L, R, page_w=None):
-    W = R - L
+def classify(line, left_edge, right_edge, page_w=None):
+    width = right_edge - left_edge
     cx = (line["x0"] + line["x1"]) / 2
-    lgap, rgap = line["x0"] - L, R - line["x1"]
-    if abs(cx - (L + R) / 2) <= CENTRE_TOL * W and lgap > MIN_GAP * W and rgap > MIN_GAP * W:
+    lgap, rgap = line["x0"] - left_edge, right_edge - line["x1"]
+    if abs(cx - (left_edge + right_edge) / 2) <= CENTRE_TOL * width and lgap > MIN_GAP * width and rgap > MIN_GAP * width:
         return "center"
-    if rgap <= EDGE_TOL * W and lgap > RIGHT_MIN_LEFT_GAP * W:
+    if rgap <= EDGE_TOL * width and lgap > RIGHT_MIN_LEFT_GAP * width:
         return "right"
-    if lgap <= MIN_GAP * W and rgap <= MIN_GAP * W:
+    if lgap <= MIN_GAP * width and rgap <= MIN_GAP * width:
         # Fills the whole text area, so centred and left look the same INSIDE it (and a widest line defines the area
         # itself). The PAGE decides: a centred line sits on the page's middle; one that starts at the text margin but
         # is off-centre on the page is left-aligned. Only a line that is also centred on the page stays ambiguous.
@@ -92,7 +93,7 @@ def match_block(block, lines, used):
 def apply_ocr_layout(page, image_path):
     """Returns (new_page, report_rows, ratios, info). ratios maps block index -> line height / body height.
     Text is never changed: only align, size label and all-empty table rows."""
-    (iw, ih), lines = ocr_lines(image_path)
+    (iw, _), lines = ocr_lines(image_path)
     if not lines:
         return page, [], {}, {}
     L, R = text_area(lines)
@@ -263,7 +264,7 @@ def polish_image_docx(docx_path, page, info, ratios, image_path):
             pass
     doc.styles["Normal"].font.size = Pt(body_pt)
 
-    tables = [t for t in doc.tables]
+    tables = list(doc.tables)
     if tables:
         _size, lines = ocr_lines(image_path)
         cells = _table_cells(page)
@@ -271,8 +272,12 @@ def polish_image_docx(docx_path, page, info, ratios, image_path):
         n_rows = len(tables[0].rows)
         # first row to last row spread over the rows between them: robust when OCR misses a middle row
         pitch = _ruled_row_pitch(image_path)
-        row_pt = pitch * sc if pitch else ((tops[-1] - tops[0]) / (n_rows - 1) * sc
-                                           if len(tops) >= 2 and n_rows >= 2 else None)
+        if pitch:
+            row_pt = pitch * sc
+        elif len(tops) >= 2 and n_rows >= 2:
+            row_pt = (tops[-1] - tops[0]) / (n_rows - 1) * sc
+        else:
+            row_pt = None
         for t in tables:
             n_cols = len(t.columns)
             weight = [max([len(r.cells[c].text) for r in t.rows] + [1]) + 4 for c in range(n_cols)]
@@ -365,7 +370,7 @@ def scan_pictures(pdf_doc, pno, out_dir, scale=1.0):
         except Exception:
             continue
         pics.append({"path": path, "ext": data.get("ext", "png"), "bytes": len(data["image"]),
-                     "sha1": hashlib.sha1(data["image"]).hexdigest(), "px": (data["width"], data["height"]),
+                     "sha1": hashlib.sha1(data["image"], usedforsecurity=False).hexdigest(), "px": (data["width"], data["height"]),
                      "bbox_pt": (x0 * scale, y0 * scale, x1 * scale, y1 * scale)})
     if sum((p["bbox_pt"][2] - p["bbox_pt"][0]) * (p["bbox_pt"][3] - p["bbox_pt"][1]) for p in pics) \
             > PICTURES_MAX_SHARE * area * scale * scale:
@@ -447,7 +452,7 @@ def scan_graphics(png_path, lines, cells, out_dir, pno, sc):
         path = os.path.join(out_dir, f"p{pno + 1:03d}_scangfx{k:02d}.png")
         crop.save(path)
         data = open(path, "rb").read()
-        pics.append({"path": path, "ext": "png", "bytes": len(data), "sha1": hashlib.sha1(data).hexdigest(),
+        pics.append({"path": path, "ext": "png", "bytes": len(data), "sha1": hashlib.sha1(data, usedforsecurity=False).hexdigest(),
                      "px": crop.size, "bbox_pt": (tx0 * sc, ty0 * sc, tx1 * sc, ty1 * sc), "float": True})
     return pics
 
@@ -514,7 +519,7 @@ def _reading_order(pages, ratios_list, img_paths):
             size, lines = ocr_lines(png)
             idx = _match_all(page, lines) if lines else {}
             if len(idx) == n and _single_column(lines, size[0]):
-                order = sorted(range(n), key=lambda bi: idx[bi])
+                order = sorted(range(n), key=idx.__getitem__)
                 if order != list(range(n)):
                     rm = {old: new for new, old in enumerate(order)}
                     page = Page(analysis=page.analysis, blocks=[page.blocks[i] for i in order])
@@ -551,22 +556,23 @@ def _strip_picture_lines(pages, plan, pics_by_page):
     return out
 
 
+def _line_in_boxes(lines, line_index, boxes):
+    """Whether the centre of line ``line_index`` lies inside any of the boxes (False when the block has no line)."""
+    if line_index is None:
+        return False
+    ln = lines[line_index]
+    cx, cy = (ln["x0"] + ln["x1"]) / 2, (ln["top"] + ln["bottom"]) / 2
+    return any(b[0] <= cx <= b[2] and b[1] <= cy <= b[3] for b in boxes)
+
+
 def _drop_picture_text(pages, ratios_list, plan, pics_by_page):
     """Text the model read OUT OF a picture is a duplicate of that picture: remove those blocks, re-index the rest."""
     sc = plan["sc"]
     new_pages, new_ratios = [], []
     for page, ratios, info, pics in zip(pages, ratios_list, plan["pages"], pics_by_page):
         boxes = [tuple(v / sc for v in p["bbox_pt"]) for p in pics]
-        keep = []
-        for bi in range(len(page.blocks)):
-            li = info["idx"].get(bi)
-            inside = False
-            if li is not None:
-                ln = info["lines"][li]
-                cx, cy = (ln["x0"] + ln["x1"]) / 2, (ln["top"] + ln["bottom"]) / 2
-                inside = any(b[0] <= cx <= b[2] and b[1] <= cy <= b[3] for b in boxes)
-            if not inside:
-                keep.append(bi)
+        keep = [bi for bi in range(len(page.blocks))
+                if not _line_in_boxes(info["lines"], info["idx"].get(bi), boxes)]
         if len(keep) != len(page.blocks):
             rm = {o: n for n, o in enumerate(keep)}
             page = Page(analysis=page.analysis, blocks=[page.blocks[i] for i in keep])
@@ -581,6 +587,14 @@ def _drop_picture_text(pages, ratios_list, plan, pics_by_page):
     return new_pages, new_ratios
 
 
+def _block_after(info, n_blocks, top_px):
+    """The first block whose line starts at or below ``top_px``: the block a picture at that height comes before."""
+    for bi, li in info["order"]:
+        if info["lines"][li]["top"] >= top_px:
+            return bi
+    return n_blocks
+
+
 def _picture_plan(pages, plan, pics_by_page):
     """Where each picture goes: the block it follows, the gap above it and its left offset, all from the scan."""
     sc = plan["sc"]
@@ -590,12 +604,7 @@ def _picture_plan(pages, plan, pics_by_page):
         entries = []
         for p in pics:
             x0, y0, x1, y1 = p["bbox_pt"]
-            top_px = y0 / sc
-            after = n
-            for bi, li in info["order"]:
-                if info["lines"][li]["top"] >= top_px:
-                    after = bi
-                    break
+            after = _block_after(info, n, y0 / sc)
             above = [l["bottom"] * sc for l in info["lines"] if l["bottom"] * sc <= y0]
             p["gap_pt"] = max(0.0, y0 - max(above)) if above else 0.0
             p["after_block"] = after
@@ -723,6 +732,16 @@ def build_scanned_docx(pages, ratios_list, img_paths, pdf_doc, pnos, docx_path, 
                                                     pnos[i], plan["sc"])
                 except Exception as exc:
                     log(f"  ! could not look for a logo on page {i + 1} ({type(exc).__name__}: {exc})")
+    if image_dir:
+        # Large filled graphics (a title banner, a chart panel) are cut out of the scan too.
+        import scan_look
+        for i, (page, info) in enumerate(zip(pages, plan["pages"])):
+            try:
+                taken = [tuple(v / plan["sc"] for v in p["bbox_pt"]) for p in pics_by_page[i]]
+                pics_by_page[i] = pics_by_page[i] + scan_look.find_graphic_regions(
+                    info["png"], info["lines"], _table_cells(page), image_dir, pnos[i], plan["sc"], taken)
+            except Exception as exc:
+                log(f"  ! could not look for graphics on page {i + 1} ({type(exc).__name__}: {exc})")
     n_pics = sum(len(p) for p in pics_by_page)
     if n_pics:
         pages = _strip_picture_lines(pages, plan, pics_by_page)
@@ -783,4 +802,10 @@ def build_scanned_docx(pages, ratios_list, img_paths, pdf_doc, pnos, docx_path, 
         for f in pngs:
             if os.path.exists(f):
                 os.remove(f)
+    try:                                                  # colours and fills measured from the scan
+        import scan_look
+        for note in scan_look.apply_scan_colours(docx_path, pages, plan):
+            log(f"  scan look: {note}")
+    except Exception as exc:
+        log(f"  ! colours from the scan skipped ({type(exc).__name__}: {exc})")
     return problems

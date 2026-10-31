@@ -47,13 +47,14 @@ import doc_pipeline
 from to_xlsx import cell_display
 from ppt_convert import readable_headers       # white-on-pale table headers, see there
 
-MODEL_URL = "http://10.0.3.66:8080"          # Qwen3.6-35B on llama.cpp
+MODEL_URL = os.environ.get("IDOX_BASE_URL", "http://127.0.0.1:8080")   # the llama.cpp server that reads pages
+PPTX, XLSX, DOCX, CSV, PDF = ".pptx", ".xlsx", ".docx", ".csv", ".pdf"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp")
-ROUTES = {".pptx": ("docx", "xlsx", "csv", "pdf"),
-          ".xlsx": ("docx", "pptx", "csv", "pdf"),
-          ".csv": ("docx", "xlsx", "pptx", "pdf"),
-          ".pdf": ("docx", "xlsx", "pptx", "csv", "image"),
-          ".docx": ("pdf", "pptx", "csv", "image", "xlsx")}
+ROUTES = {PPTX: ("docx", "xlsx", "csv", "pdf"),
+          XLSX: ("docx", "pptx", "csv", "pdf"),
+          CSV: ("docx", "xlsx", "pptx", "pdf"),
+          PDF: ("docx", "xlsx", "pptx", "csv", "image"),
+          DOCX: ("pdf", "pptx", "csv", "image", "xlsx")}
 ROUTES.update({ext: ("docx", "pdf", "csv", "pptx", "xlsx") for ext in IMAGE_EXTS})
 MIN_COVERAGE = 95.0                           # % of the source's words that must be in the output
 MIN_COVERAGE_OCR = 85.0                       # the same, when the source itself had to be read by OCR
@@ -64,7 +65,8 @@ IMAGE_DPI = 150                               # --to image
 def _tokens(text: str) -> list:
     """Words and numbers, lower-cased; thousands commas and currency signs removed so $1,200.50 matches 1200.50."""
     text = re.sub(r"(?<=\d),(?=\d)", "", text.lower())
-    return re.findall(r"[^\W_]+", text)
+    # 01 and 1 are the same number: a date shown as 1/1/2024 must match one stored as 2024-01-01
+    return [w.lstrip("0") or "0" if w.isdigit() else w for w in re.findall(r"[^\W_]+", text)]
 
 
 def fit_sheets_to_page(src: str, dst: str) -> bool:
@@ -76,7 +78,8 @@ def fit_sheets_to_page(src: str, dst: str) -> bool:
 
     with zipfile.ZipFile(src) as zf:
         if any(n.startswith(("xl/drawings/", "xl/charts/", "xl/media/")) for n in zf.namelist()):
-            return False
+            _fit_by_xml(src, dst)                    # charts and pictures: edit the sheets' page setup in place
+            return True
     wb = openpyxl.load_workbook(src)
     for ws in wb:
         ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
@@ -88,6 +91,41 @@ def fit_sheets_to_page(src: str, dst: str) -> bool:
     return True
 
 
+
+
+_AFTER_PAGE_SETUP = ("headerFooter", "rowBreaks", "colBreaks", "customProperties", "cellWatches", "ignoredErrors",
+                     "smartTags", "drawing", "legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects",
+                     "controls", "webPublishItems", "tableParts", "extLst")
+
+
+def _fit_by_xml(src: str, dst: str) -> None:
+    """The same one-page-wide landscape setup, written straight into each sheet's XML. openpyxl cannot do it for a
+    workbook with a chart or picture: saving would drop them. Nothing else in the file is touched."""
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", item.filename):
+                xml = data.decode("utf-8")
+                if re.search(r"<sheetPr\b[^>]*/>", xml):
+                    xml = re.sub(r"<sheetPr\b([^>]*)/>", r'<sheetPr\1><pageSetUpPr fitToPage="1"/></sheetPr>', xml, count=1)
+                elif "<sheetPr" in xml:
+                    if "<pageSetUpPr" in xml:
+                        xml = re.sub(r"<pageSetUpPr\b[^>]*/>", '<pageSetUpPr fitToPage="1"/>', xml, count=1)
+                    else:
+                        xml = xml.replace("</sheetPr>", '<pageSetUpPr fitToPage="1"/></sheetPr>', 1)
+                else:
+                    xml = re.sub(r"(<worksheet\b[^>]*>)", r'\1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>', xml, count=1)
+                setup = '<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>'
+                if re.search(r"<pageSetup\b[^>]*/>", xml):
+                    xml = re.sub(r"<pageSetup\b[^>]*/>", setup, xml, count=1)
+                elif re.search(r"<pageMargins\b[^>]*/>", xml):
+                    xml = re.sub(r"(<pageMargins\b[^>]*/>)", r"\1" + setup, xml, count=1)
+                else:
+                    later = [m.start() for t in _AFTER_PAGE_SETUP for m in [re.search(rf"<{t}\b", xml)] if m]
+                    at = min(later) if later else xml.rfind("</worksheet>")
+                    xml = xml[:at] + setup + xml[at:]
+                data = xml.encode("utf-8")
+            zout.writestr(item, data)
 
 
 def _units(ws):
@@ -104,10 +142,15 @@ def _units(ws):
     for first, last in blocks:
         one_line = first == last and sum(c.value is not None for c in ws[first]) == 1
         if units and units[-1][2]:                   # the line above was a title: it belongs to this table
-            units[-1] = [units[-1][0], last, False]
+            units[-1] = [units[-1][0], last, one_line and len(units) == 1]   # at the sheet's start every title line joins
         else:
             units.append([first, last, one_line])
     return [(a, b) for a, b, _ in units]
+
+
+def _is_table(ws, first: int, last: int) -> bool:
+    """A table has a row with two or more filled cells; a block of one-cell rows is notes, not a table."""
+    return any(sum(c.value is not None for c in ws[r]) >= 2 for r in range(first, last + 1))
 
 
 def _break_between_tables(ws) -> None:
@@ -118,7 +161,7 @@ def _break_between_tables(ws) -> None:
 
     previous_end = 0
     for first, last in _units(ws):
-        if previous_end:                             # one table to a page: the model reads one table at a time
+        if previous_end and _is_table(ws, first, last):    # one table to a page; notes stay under the table above
             ws.row_breaks.append(Break(id=previous_end))
         previous_end = last
 
@@ -143,7 +186,7 @@ def csv_to_text_workbook(src: str, dst: str) -> None:
     wb = openpyxl.Workbook()
     ws = wb.active
     for row in csv.reader(text.splitlines(), dialect):
-        ws.append([c for c in row])
+        ws.append(list(row))
     for line in ws.iter_rows():
         for cell in line:
             cell.number_format = "@"                  # text: shown exactly as written
@@ -160,16 +203,16 @@ def csv_to_text_workbook(src: str, dst: str) -> None:
 def table_counts(src: str, out: str):
     """(tables in the source, tables in the Word output): a table cut in two shows up as too many."""
     ext = os.path.splitext(src)[1].lower()
-    if ext == ".pptx":
+    if ext == PPTX:
         from pptx import Presentation
         want = sum(1 for sl in Presentation(src).slides for sh in sl.shapes if getattr(sh, "has_table", False) and sh.has_table)
-    elif ext == ".xlsx":
+    elif ext == XLSX:
         import openpyxl
         want = 0
         for ws in openpyxl.load_workbook(src, data_only=True):
-            tables = [(a, b) for a, b in _units(ws) if b > a]            # a table has a header and at least a row
+            tables = [(a, b) for a, b in _units(ws) if b > a and _is_table(ws, a, b)]
             want += len(tables) or (1 if ws.max_row > 1 or ws.max_column > 1 else 0)
-    elif ext == ".csv":
+    elif ext == CSV:
         want = 1
     else:
         want = None                                  # a PDF, Word file or image has no table list to count against
@@ -177,38 +220,50 @@ def table_counts(src: str, out: str):
     return want, len(docx.Document(out).tables)
 
 
-def _pptx_text(path: str) -> str:
-    from pptx import Presentation
+def _shape_parts(shape) -> list[str]:
+    """The words one shape holds: its text, its table cells and its chart's names and values."""
+    parts: list[str] = []
+    if shape.has_text_frame:
+        parts.append(shape.text_frame.text)
+    if getattr(shape, "has_table", False) and shape.has_table:
+        parts.extend(c.text for row in shape.table.rows for c in row.cells)
+    if getattr(shape, "has_chart", False) and shape.has_chart:
+        for plot in shape.chart.plots:
+            parts.extend(str(c) for c in plot.categories)
+            parts.extend(s.name or "" for s in plot.series)
+            parts.extend(str(v) for s in plot.series for v in s.values if v is not None)
+    return parts
+
+
+def _walk_shapes(shapes) -> list[str]:
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-    parts = []
+    parts: list[str] = []
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            parts.extend(_walk_shapes(shape.shapes))
+        else:
+            parts.extend(_shape_parts(shape))
+    return parts
 
-    def walk(shapes):
-        for sh in shapes:
-            if sh.shape_type == MSO_SHAPE_TYPE.GROUP:
-                walk(sh.shapes)
-                continue
-            if sh.has_text_frame:
-                parts.append(sh.text_frame.text)
-            if getattr(sh, "has_table", False) and sh.has_table:
-                parts.extend(c.text for row in sh.table.rows for c in row.cells)
-            if getattr(sh, "has_chart", False) and sh.has_chart:
-                for plot in sh.chart.plots:
-                    parts.extend(str(c) for c in plot.categories)
-                    parts.extend(s.name or "" for s in plot.series)
-                    parts.extend(str(v) for s in plot.series for v in s.values if v is not None)
 
-    for slide in Presentation(path).slides:
-        walk(slide.shapes)
-    return "\n".join(parts)
+def _pptx_text(path: str) -> str:
+    from pptx import Presentation
+
+    return "\n".join(part for slide in Presentation(path).slides for part in _walk_shapes(slide.shapes))
 
 
 def _xlsx_text(path: str) -> str:
     import openpyxl
     wb = openpyxl.load_workbook(path, data_only=True)
     # as the cell is shown (45.00, not 45): the number format decides, the same way the writer applies it
-    return "\n".join(cell_display(c.value, c.number_format) for ws in wb for row in ws.iter_rows() for c in row
-                     if c.value is not None)
+    import datetime
+
+    def shown(c):
+        if isinstance(c.value, datetime.datetime):             # a date is read by its parts, not as 2024-01-01 00:00:00
+            return f"{c.value.month}/{c.value.day}/{c.value.year}"
+        return cell_display(c.value, c.number_format)
+    return "\n".join(shown(c) for ws in wb for row in ws.iter_rows() for c in row if c.value is not None)
 
 
 def _csv_text(path: str) -> str:
@@ -274,13 +329,13 @@ def render_pages(pdf: str, outdir: str, name: str) -> list:
 
 def _out_text(path: str) -> str:
     ext = os.path.splitext(path)[1].lower()
-    if ext == ".pdf":
+    if ext == PDF:
         return _pdf_text(path)
-    if ext == ".docx":
+    if ext == DOCX:
         return _docx_text(path)
-    if ext == ".xlsx":
+    if ext == XLSX:
         return _xlsx_text(path)
-    if ext == ".pptx":
+    if ext == PPTX:
         return _pptx_text(path)
     return _csv_text(path)
 
@@ -290,10 +345,10 @@ def source_text(path: str, pdf: str):
     ext = os.path.splitext(path)[1].lower()
     if ext in IMAGE_EXTS:
         return ocr_text(pdf), True
-    if ext == ".pdf":
+    if ext == PDF:
         text = _pdf_text(path)
         return (text, False) if text.strip() else (ocr_text(path), True)       # no text layer: a scan
-    return {".pptx": _pptx_text, ".xlsx": _xlsx_text, ".csv": _csv_text, ".docx": _docx_text}[ext](path), False
+    return {PPTX: _pptx_text, XLSX: _xlsx_text, CSV: _csv_text, DOCX: _docx_text}[ext](path), False
 
 
 def _ocr_reading(dump: str):
@@ -338,48 +393,91 @@ def convert(src: str, to: str, outdir: str, base_url: str, model: str, pages: st
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _convert(src: str, to: str, outdir: str, work: str, name: str, base_url: str, model: str, pages: str) -> bool:
-    started = time.time()
-    to_draw = os.path.abspath(src)
-    if to_draw.lower().endswith(".csv"):                             # drawn as text, so 45.00 stays 45.00
-        as_book = os.path.join(work, f"{name}.xlsx")
+def _drawable(src: str, work: str, name: str) -> str:
+    """The file to draw: a copy made easier to read (never the original), or the source itself."""
+    path = os.path.abspath(src)
+    suffix = path.lower()
+    if suffix.endswith(CSV):                                         # drawn as text, so 45.00 stays 45.00
+        as_book = os.path.join(work, f"{name}{XLSX}")
         csv_to_text_workbook(src, as_book)
-        to_draw = as_book
         print("  drew the CSV as text cells (numbers keep their written form), one page wide")
-    elif to_draw.lower().endswith(".xlsx"):                          # a copy, so the original workbook is never touched
-        fitted = os.path.join(work, f"{name}.xlsx")
+        return as_book
+    if suffix.endswith(XLSX):
+        fitted = os.path.join(work, f"{name}{XLSX}")
         if fit_sheets_to_page(src, fitted):
-            to_draw = fitted
             print("  set every sheet to one page wide (landscape) in the copy that is drawn")
-        else:
-            print("  the workbook has charts or pictures: drawn as it is (wide sheets may spread over several pages)")
-    if to_draw.lower().endswith(".pptx"):                            # a copy, so the original deck is never touched
-        to_draw = os.path.join(work, f"{name}.pptx")
-        changed = readable_headers(src, to_draw)
+            return fitted
+        print("  the workbook has charts or pictures: drawn as it is (wide sheets may spread over several pages)")
+        return path
+    if suffix.endswith(PPTX):
+        copy = os.path.join(work, f"{name}{PPTX}")
+        changed = readable_headers(src, copy)
         if changed:
             print(f"  made {changed} header cell(s) readable (white text on a light fill) in the copy that is drawn")
-    ext = to_draw.lower().rsplit(".", 1)[-1]
-    if ext == "pdf":                                                 # already pages: a scan or a digital PDF
-        pdf = to_draw
-    elif "." + ext in IMAGE_EXTS:                                    # an image: a PDF page the pipeline can read
-        pdf = os.path.join(work, f"{name}.pdf")
+        return copy
+    return path
+
+
+def _pages_of(to_draw: str, work: str, name: str) -> str:
+    """The PDF whose pages the model reads: the PDF itself, a one-page PDF made from an image, or LibreOffice's pages."""
+    suffix = os.path.splitext(to_draw)[1].lower()
+    if suffix == PDF:                                                # already pages: a scan or a digital PDF
+        return to_draw
+    if suffix in IMAGE_EXTS:                                         # an image: a PDF page the pipeline can read
+        pdf = os.path.join(work, f"{name}{PDF}")
         image_to_pdf(to_draw, pdf)
         print("  made a PDF page from the image")
-    else:
-        pdf = doc_pipeline.docx_to_pdf(to_draw, work)                # LibreOffice draws any Office file or CSV
-        print(f"  LibreOffice drew {pdf}")
+        return pdf
+    pdf = doc_pipeline.docx_to_pdf(to_draw, work)                    # LibreOffice draws any Office file or CSV
+    print(f"  LibreOffice drew {pdf}")
+    return pdf
+
+
+def _report_checks(src: str, out_path: str, pdf: str, read, to: str) -> str:
+    """Print the source check and the table count; return OK or REVIEW."""
+    coverage, missing, ocr = check_against_source(src, out_path, pdf, read)
+    floor = MIN_COVERAGE_OCR if ocr else MIN_COVERAGE
+    print(f"\n  source check{' (OCR reading of the source)' if ocr else ''}: {coverage:.1f}% of the source's words "
+          f"are in {os.path.basename(out_path)}")
+    if missing:
+        print(f"  missing from the output ({len(missing)}): {', '.join(missing[:15])}{' ...' if len(missing) > 15 else ''}")
+    verdict = "OK" if coverage >= floor else "REVIEW"
+    if to == "docx":
+        want, got = table_counts(src, out_path)
+        if want is not None:
+            print(f"  tables: {got} in the Word file for {want} in the source")
+        if want is not None and got != want:
+            print("  (a different count can mean a table was cut in two, or a sheet or slide holds several tables)")
+            verdict = "REVIEW"
+    return verdict
+
+
+def _render_only(pdf: str, to: str, outdir: str, name: str, from_image: bool, started: float) -> bool | None:
+    """The routes no model reads: page images, and an Office file to PDF. None when the model has to read the pages."""
     out_path = os.path.join(outdir, f"{name}.{to}")
     if to == "image":
         written = render_pages(pdf, outdir, name)
         print(f"\n  OK: {len(written)} page image(s) in {outdir}  ({time.time() - started:.0f}s, no model)")
         return bool(written)
-    if to == "pdf" and "." + ext not in IMAGE_EXTS:
+    if to == "pdf" and not from_image:
         shutil.copyfile(pdf, out_path)
         print(f"\n  OK: {out_path}  ({time.time() - started:.0f}s, no model: LibreOffice's own pages)")
         return True
+    return None
+
+
+def _convert(src: str, to: str, outdir: str, work: str, name: str, base_url: str, model: str, pages: str) -> bool:
+    started = time.time()
+    to_draw = _drawable(src, work, name)
+    pdf = _pages_of(to_draw, work, name)
+    from_image = os.path.splitext(to_draw)[1].lower() in IMAGE_EXTS
+    rendered = _render_only(pdf, to, outdir, name, from_image, started)
+    if rendered is not None:
+        return rendered
+    out_path = os.path.join(outdir, f"{name}.{to}")
     via_word = to == "pdf"                                           # image -> PDF: read into Word, then LibreOffice
     model_to = "docx" if via_word else to
-    model_out = os.path.join(work, f"{name}.docx") if via_word else out_path
+    model_out = os.path.join(work, f"{name}{DOCX}") if via_word else out_path
     drawn_s = time.time() - started
     # a scan or image is read by Tesseract once, as each page is drawn, and the final check reuses that reading
     dump = os.path.join(work, "ocr.json")
@@ -395,20 +493,7 @@ def _convert(src: str, to: str, outdir: str, work: str, name: str, base_url: str
         shutil.copyfile(made, out_path)
         shutil.rmtree(work + "_pdf", ignore_errors=True)
     checking = time.time()
-    coverage, missing, ocr = check_against_source(src, out_path, pdf, read)
-    floor = MIN_COVERAGE_OCR if ocr else MIN_COVERAGE
-    print(f"\n  source check{' (OCR reading of the source)' if ocr else ''}: {coverage:.1f}% of the source's words "
-          f"are in {os.path.basename(out_path)}")
-    if missing:
-        print(f"  missing from the output ({len(missing)}): {', '.join(missing[:15])}{' ...' if len(missing) > 15 else ''}")
-    verdict = "OK" if coverage >= floor else "REVIEW"
-    if to == "docx":
-        want, got = table_counts(src, out_path)
-        if want is not None:
-            print(f"  tables: {got} in the Word file for {want} in the source")
-        if want is not None and got != want:
-            print("  (a different count can mean a table was cut in two, or a sheet or slide holds several tables)")
-            verdict = "REVIEW"
+    verdict = _report_checks(src, out_path, pdf, read, to)
     print(f"  time: drawing the pages {drawn_s:.0f}s, reading and writing {secs:.0f}s, "
           f"checking against the source {time.time() - checking:.0f}s")
     print(f"  {verdict}: {out_path}  ({time.time() - started:.0f}s)")
@@ -424,7 +509,7 @@ def main():
     parser.add_argument("--keep-work", action="store_true",
                         help="also keep the drawn PDF and the model's Markdown, in <outdir>/<name>_work/")
     parser.add_argument("--model", default="qwen3-vl:2b-instruct", help="model name (a raw llama-server ignores it)")
-    parser.add_argument("--base-url", default=MODEL_URL, help=f"the llama-server to use (default {MODEL_URL})")
+    parser.add_argument("--base-url", default=MODEL_URL, help=f"the llama-server to use (default {MODEL_URL}; IDOX_BASE_URL sets it)")
     args = parser.parse_args()
 
     outdir = os.path.abspath(args.outdir)

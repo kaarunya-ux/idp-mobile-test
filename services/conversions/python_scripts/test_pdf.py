@@ -67,7 +67,8 @@ from blocks import (
     ungrounded_text_blocks,
 )
 import crop_reread
-from repair import drop_spurious_blocks, reorder_blocks, restore_missing_lines
+from repair import (drop_spurious_blocks, find_running_lines, merge_continued_tables, reorder_blocks, resegment_blocks,
+                    restore_missing_lines, strip_running_lines)
 import ocr
 import pdf_look
 from to_docx import build_docx, verify_docx, verify_images
@@ -810,6 +811,31 @@ def measure_layout(pdf_page) -> dict:
     }
 
 
+MAX_MARGIN_SHARE = 0.25      # a side margin wider than this share of the page is the text of one sparse page, not a margin
+
+
+def document_layout(first: dict, pdf_pages) -> dict:
+    """The page setup for the whole document. measure_layout reads one page, and a first page with only a centred title
+    (the first page of a printed spreadsheet) gave 4.5 inch side margins, so the text column was 2 inches wide and the
+    tables ran off the page. The margins are the smallest found on any page, and none may exceed MAX_MARGIN_SHARE."""
+    layout = dict(first)
+    sides = {"left_pt": [], "right_pt": [], "top_pt": []}
+    for pg in pdf_pages:
+        if not pg.get_text("blocks"):
+            continue
+        m = measure_layout(pg)
+        for k in sides:
+            sides[k].append(m[k])
+    for k, vals in sides.items():
+        if vals:
+            layout[k] = min(layout[k], *vals)
+    cap = layout["width_pt"] * MAX_MARGIN_SHARE
+    layout["left_pt"], layout["right_pt"] = min(layout["left_pt"], cap), min(layout["right_pt"], cap)
+    layout["top_pt"] = min(layout["top_pt"], layout["height_pt"] * MAX_MARGIN_SHARE)
+    layout["bottom_pt"] = layout["top_pt"]
+    return layout
+
+
 def check_geometry(page, pdf_page):
     """Advisory comparison against PyMuPDF's own table detector.
 
@@ -1206,6 +1232,9 @@ for pno in targets:
         page, snaps = snap_to_text_layer(page, verify_text)
         if snaps:
             print(f"       ~ corrected {len(snaps)} misread passage(s)/cell(s) to the PDF's exact text")
+        page, split = resegment_blocks(page, pdf_page)
+        for m in split:
+            print(f"       ~ {m}")
         page, moves = reorder_blocks(page, pdf_page)
         for m in moves:
             print(f"       ~ put back in the PDF's order: {m}")
@@ -1439,6 +1468,9 @@ print(f"clean extraction written to {args.out}")
 # extracted and validated above -- NOT once per page.
 if args.docx and extracted_pages:
     conversion_started = time.time()
+    extracted_pages, joined = merge_continued_tables(extracted_pages, [doc[n] for n in page_numbers])
+    for j in joined:
+        print(f"  tables: {j}")
     problems = None
     if scan_info and len(scan_info) == len(extracted_pages):
         # Every page is a scan: lay the document out like the scans (margins, paragraph gaps, inserted pictures,
@@ -1461,9 +1493,24 @@ if args.docx and extracted_pages:
         # the PDF's text layer (the model's blocks only decide order and structure).
         # Any failure here keeps the default Word styles.
         word_pages, word_layout = extracted_pages, source_layout
+        running, extracted_for_word = None, extracted_pages
+        if source_layout:
+            source_layout = document_layout(source_layout, [doc[n] for n in page_numbers])
+            word_layout = source_layout
+        try:        # the line every page repeats in its margin (report name, "Page 2") goes to the real footer
+            digital = [bool(x.strip()) for x in source_texts]
+            if all(digital):
+                frows, hrows = find_running_lines([doc[n] for n in page_numbers])
+                if any(frows) or any(hrows):
+                    extracted_for_word, moved = strip_running_lines(extracted_pages, frows, hrows)
+                    running = (frows, hrows)
+                    print(f"  running lines: {moved} cut from the page text, to go into the footer / header")
+        except Exception as exc:
+            print(f"  ! running footer detection skipped ({type(exc).__name__}: {exc})")
+            running = None
         try:
             word_pages, word_layout, look_notes = pdf_look.restyle_document(
-                extracted_pages, [doc[n] for n in page_numbers],
+                extracted_for_word, [doc[n] for n in page_numbers],
                 [bool(t.strip()) for t in source_texts], page_image_sets, source_layout)
             for note in look_notes:
                 print(f"  layout: {note}")
@@ -1485,6 +1532,9 @@ if args.docx and extracted_pages:
                 body_pt=(source_layout or {}).get("body_pt", 11))
         try:                                    # layout fixes on top of the copied appearance: footer, page breaks
             import output_layout
+            if running:
+                n_rows = output_layout.set_running_lines(args.docx, running[0], running[1], len(extracted_pages))
+                print(f"  layout: {n_rows} running line row(s) written into the Word footer / header")
             for note in output_layout.fix_docx_layout(args.docx):
                 print(f"  layout: {note}")
         except Exception as exc:

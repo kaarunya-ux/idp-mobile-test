@@ -178,7 +178,7 @@ def _merge(page, new_blocks, at):
     return Page(analysis=LayoutAnalysis(n_blocks=len(blocks), table_column_counts=counts[:10]), blocks=blocks), keep
 
 
-def _round(page, lines, image_path, model, base_url, include_look, reader, missing_lines):
+def _round(page, lines, image_path, model, base_url, include_look, reader, missing_lines, tried):
     """One pass: re-read every run of missing lines once. Returns (page, notes); the same page object when
     nothing was missing or nothing helped."""
     states = _state(lines, page, missing_lines)
@@ -192,6 +192,9 @@ def _round(page, lines, image_path, model, base_url, include_look, reader, missi
         path, top, bottom = _crop(image_path, lines, run, n + 1)
         started = time.time()
         label = f"run {n + 1} ({len(run)} line(s), pixel rows {top}-{bottom})"
+        if (top, bottom) in tried:
+            notes.append(f"{label}: skipped, this strip was already re-read and gave nothing")
+            continue
         median = sorted(l["h"] for l in lines)[len(lines) // 2]
         if bottom - top < MIN_CROP_LINES * median:
             # a 2-pixel strip is an OCR speck, not a line: the model given a blank crop wrote until its token limit
@@ -216,6 +219,7 @@ def _round(page, lines, image_path, model, base_url, include_look, reader, missi
             page = merged
         else:
             notes.append(f"{label}: re-read in {took:.0f}s did not bring any of the missing lines back; left as is")
+            tried.add((top, bottom))
     notes.reverse()
     return page, notes
 
@@ -237,9 +241,9 @@ def recover(page, image_path, model, base_url, include_look=True, reader=extract
         return page, [f"re-read skipped: could not locate the missing lines ({exc})"]
     if not lines:
         return page, []
-    notes = []
+    notes, tried = [], set()
     for round_no in range(MAX_ROUNDS):
-        better, new_notes = _round(page, lines, image_path, model, base_url, include_look, reader, missing_lines)
+        better, new_notes = _round(page, lines, image_path, model, base_url, include_look, reader, missing_lines, tried)
         notes += [f"round {round_no + 1}, {n}" for n in new_notes] if MAX_ROUNDS > 1 and new_notes else new_notes
         if better is page:
             break                                      # nothing was missing, or nothing helped: stop

@@ -257,7 +257,7 @@ class Page(BaseModel):
     analysis: LayoutAnalysis = Field(
         description="Your reasoning about the page layout, BEFORE extracting."
     )
-    blocks: List[Union[TableBlock, TextBlock]] = Field(
+    blocks: List[TableBlock | TextBlock] = Field(
         description="Every block on the page, in top-to-bottom reading order."
     )
 
@@ -267,7 +267,7 @@ class PageNoLook(BaseModel):
     analysis: LayoutAnalysis = Field(
         description="Your reasoning about the page layout, BEFORE extracting."
     )
-    blocks: List[Union[TableBlock, TextBlockNoLook]] = Field(
+    blocks: List[TableBlock | TextBlockNoLook] = Field(
         description="Every block on the page, in top-to-bottom reading order."
     )
 
@@ -573,7 +573,7 @@ def drop_duplicate_blocks(page: Page, source_text: str = None):
                 normalize(" ".join(str(c) for c in row)) for row in block.rows
             ]
             table_key = normalize(
-                " ".join(block.header) + " ".join(k for k in row_keys)
+                " ".join(block.header) + " ".join(row_keys)
             )
             substantive = [k for k in row_keys if len(k) > 12]
 
@@ -716,10 +716,12 @@ def merge_nested_tables(page: Page):
             parent.header[:-1] if parent.has_header else []
         )
 
-        child_width = (
-            len(child.header) if child.has_header
-            else (len(child.rows[0]) if child.rows else 0)
-        )
+        if child.has_header:
+            child_width = len(child.header)
+        elif child.rows:
+            child_width = len(child.rows[0])
+        else:
+            child_width = 0
         child_header = (
             child.header if child.has_header else [""] * child_width
         )
@@ -780,7 +782,7 @@ def trim_table_text(page: Page):
             pool = {}
             for c in cells:
                 pool[c] = pool.get(c, 0) + 1
-            for i, (_pos, w) in enumerate(words):
+            for i, (pos, w) in enumerate(words):
                 if w != first:
                     continue
                 tail = [t for _p, t in words[i:] if t and not re.fullmatch(r"[|\-:]+", t)]
@@ -793,7 +795,7 @@ def trim_table_text(page: Page):
                         left[t] -= 1
                         hit += 1
                 if hit / len(tail) >= TRIM_TABLE_SHARE:
-                    cut = words[i][0] if cut is None else min(cut, words[i][0])
+                    cut = pos if cut is None else min(cut, pos)
                     break
         if cut is None:
             out.append(block)
@@ -1458,7 +1460,7 @@ def snap_to_text_layer(page: Page, source_text: str,
 # IDOX_BASE_URL overrides it without editing code (the API and start_convert.sh already use that variable).
 # 2026-10-06: default switched to the Qwen3.6-35B-A3B (IQ4_XS) server on the Mac mini, for testing
 # every feature against it. The 8B at 10.0.3.33:8080 above is down.
-DEFAULT_BASE_URL = os.environ.get("IDOX_BASE_URL", "http://10.0.3.66:8080")
+DEFAULT_BASE_URL = os.environ.get("IDOX_BASE_URL", "http://127.0.0.1:8080")
 
 # The local, fully-controlled setup this replaced as the default -- still
 # valid, still running, not removed. Use this explicitly (--base-url
@@ -1510,7 +1512,7 @@ def extract_page(image_path: str, model: str = MODEL_NAME,
     """
     if base_url:
         return _extract_page_raw_server(
-            image_path, base_url, num_ctx, num_predict, return_timing,
+            image_path, base_url, num_predict, return_timing,
             include_look,
         )
 
@@ -1605,7 +1607,7 @@ def _fit_max_side(image_path: str, max_side: int):
 
 
 def _extract_page_raw_server(image_path: str, base_url: str,
-                             num_ctx: int, num_predict: int,
+                             num_predict: int,
                              return_timing: bool, include_look: bool = True):
     """The base_url path: talk to a raw llama-server directly, not Ollama.
 
@@ -1635,7 +1637,9 @@ def _extract_page_raw_server(image_path: str, base_url: str,
     import requests
 
     api_key = os.environ.get("IDOX_API_KEY", "").strip()
-    thinking = os.environ.get("IDOX_THINKING", "").strip().lower()
+    # Never leave this to the server: a llama.cpp server restarted with thinking on answers every page with hidden
+    # reasoning first, which used the whole 4000-token budget before any output was written (15 of 32 runs failed).
+    thinking = os.environ.get("IDOX_THINKING", "").strip().lower() or "off"
     max_side = int(os.environ.get("IDOX_MAX_IMAGE_SIDE", "0") or 0)
     timeout = int(os.environ.get("IDOX_TIMEOUT", "600") or 600)
 
@@ -1690,7 +1694,6 @@ def _extract_page_raw_server(image_path: str, base_url: str,
             resp = requests.post(url, headers=headers, json=body, timeout=timeout)
     else:
         resp = requests.post(url, headers=headers, json=body, timeout=timeout)
-    wall_elapsed = _time.time() - started
     if resp.status_code == 401:
         raise RuntimeError("the server rejected the API key (401): the key is "
                            "missing or wrong")
