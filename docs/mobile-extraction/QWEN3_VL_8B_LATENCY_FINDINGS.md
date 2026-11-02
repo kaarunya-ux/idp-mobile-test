@@ -55,7 +55,7 @@ of the current unmeasured flag.
 
 ## Part 2 — 6GB-RAM-phone scratchpad re-tests (2026-10-29 to 2026-10-31)
 
-**Device:** Samsung SM-M35x 5G family, 6GB-RAM unit (serial RZCXA1SXH5V, ~5.56GB usable RAM,
+**Device:** Samsung SM-M35x 5G family, 6GB-RAM unit (~5.56GB usable RAM,
 confirmed a distinct physical unit from the 5.5GB phone referenced in
 `ON_DEVICE_LATENCY_AND_ACCURACY_FINDINGS.md` and the LFM2/MiniCPM findings docs).
 
