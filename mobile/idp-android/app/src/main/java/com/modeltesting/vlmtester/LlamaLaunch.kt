@@ -177,6 +177,14 @@ object LlamaLaunch {
     // prefill-rate swings seen across otherwise-identical requests. Not auto-detected.
     // -fa on: 'auto' (the default) was leaving flash attention off in practice; forcing it on
     // measurably helped prefill throughput in on-device testing 2026-09-24.
+    // -ctk/-ctv q8_0 (added 2026-10-29, NOT yet latency-measured on this phone): quantizes the
+    // KV cache to 8-bit instead of fp16, shrinking its memory footprint by about half. This phone
+    // was observed to collapse from ~15 tok/s to ~0.3 tok/s when a model's resident set exceeds
+    // available RAM (major page faults into swap) - see docs/mobile-extraction section on the
+    // Qwen3-VL-8B phone test. Shrinking the KV cache buys headroom against that cliff; it does not
+    // by itself speed up a model that already fits. Flag exists upstream since mid-2024 and is a
+    // standard llama-server option (no model-specific risk expected), but has not been run on this
+    // build or this phone before shipping - watch for regressions before trusting it in the field.
     private val FAST_CORES_AND_FLASH_ATTENTION = listOf(
         "-Cr",
         "4-7",
@@ -187,7 +195,11 @@ object LlamaLaunch {
         "--cpu-strict-batch",
         "1",
         "-fa",
-        "on"
+        "on",
+        "-ctk",
+        "q8_0",
+        "-ctv",
+        "q8_0"
     )
 
     private val CONTEXT_4096 = listOf("-c", "4096")

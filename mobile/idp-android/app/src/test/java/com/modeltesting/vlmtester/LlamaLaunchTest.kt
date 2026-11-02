@@ -46,8 +46,10 @@ class LlamaLaunchTest {
             jinja = jinja
         )
 
-    private val fastCores =
-        listOf("-Cr", "4-7", "-Crb", "4-7", "--cpu-strict", "1", "--cpu-strict-batch", "1", "-fa", "on")
+    private val fastCores = listOf(
+        "-Cr", "4-7", "-Crb", "4-7", "--cpu-strict", "1", "--cpu-strict-batch", "1", "-fa", "on",
+        "-ctk", "q8_0", "-ctv", "q8_0"
+    )
 
     // --- cliArgs ----------------------------------------------------------------------------
 
