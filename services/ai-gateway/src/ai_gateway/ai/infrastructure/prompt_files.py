@@ -1,8 +1,8 @@
 """``PromptsPort`` on the prompt files shipped in the package (``ai_gateway/prompts/<task>.v<n>.md``, LLM-02).
 
 Each file starts with front matter (``key: value`` lines between ``---`` lines: name, version, model, temperature,
-max_tokens); the rest is the system prompt. The highest version of each name is used. Every file is read and checked
-once at start-up, so a broken prompt stops the process instead of failing a call.
+max_tokens, optionally thinking); the rest is the system prompt. The highest version of each name is used. Every file
+is read and checked once at start-up, so a broken prompt stops the process instead of failing a call.
 """
 
 import re
@@ -63,6 +63,13 @@ def parse_prompt(text: str, *, file_name: str) -> Prompt:
             temperature=float(head["temperature"]),
             max_tokens=int(head["max_tokens"]),
             model=ModelRole(head["model"]) if "model" in head else None,
+            thinking=_flag(head["thinking"]) if "thinking" in head else None,
         )
     except (KeyError, ValueError) as exc:
         raise PromptFileError(f"{file_name}: front matter is missing or has a wrong value") from exc
+
+
+def _flag(value: str) -> bool:
+    if value not in ("true", "false"):
+        raise ValueError(f"not true or false: {value}")
+    return value == "true"

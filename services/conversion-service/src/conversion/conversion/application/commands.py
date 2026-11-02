@@ -8,6 +8,7 @@ from conversion.conversion.domain.events import ItemContext
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionRequest
 from conversion.conversion.domain.options import ConversionOptions
+from conversion.conversion.domain.ports import StepContext
 from conversion.conversion.domain.route_planner import OcrMode
 from conversion.core.errors import DomainError
 
@@ -47,3 +48,4 @@ class ConvertFileCommand:
     options: ConversionOptions = field(default_factory=ConversionOptions)
     pdf_is_scanned: bool = False
     ocr: OcrMode = OcrMode.AUTO
+    context: StepContext | None = None  # the job's account and output prefix (the scanned routes need them)

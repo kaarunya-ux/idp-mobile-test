@@ -164,3 +164,25 @@ class InvalidPlanError(DomainError):
 
     code = ErrorCode.INVALID_PLAN
     title = "Edit plan can't be applied"
+
+
+class AiUnavailableError(DomainError):
+    """A scanned route needs the model, and ai-gateway didn't answer (busy, model down, a timeout). Reported as
+    ``CNV-503-AI-001``; Java may try again later."""
+
+    code = ErrorCode.AI_UNAVAILABLE
+    title = "Text recognition unavailable"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("The scanned document couldn't be read right now. Please try again later.")
+
+
+class AiLimitReachedError(DomainError):
+    """The account has used its AI calls for today (ai-gateway's daily cap). Reported as ``CNV-429-AI-001``."""
+
+    code = ErrorCode.AI_LIMIT_REACHED
+    title = "Daily limit reached"
+
+    def __init__(self) -> None:
+        super().__init__("Converting scanned documents is limited per day; this account has reached today's limit.")

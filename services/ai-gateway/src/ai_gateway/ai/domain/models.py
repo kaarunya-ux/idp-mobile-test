@@ -12,6 +12,7 @@ class Task(StrEnum):
     CLASSIFY = "classify"
     PAGE_ANALYSIS = "page-analysis"
     TEMPLATE_SUGGEST = "template-suggest"
+    PAGE_READ = "page-read"  # a whole page as blocks, for conversion-service's scanned routes
 
 
 class Priority(StrEnum):
@@ -71,6 +72,7 @@ class Prompt:
     temperature: float
     max_tokens: int
     model: ModelRole | None = None  # None for a prompt that is part of another call (the repair instruction)
+    thinking: bool | None = None  # sent on every call when set: a server's own default must never decide it
 
     @property
     def label(self) -> str:
@@ -90,6 +92,7 @@ class ModelRequest:
     temperature: float
     max_tokens: int
     follow_up: Sequence[tuple[str, str]] = ()  # (role, text) turns after the first user turn: the repair attempt
+    thinking: bool | None = None  # hybrid models' reasoning mode, when the prompt sets it
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

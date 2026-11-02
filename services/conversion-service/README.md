@@ -102,6 +102,9 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `EDIT__REDACTION_DPI` | `200` | 96–400 | How sharp a redacted page is when it is redrawn as a picture |
 | `EDIT__MAX_IMAGE_BYTES` | `5MiB` | a size | Largest signature or inserted image |
 | `CRYPTO__PRIVATE_KEY` | — (none) | RSA private key, PEM | Decrypts edit-plan passwords Java encrypted with our public key. Without it, plans with passwords fail with `CNV-422-PLAN-001` |
+| `AI_GATEWAY__URL` | — (off) | `http://ai-gateway:8002` | The scanned routes (scan or photo to Word, Excel or CSV) read pages through ai-gateway's `page-read`. Unset: they answer `CNV-422-ROUTE-001` |
+| `AI_GATEWAY__TIMEOUT` / `__RENDER_DPI` / `__MAX_PAGES` | `240` s / `200` / `50` | | Per page; the DPI a scanned PDF page is drawn at; pages read per document |
+| `SERVICE_AUTH__TOKEN_URL` / `__CLIENT_SECRET` / `__CLIENT_ID` / `__AUDIENCE` | — / — / `conversion-service` / `ai-gateway` | | Keycloak client credentials for ai-gateway; needed with `AI_GATEWAY__URL` |
 | `PREVIEW__MAX_SIDE_PX` | `400` | 64–2000 | Longest side of a page thumbnail; an A4 page comes out 283 × 400 |
 | `PREVIEW__JPEG_QUALITY` | `75` | 30–95 | JPEG quality of thumbnails |
 | `OUTBOX__BATCH_SIZE` | `100` | 1–1000 | Rows the relay claims at once |

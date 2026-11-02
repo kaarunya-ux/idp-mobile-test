@@ -63,7 +63,10 @@ def _body(request: ModelRequest, model: str) -> dict[str, Any]:
         {"role": "user", "content": content},
         *({"role": role, "content": text} for role, text in request.follow_up),
     ]
-    return {
+    extra: dict[str, Any] = {}
+    if request.thinking is not None:  # llama.cpp's chat template switch for hybrid models (Qwen3)
+        extra["chat_template_kwargs"] = {"enable_thinking": request.thinking}
+    return extra | {
         "model": model,
         "messages": messages,
         "response_format": {

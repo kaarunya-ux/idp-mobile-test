@@ -17,12 +17,15 @@ from ai_gateway.ai.api.schemas import (
     FieldReadSingleResponse,
     PageAnalysisRequest,
     PageAnalysisResponse,
+    PageReadRequest,
+    PageReadResponse,
     TemplateSuggestRequest,
     TemplateSuggestResponse,
 )
 from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.domain.models import FieldReadQuery
 from ai_gateway.core.security import ServicePrincipal, current_service
@@ -47,6 +50,7 @@ type FieldReader = Annotated[ReadFieldsService, _service("read_fields", ReadFiel
 type Classifier = Annotated[ClassifyPageService, _service("classify", ClassifyPageService)]
 type Analyser = Annotated[AnalysePageService, _service("analyse", AnalysePageService)]
 type Suggester = Annotated[SuggestTemplateService, _service("suggest", SuggestTemplateService)]
+type PageReader = Annotated[ReadPageService, _service("read_page", ReadPageService)]
 
 
 @router.post(
@@ -99,3 +103,9 @@ async def template_suggest(
     words = [{"text": w.text, "box": list(w.box)} for w in body.ocr_words]
     answer = await service.suggest(mappers.caller_of(body, principal), mappers.image_ref(body.page), words)
     return mappers.to_template_suggest_response(answer)
+
+
+@router.post("/page-read", summary="Read a whole page as blocks", response_model=PageReadResponse, responses=_ERRORS)
+async def page_read(body: PageReadRequest, principal: Service, service: PageReader) -> PageReadResponse:
+    answer = await service.read(mappers.caller_of(body, principal), mappers.image_ref(body.page))
+    return mappers.to_page_read_response(answer)

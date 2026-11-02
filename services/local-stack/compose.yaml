@@ -42,6 +42,11 @@ x-extraction-env: &extraction-env
 x-conversion-env: &conversion-env
   <<: *common-env
   DB__URL: postgresql+psycopg://conversion:conversion@postgres:5432/conversion_db
+  # The scanned routes (scan or photo to Word, Excel or CSV) read pages through ai-gateway's page-read
+  AI_GATEWAY__URL: http://ai-gateway:8002
+  SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
+  SERVICE_AUTH__CLIENT_ID: conversion-service
+  SERVICE_AUTH__CLIENT_SECRET: ${CONVERSION_CLIENT_SECRET:-local-conversion-secret}
 
 services:
   # --- Our own infrastructure (always) ------------------------------------------------------------------------
@@ -232,6 +237,16 @@ services:
     build: {<<: *conversion-build, target: worker}
     environment: *conversion-env
     depends_on: *conversion-ready
+
+  # The "ocr" pool: the scanned routes, which wait on ai-gateway (IDP-03 ch. 3.2: its own pool)
+  conversion-worker-ocr:
+    image: idp-local/conversion-service:worker
+    build: {<<: *conversion-build, target: worker}
+    command: ["celery", "-A", "conversion.worker", "worker", "-Q", "ocr", "-c", "4", "--prefetch-multiplier", "1", "-n", "ocr@%h"]
+    environment: *conversion-env
+    depends_on:
+      <<: *conversion-ready
+      ai-gateway: {condition: service_healthy}
 
   conversion-health:
     image: idp-local/conversion-service:health

@@ -8,6 +8,7 @@ from ai_gateway.ai.application.runner import ModelCallRunner
 from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.domain.models import FieldReadQuery, FieldSpec, ImageRef, ModelRole, Task
 from ai_gateway.ai.infrastructure.breaker import CircuitBreaker
@@ -101,7 +102,9 @@ async def test_every_card_and_a_generic_read_pass_the_gateways_checks_against_th
     assert answer.provenance.model == "mock-vl"
 
 
-async def test_single_field_classify_analysis_and_suggestions_pass_the_gateways_checks_against_the_mock() -> None:
+async def test_single_field_classify_analysis_suggestions_and_page_read_pass_the_gateways_checks_against_the_mock() -> (
+    None
+):
     runner, images, prompts = _runner(), FakeImages(), PromptFiles.load()
 
     single = await ReadFieldsService(runner=runner, images=images, prompts=prompts).read_one(
@@ -119,3 +122,5 @@ async def test_single_field_classify_analysis_and_suggestions_pass_the_gateways_
     assert classified.value.document_type == "PAN_CARD"
     assert analysed.value.summary.startswith("A mock analysis")
     assert suggested.value.fields[0].key == "name"
+    page = await ReadPageService(runner=runner, images=images, prompts=prompts, max_side_px=2048).read(caller(), PAGE)
+    assert [b.kind for b in page.value.blocks] == ["heading", "paragraph", "table"]

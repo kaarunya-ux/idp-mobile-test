@@ -38,7 +38,13 @@ class ConvertFileService:
                 step_dir = command.output_dir if is_last else Path(scratch) / f"step-{position}"
                 step_dir.mkdir(parents=True, exist_ok=True)
                 result = self._converters.get(step.converter).convert(
-                    StepRequest(step=step, inputs=files, output_dir=step_dir, options=command.options)
+                    StepRequest(
+                        step=step,
+                        inputs=files,
+                        output_dir=step_dir,
+                        options=command.options,
+                        context=command.context,
+                    )
                 )
                 files = result.outputs
                 page_count = page_count or result.page_count  # pages of the original input

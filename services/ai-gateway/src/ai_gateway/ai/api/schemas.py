@@ -184,3 +184,31 @@ class SuggestedTableBody(_Body):
 class TemplateSuggestResponse(_ProvenanceBody):
     fields: list[SuggestedFieldBody]
     tables: list[SuggestedTableBody]
+
+
+class PageReadRequest(CallerBody):
+    page: ImageRefBody
+
+
+class PageAnalysisBody(_Body):
+    n_blocks: int
+    table_column_counts: list[int]
+
+
+class PageBlockBody(_Body):
+    """A text block (``text``, ``align``, ``size``, ``bold``) or a table (``hasHeader``, ``header``, ``rows``)."""
+
+    kind: str
+    text: str | None = None
+    align: str | None = None
+    size: str | None = None
+    bold: bool | None = None
+    has_header: bool | None = None
+    n_cols: int | None = None
+    header: list[str] | None = None
+    rows: list[list[str]] | None = None
+
+
+class PageReadResponse(_ProvenanceBody):
+    analysis: PageAnalysisBody
+    blocks: list[PageBlockBody]

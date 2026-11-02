@@ -106,6 +106,26 @@ class OutboxSettings(BaseModel):
     backoff_max: timedelta = Field(timedelta(minutes=5), ge=timedelta(seconds=1))
 
 
+class AiGatewaySettings(BaseModel):
+    """ai-gateway, for the scanned routes (scan or photo to Word, Excel or CSV). Unset: those routes answer
+    ``CNV-422-ROUTE-001`` as before, and every other route is unaffected."""
+
+    url: HttpUrl | None = None  # e.g. http://ai-gateway:8002
+    timeout: timedelta = Field(timedelta(seconds=240), ge=timedelta(seconds=5), le=timedelta(minutes=15))
+    render_dpi: int = Field(200, ge=72, le=400)  # a scanned PDF page is drawn at this DPI for the model
+    max_pages: int = Field(50, ge=1, le=500)  # one model call per page: more pages go to review, not to the model
+
+
+class ServiceAuthSettings(BaseModel):
+    """This service's own client-credentials login, for calls to ai-gateway (SEC-07)."""
+
+    token_url: HttpUrl  # Keycloak: <issuer>/protocol/openid-connect/token
+    client_id: str = Field("conversion-service", min_length=1, max_length=128)
+    client_secret: SecretStr
+    audience: str | None = Field("ai-gateway", max_length=128)
+    timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(seconds=1), le=timedelta(minutes=1))
+
+
 class MissingSettingsError(RuntimeError):
     """A process started without settings it needs, for example a worker without ``DB__URL``."""
 
@@ -124,6 +144,8 @@ class Settings(BaseSettings):
     edit: EditSettings = Field(default_factory=EditSettings)
     crypto: CryptoSettings = Field(default_factory=CryptoSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
+    ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
+    service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
     # No defaults: credentials never live in code (CFG-03). Only the processes that use a group require it, so the
     # health server and unit tests run without them; ``require_*`` stops a worker at startup instead.
     db: DatabaseSettings | None = None

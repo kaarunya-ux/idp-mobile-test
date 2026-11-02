@@ -16,6 +16,7 @@ from ai_gateway.ai.application.runner import ModelCallRunner
 from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.domain.models import ModelRole, Plan, Task
 from ai_gateway.ai.infrastructure.breaker import CircuitBreaker
@@ -40,6 +41,7 @@ class AiServices:
     classify: ClassifyPageService
     analyse: AnalysePageService
     suggest: SuggestTemplateService
+    read_page: ReadPageService
 
 
 @dataclass(slots=True, kw_only=True)
@@ -101,6 +103,7 @@ def build(settings: Settings, clock: Clock) -> Container:
             Task.CLASSIFY: model.timeouts.classify.total_seconds(),
             Task.PAGE_ANALYSIS: model.timeouts.page_analysis.total_seconds(),
             Task.TEMPLATE_SUGGEST: model.timeouts.template_suggest.total_seconds(),
+            Task.PAGE_READ: model.timeouts.page_read.total_seconds(),
         },
     )
     images = S3ImageStore(
@@ -114,6 +117,9 @@ def build(settings: Settings, clock: Clock) -> Container:
         classify=ClassifyPageService(runner=runner, images=images, prompts=prompts),
         analyse=AnalysePageService(runner=runner, images=images, prompts=prompts),
         suggest=SuggestTemplateService(runner=runner, images=images, prompts=prompts),
+        read_page=ReadPageService(
+            runner=runner, images=images, prompts=prompts, max_side_px=model.page_read_max_side_px
+        ),
     )
     return Container(ai=services, http=http, redis=redis)
 

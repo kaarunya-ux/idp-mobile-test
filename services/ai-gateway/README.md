@@ -24,6 +24,7 @@ All `POST`, JSON, `Authorization: Bearer <service token>`. Every answer also has
 | `/internal/v1/ai/classify` | `accountId, priority?, plan?, page, candidates[]` | `documentType, confidence` |
 | `/internal/v1/ai/page-analysis` | `accountId, priority?, plan?, pages[1..5], currentResult, question?` | `fields[], summary, warnings[]` |
 | `/internal/v1/ai/template-suggest` | `accountId, priority?, plan?, page, ocrWords[{text, box}]` | `fields[], tables[]` |
+| `/internal/v1/ai/page-read` | `accountId, priority?, plan?, page` | `analysis{nBlocks, tableColumnCounts}, blocks[]`: headings, paragraphs, lists (text, align, size, bold) and tables (hasHeader, header, rows). For conversion-service's scanned routes |
 
 Images are `{bucket, key}` in MinIO: callers never send bytes. Errors are RFC 9457 problem details:
 
@@ -50,7 +51,8 @@ Callers treat every 5xx as "AI unavailable": the fields stay for review, and the
 | `MODEL__API_KEY` | none | Sent as a bearer token when set |
 | `MODEL__VL_MODEL`, `MODEL__SMART_MODEL`, `MODEL__AUTO_MODEL` | `vl`, `smart`, `auto` | The names the server knows |
 | `MODEL__VL_MAX_CONCURRENT` | 4 | The server's capacity, shared by all replicas |
-| `MODEL__TIMEOUTS__FIELD_READ`, `__CLASSIFY`, `__PAGE_ANALYSIS`, `__TEMPLATE_SUGGEST`, `__CONNECT` | 30 s, 30 s, 90 s, 90 s, 2 s | ISO 8601 durations or seconds |
+| `MODEL__TIMEOUTS__FIELD_READ`, `__CLASSIFY`, `__PAGE_ANALYSIS`, `__TEMPLATE_SUGGEST`, `__PAGE_READ`, `__CONNECT` | 30 s, 30 s, 90 s, 90 s, 180 s, 2 s | ISO 8601 durations or seconds |
+| `MODEL__PAGE_READ_MAX_SIDE_PX` | 2048 | A whole page is sent larger than a card, so small print stays readable |
 | `MODEL__MAX_IMAGE_SIDE_PX`, `MODEL__MAX_IMAGE_BYTES` | 1280, 20 MiB | |
 | `QUEUE__WAIT_TIMEOUT`, `QUEUE__PRIORITY_SHARE`, `QUEUE__LEASE` | 20 s, 3, 3 min | |
 | `CAPS__GUEST`, `CAPS__PERSONAL`, `CAPS__CORPORATE` | 10, 30, 5000 | Calls per account per UTC day |

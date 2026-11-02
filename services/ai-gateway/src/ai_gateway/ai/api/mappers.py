@@ -11,14 +11,23 @@ from ai_gateway.ai.api.schemas import (
     FieldReadSingleResponse,
     FieldValueBody,
     ImageRefBody,
+    PageAnalysisBody,
     PageAnalysisResponse,
+    PageBlockBody,
+    PageReadResponse,
     SuggestedColumnBody,
     SuggestedFieldBody,
     SuggestedTableBody,
     TemplateSuggestResponse,
     TokensBody,
 )
-from ai_gateway.ai.application.answer_models import ClassifyAnswer, PageAnalysisAnswer, TemplateSuggestAnswer
+from ai_gateway.ai.application.answer_models import (
+    ClassifyAnswer,
+    PageAnalysisAnswer,
+    PageReadAnswer,
+    PageTableBlock,
+    TemplateSuggestAnswer,
+)
 from ai_gateway.ai.domain.models import Answer, Caller, FieldSpec, FieldValue, ImageRef, Plan, Priority, Provenance
 from ai_gateway.core.security import ServicePrincipal
 
@@ -85,3 +94,17 @@ def to_template_suggest_response(answer: Answer[TemplateSuggestAnswer]) -> Templ
         ],
         **_provenance(answer.provenance),
     )
+
+
+def to_page_read_response(answer: Answer[PageReadAnswer]) -> PageReadResponse:
+    found = answer.value
+    blocks = [
+        PageBlockBody(kind=b.kind, has_header=b.has_header, n_cols=b.n_cols, header=b.header, rows=b.rows)
+        if isinstance(b, PageTableBlock)
+        else PageBlockBody(kind=b.kind, text=b.text, align=b.align, size=b.size, bold=b.bold)
+        for b in found.blocks
+    ]
+    analysis = PageAnalysisBody(
+        n_blocks=found.analysis.n_blocks, table_column_counts=found.analysis.table_column_counts
+    )
+    return PageReadResponse(analysis=analysis, blocks=blocks, **_provenance(answer.provenance))

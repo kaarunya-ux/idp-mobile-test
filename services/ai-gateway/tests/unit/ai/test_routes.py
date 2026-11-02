@@ -1,5 +1,6 @@
 """The internal API end to end on fake ports: token, body checks, both field-read forms, and problem details."""
 
+import json
 from collections.abc import Iterator
 
 import pytest
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.infrastructure.prompt_files import PromptFiles
 from ai_gateway.bootstrap import AiServices, Container, Unavailable
@@ -43,6 +45,7 @@ def _client(model: FakeModel, caps: FakeCaps | None = None, *, available: bool =
                 classify=ClassifyPageService(runner=shared, images=images, prompts=prompts),
                 analyse=AnalysePageService(runner=shared, images=images, prompts=prompts),
                 suggest=SuggestTemplateService(runner=shared, images=images, prompts=prompts),
+                read_page=ReadPageService(runner=shared, images=images, prompts=prompts, max_side_px=2048),
             )
         )
 
@@ -197,3 +200,32 @@ def test_returns_suggested_fields_when_suggesting_a_template(client: TestClient,
 
 def test_serves_prometheus_metrics(client: TestClient) -> None:
     assert "ai_requests_total" in client.get("/metrics/").text
+
+
+def test_returns_a_pages_blocks_in_camel_case_when_reading_a_page() -> None:
+    answer = {
+        "analysis": {"n_blocks": 2, "table_column_counts": [2]},
+        "blocks": [
+            {"kind": "heading", "text": "Invoice", "align": "center", "size": "large", "bold": True},
+            {
+                "kind": "table",
+                "has_header": True,
+                "n_data_rows": 1,
+                "n_cols": 2,
+                "header": ["A", "B"],
+                "rows": [["1", "2"]],
+            },
+        ],
+    }
+    model = FakeModel(json.dumps(answer))
+    for client in _client(model):
+        response = client.post(
+            "/internal/v1/ai/page-read",
+            json={"accountId": str(ACCOUNT), "page": PAGE},
+        )
+
+        body = response.json()
+        assert response.status_code == 200
+        assert body["analysis"] == {"nBlocks": 2, "tableColumnCounts": [2]}
+        assert body["blocks"][1]["hasHeader"] is True
+        assert body["promptVersion"] == "page-read.v1"

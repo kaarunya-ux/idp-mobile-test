@@ -42,17 +42,17 @@ class S3ImageStore:
         self._max_bytes = max_bytes
         self._max_side_px = max_side_px
 
-    async def load(self, refs: Sequence[ImageRef], *, stack: bool) -> Sequence[Image]:
+    async def load(self, refs: Sequence[ImageRef], *, stack: bool, max_side_px: int | None = None) -> Sequence[Image]:
         for ref in refs:
             if ref.bucket not in self._allowed:
                 raise InputInvalidError(f"Images are not read from the bucket '{ref.bucket}'.")
-        return await asyncio.to_thread(self._load, refs, stack)
+        return await asyncio.to_thread(self._load, refs, stack, max_side_px or self._max_side_px)
 
-    def _load(self, refs: Sequence[ImageRef], stack: bool) -> list[Image]:
+    def _load(self, refs: Sequence[ImageRef], stack: bool, max_side_px: int) -> list[Image]:
         pages = [self._open(ref) for ref in refs]
         if stack and len(pages) > 1:
             pages = [_stack(pages[:2])]
-        return [self._encode(page) for page in pages]
+        return [self._encode(page, max_side_px) for page in pages]
 
     def _open(self, ref: ImageRef) -> PilImage.Image:
         try:
@@ -75,8 +75,8 @@ class S3ImageStore:
             raise InputInvalidError("A page image is not an image the gateway can read.") from exc
         return image.convert("RGB")
 
-    def _encode(self, page: PilImage.Image) -> Image:
-        page.thumbnail((self._max_side_px, self._max_side_px), PilImage.Resampling.LANCZOS)
+    def _encode(self, page: PilImage.Image, max_side_px: int) -> Image:
+        page.thumbnail((max_side_px, max_side_px), PilImage.Resampling.LANCZOS)
         buffer = io.BytesIO()
         page.save(buffer, format="JPEG", quality=_JPEG_QUALITY)
         return Image(data=buffer.getvalue(), media_type="image/jpeg")

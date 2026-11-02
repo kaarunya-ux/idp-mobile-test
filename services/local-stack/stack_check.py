@@ -6,6 +6,8 @@
    ``ExtractionRequested`` goes to ``idp.commands``, and ``ExtractionCompleted`` (or ``WorkFailed``) comes back on
    ``idp.events``, with ``result.json`` in ``idp-derived``.
 4. One conversion: a generated image becomes a PDF (``ConversionRequested`` -> ``ConversionCompleted``).
+5. One scanned conversion: a generated photo of a page becomes a Word file, read by the model through ai-gateway's
+   ``page-read`` (the mock model answers in this stack).
 
 It plays the Java side the way ``conversion-service/scripts/send_job.py`` does. Exit code 0 only if every step passed.
 """
@@ -182,17 +184,25 @@ def check_extraction() -> None:
 
 
 def check_conversion() -> None:
-    item, job, file_id = uuid4(), uuid4(), uuid4()
     buffer = io.BytesIO()
     Image.new("RGB", (800, 600), (200, 220, 240)).save(buffer, format="PNG")
+    convert("conversion end to end", buffer.getvalue(), "PDF")
+
+
+def check_scanned_conversion() -> None:
+    convert("scanned conversion end to end (model through ai-gateway)", card_image(), "DOCX")
+
+
+def convert(name: str, picture: bytes, target: str) -> None:
+    item, job, file_id = uuid4(), uuid4(), uuid4()
     key = f"{ACCOUNT}/{file_id}/stack-check.png"
-    s3().put_object(Bucket="idp-originals", Key=key, Body=buffer.getvalue(), ContentType="image/png")
+    s3().put_object(Bucket="idp-originals", Key=key, Body=picture, ContentType="image/png")
     payload = {
         "jobId": str(job),
         "itemId": str(item),
         "type": "CONVERSION",
         "inputs": [{"bucket": "idp-originals", "key": key, "contentType": "image/png"}],
-        "target": "PDF",
+        "target": target,
         "options": {},
         "outputPrefix": f"{ACCOUNT}/{job}/{item}",
     }
@@ -202,13 +212,13 @@ def check_conversion() -> None:
             send_and_wait("conversion.requested.standard", body, event_id, item, {"ConversionCompleted", "WorkFailed"})
         )
     except TimeoutError:
-        step("conversion end to end", False, f"no answer in {TIMEOUT_S} s: is conversion-worker running?")
+        step(name, False, f"no answer in {TIMEOUT_S} s: is the conversion worker for this route running?")
         return
     outputs = event.get("payload", {}).get("outputs", [])
     passed = event.get("type") == "ConversionCompleted" and bool(outputs)
-    name = outputs[0]["key"].rsplit("/", 1)[-1] if passed else ""
-    detail = f"{name}, {outputs[0].get('pageCount')} page" if passed else str(event)[:200]
-    step("conversion end to end", passed, detail)
+    file_name = outputs[0]["key"].rsplit("/", 1)[-1] if passed else ""
+    detail = f"{file_name}, {outputs[0].get('pageCount')} page" if passed else str(event)[:200]
+    step(name, passed, detail)
 
 
 def guarded(name: str, check: Callable[[], None]) -> None:
@@ -225,6 +235,7 @@ if __name__ == "__main__":
     check_api()
     guarded("extraction end to end", check_extraction)
     guarded("conversion end to end", check_conversion)
+    guarded("scanned conversion end to end (model through ai-gateway)", check_scanned_conversion)
     failed = [name for name, passed, _ in results if not passed]
     summary = f"\n{len(results) - len(failed)} of {len(results)} checks passed"
     print(summary + (f"; failed: {', '.join(failed)}" if failed else ""))  # noqa: T201

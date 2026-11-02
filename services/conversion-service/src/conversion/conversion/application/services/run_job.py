@@ -27,7 +27,7 @@ from conversion.conversion.domain.exceptions import OcrNotAvailableError
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionRequest
 from conversion.conversion.domain.options import MAX_DPI, ConversionOptions, JobOptions
-from conversion.conversion.domain.ports import ImageThumbnailPort, PdfMergerPort
+from conversion.conversion.domain.ports import ImageThumbnailPort, PdfMergerPort, StepContext
 from conversion.conversion.domain.route_planner import OcrMode
 from conversion.conversion.domain.values import JobType, ThumbnailSpec
 
@@ -84,6 +84,9 @@ class ConvertHandler:
                     options=options.conversion,
                     pdf_is_scanned=job.pdf_is_scanned,
                     ocr=options.ocr,
+                    context=StepContext(
+                        account_id=request.context.tenant_id, key_prefix=request.output_prefix.strip("/")
+                    ),
                 )
             )
         except LookupError as exc:  # the route needs a converter this build doesn't have: OCR

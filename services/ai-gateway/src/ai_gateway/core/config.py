@@ -23,6 +23,7 @@ class ModelTimeouts(BaseModel):
     classify: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
     page_analysis: timedelta = Field(timedelta(seconds=90), ge=timedelta(seconds=1), le=timedelta(minutes=10))
     template_suggest: timedelta = Field(timedelta(seconds=90), ge=timedelta(seconds=1), le=timedelta(minutes=10))
+    page_read: timedelta = Field(timedelta(seconds=180), ge=timedelta(seconds=1), le=timedelta(minutes=15))
     connect: timedelta = Field(timedelta(seconds=2), ge=timedelta(milliseconds=100), le=timedelta(seconds=30))
 
 
@@ -37,6 +38,7 @@ class ModelSettings(BaseModel):
     vl_max_concurrent: int = Field(4, ge=1, le=256)  # the server's capacity, shared by every gateway replica
     timeouts: ModelTimeouts = Field(default_factory=ModelTimeouts)
     max_image_side_px: int = Field(1280, ge=256, le=4096)  # IDP-03 ch. 4.3
+    page_read_max_side_px: int = Field(2048, ge=256, le=4096)  # whole pages: small print needs more pixels than a card
     max_image_bytes: ByteSize = ByteSize(20 * 1024 * 1024)  # larger page images are refused (AIG-422-INPUT-001)
 
 

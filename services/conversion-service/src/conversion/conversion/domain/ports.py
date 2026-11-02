@@ -11,6 +11,7 @@ from types import TracebackType
 from typing import Protocol, Self
 from uuid import UUID
 
+from conversion.conversion.domain.document_model import Page
 from conversion.conversion.domain.edit_plan import EditPlan
 from conversion.conversion.domain.events import ConversionEvent
 from conversion.conversion.domain.formats import Format
@@ -22,6 +23,15 @@ from conversion.conversion.domain.values import ObjectRef, ThumbnailSpec, Worker
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class StepContext:
+    """Who a step works for, and where in storage it may keep working files. Only the model reader needs it: it puts
+    page pictures there, because ai-gateway reads images by key, never bytes (IDP-03 ch. 4.3)."""
+
+    account_id: UUID  # for ai-gateway's daily limit (IDP-03 ch. 4.5)
+    key_prefix: str  # the item's output prefix, <accountId>/<jobId>/<itemId>
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class StepRequest:
     """One step to run on files in a local working folder."""
 
@@ -29,6 +39,7 @@ class StepRequest:
     inputs: tuple[Path, ...]  # usually one file; several only when images become one PDF or deck
     output_dir: Path
     options: ConversionOptions
+    context: StepContext | None = None  # None outside a job (tests, tools): steps that need it refuse
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -49,6 +60,18 @@ class ConverterPort(Protocol):
 
     def convert(self, request: StepRequest) -> StepResult:
         """Write the step's output into ``request.output_dir``. Raise a ``DomainError`` when the input is bad."""
+        ...
+
+
+class PageReaderPort(Protocol):
+    """Reads one page picture (a scanned page, or a photo) into the document model's blocks, for the scanned routes.
+
+    The model-first reader asks ai-gateway's ``page-read`` (Sumukh's approach). An OCR reader can sit behind the same
+    port later, and the route then picks one; neither knows about the other.
+    """
+
+    def read_page(self, image: Path, number: int, context: StepContext) -> Page:
+        """Raises ``AiUnavailableError`` or ``AiLimitReachedError`` when the page can't be read now."""
         ...
 
 

@@ -1029,3 +1029,51 @@ watermark, redact, page numbers, metadata: the redacted PAN was gone from the fi
 | Merged file name | `merged.pdf`. **Open:** whether Java wants the user's chosen name in `options` |
 | Bookmarks and form fields | Not carried into a merge. Fine for now; revisit with `PDF_EDIT` |
 | Java contract | `target` may be left out for `PDF_MERGE` and `PREVIEW`. **Tell the Java team** which bucket previews land in (`idp-derived`) |
+
+## Entry 10: The scanned routes, with Sumukh's model-first reading through ai-gateway (2026-11-02)
+
+**Goal:** the conversions whose input is a picture of text: a scanned PDF or a photo to Word, Excel or CSV. They were
+planned since step 3 and failed with `CNV-422-ROUTE-001`, because their reading step (`ocr_to_model`) didn't exist.
+
+### Where it comes from
+
+Sumukh's PR #20 (`services/conversions`, the model-first conversions): a large vision model reads each page picture and
+writes its blocks, with an analysis first (how many blocks, how wide each table is). On his 32 test conversions it kept
+99.2% of the words and matched 98% of the table cells. The PR itself was a second conversion service, with PyMuPDF
+(AGPL), `requests` and direct model calls, so it was not merged. Its reading was moved here instead, as agreed with the
+owner:
+
+| Piece | Where now | Instead of |
+|---|---|---|
+| His prompt (`read_page.v1.md`) and answer shape | ai-gateway: `page-read` endpoint, `prompts/page-read.v1.md` | a model call inside the service |
+| Thinking switched off on every call | ai-gateway: prompt front matter `thinking: false` | |
+| Reading a page | `infrastructure/readers/model_reader.py` (`GatewayPageReader`), behind `PageReaderPort` | `blocks.py` with `requests` |
+| Drawing scanned pages | `infrastructure/converters/ocr_to_model.py`, with PDFium | PyMuPDF |
+
+### What we did
+
+```
+domain/ports.py            StepContext (account, output prefix) on every step; PageReaderPort
+infrastructure/readers/    model_reader.py: the page picture to idp-derived (<prefix>/model-pages/), then page-read
+infrastructure/converters/ ocr_to_model.py: scanned PDF pages (AI_GATEWAY__RENDER_DPI) or a photo, page by page
+core/service_auth.py       the client-credentials token for ai-gateway (as extraction-service)
+bootstrap.py               the reader is registered only when AI_GATEWAY__URL and SERVICE_AUTH__* are set
+```
+
+The writers (Word, Excel, CSV) are the digital routes' own. New error codes: `CNV-503-AI-001` (no answer from the
+gateway; retryable) and `CNV-429-AI-001` (the account's daily AI limit). `httpx` joins the worker dependencies (approved).
+
+### Not in this step
+
+- **Image to searchable PDF** (`ocr=ON`): it needs each word's position on the page, which a model reading does not give.
+  It waits for the OCR engines (`idp_ocr_engines`), which are to become a shared package first.
+- **Checking the reading against OCR**, as Sumukh's scripts did with Tesseract: the same wait.
+
+### Check it
+
+```bash
+cd services/conversion-service && make check
+cd ../local-stack && make build && make up && make check   # includes a photo to Word through the mock model
+```
+
+Result here: 475 unit tests pass, 92% coverage; one runs a scanned PDF to Word through the real Word writer.

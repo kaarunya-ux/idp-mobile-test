@@ -2,7 +2,7 @@
 ``response_format`` so a host that enforces schemas can only answer in this shape."""
 
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -108,3 +108,39 @@ def values_reader(keys: Sequence[str]) -> Callable[[str], dict[str, str | None]]
         return values
 
     return read
+
+
+# --- page-read: a whole page as blocks (Sumukh's model-first reading, services/conversions/prompts/read_page) -----
+
+_MAX_BLOCKS = 200
+_MAX_TABLE_COLUMNS = 50
+_MAX_TABLE_ROWS = 1000
+
+
+class PageAnalysis(_Answer):
+    """Written before the blocks, so the model commits to a block count and table widths first."""
+
+    n_blocks: int = Field(ge=0, le=_MAX_BLOCKS)
+    table_column_counts: list[int] = Field(default_factory=list, max_length=10)
+
+
+class PageTextBlock(_Answer):
+    kind: Literal["heading", "paragraph", "caption", "list", "image"]
+    text: str = Field(max_length=20_000)
+    align: Literal["left", "center", "right"] = "left"
+    size: Literal["large", "normal", "small"] = "normal"
+    bold: bool = False
+
+
+class PageTableBlock(_Answer):
+    kind: Literal["table"]
+    has_header: bool
+    n_data_rows: int = Field(ge=0, le=_MAX_TABLE_ROWS)
+    n_cols: int = Field(ge=1, le=_MAX_TABLE_COLUMNS)
+    header: list[str] = Field(default_factory=list, max_length=_MAX_TABLE_COLUMNS)
+    rows: list[list[str]] = Field(default_factory=list, max_length=_MAX_TABLE_ROWS)
+
+
+class PageReadAnswer(_Answer):
+    analysis: PageAnalysis  # first: the field order is the order the model writes them (see the prompt)
+    blocks: list[Annotated[PageTextBlock | PageTableBlock, Field(discriminator="kind")]] = Field(max_length=_MAX_BLOCKS)

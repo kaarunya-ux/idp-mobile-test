@@ -10,6 +10,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import boto3
+import httpx
 from botocore.config import Config
 from celery import Celery
 from faststream.rabbit import RabbitBroker
@@ -34,6 +35,7 @@ from conversion.conversion.infrastructure.converters.images_to_pdf import Img2Pd
 from conversion.conversion.infrastructure.converters.model_to_docx import PythonDocxWriter
 from conversion.conversion.infrastructure.converters.model_to_pptx import PythonPptxWriter
 from conversion.conversion.infrastructure.converters.model_to_sheets import CsvModelWriter, OpenpyxlModelWriter
+from conversion.conversion.infrastructure.converters.ocr_to_model import ModelFirstOcrConverter
 from conversion.conversion.infrastructure.converters.office_to_pdf import LibreOfficePdfConverter
 from conversion.conversion.infrastructure.converters.pdf_merge import PikepdfMerger
 from conversion.conversion.infrastructure.converters.pdf_to_images import PdfiumPageRenderer
@@ -49,6 +51,7 @@ from conversion.conversion.infrastructure.messaging.messages import PRODUCER
 from conversion.conversion.infrastructure.messaging.publisher import RabbitEventPublisher
 from conversion.conversion.infrastructure.pdfedit.editor import PikepdfEditor
 from conversion.conversion.infrastructure.persistence.repository import SqlUnitOfWork
+from conversion.conversion.infrastructure.readers.model_reader import GatewayPageReader
 from conversion.conversion.infrastructure.registry import ConverterRegistry
 from conversion.conversion.infrastructure.secrets import RsaSecrets
 from conversion.conversion.infrastructure.storage import S3ObjectStorage
@@ -57,16 +60,19 @@ from conversion.core.clock import Clock, SystemClock
 from conversion.core.config import Settings, StorageSettings
 from conversion.core.db import SessionFactory, create_db_engine, create_session_factory
 from conversion.core.outbox import OutboxRelay
+from conversion.core.service_auth import ServiceTokenProvider
 
 if TYPE_CHECKING:  # boto3-stubs is a dev dependency: type hints only, not in the images
     from mypy_boto3_s3 import S3Client
 
 
-def build_converter_registry(settings: Settings) -> ConverterRegistry:
-    """Every converter this build of the service can run."""
+def build_converter_registry(settings: Settings, storage: ObjectStoragePort | None = None) -> ConverterRegistry:
+    """Every converter this build of the service can run. The scanned routes' reader joins only when ai-gateway and
+    storage are configured; without them those routes answer ``CNV-422-ROUTE-001``, as before."""
     limits, office = settings.limits, settings.office
     return ConverterRegistry(
         [
+            *_scanned_reader(settings, storage),
             PillowImageFormatConverter(max_pixels=limits.max_image_pixels),
             PdfiumPageRenderer(max_pages=limits.max_pages, max_side_px=limits.max_render_side_px),
             Img2PdfImageWrapper(max_pixels=limits.max_image_pixels),
@@ -85,13 +91,33 @@ def build_converter_registry(settings: Settings) -> ConverterRegistry:
     )
 
 
-def build_convert_file_service(settings: Settings) -> ConvertFileService:
-    return ConvertFileService(RoutePlanner(), build_converter_registry(settings))
+def _scanned_reader(settings: Settings, storage: ObjectStoragePort | None) -> list[ModelFirstOcrConverter]:
+    gateway, auth = settings.ai_gateway, settings.service_auth
+    if gateway.url is None or auth is None or storage is None or settings.storage is None:
+        return []
+    tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
+    seconds = gateway.timeout.total_seconds()
+    client = httpx.Client(
+        base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
+    )
+    reader = GatewayPageReader(client, tokens, storage, bucket=settings.storage.bucket_derived)
+    return [
+        ModelFirstOcrConverter(
+            reader,
+            render_dpi=gateway.render_dpi,
+            max_pages=gateway.max_pages,
+            max_pixels=settings.limits.max_image_pixels,
+        )
+    ]
+
+
+def build_convert_file_service(settings: Settings, storage: ObjectStoragePort | None = None) -> ConvertFileService:
+    return ConvertFileService(RoutePlanner(), build_converter_registry(settings, storage))
 
 
 def build_job_runner(settings: Settings, storage: ObjectStoragePort) -> JobRunner:
     limits, preview, edit = settings.limits, settings.preview, settings.edit
-    converter = build_convert_file_service(settings)
+    converter = build_convert_file_service(settings, storage)
     private_key = settings.crypto.private_key
     return JobRunner(
         {

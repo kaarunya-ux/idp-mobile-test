@@ -77,7 +77,7 @@ class FakeImages:
     def __init__(self) -> None:
         self.loaded: list[tuple[list[ImageRef], bool]] = []
 
-    async def load(self, refs: Sequence[ImageRef], *, stack: bool) -> Sequence[Image]:
+    async def load(self, refs: Sequence[ImageRef], *, stack: bool, max_side_px: int | None = None) -> Sequence[Image]:
         self.loaded.append((list(refs), stack))
         count = 1 if stack else len(refs)
         return [Image(data=b"jpeg") for _ in range(count)]

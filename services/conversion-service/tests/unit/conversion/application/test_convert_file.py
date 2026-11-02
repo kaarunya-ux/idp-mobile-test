@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from uuid import uuid4
 
 import docx
 import openpyxl
@@ -11,10 +12,11 @@ from PIL import Image
 from conversion.bootstrap import build_convert_file_service, build_converter_registry
 from conversion.conversion.application.commands import ConvertFileCommand
 from conversion.conversion.application.services.convert_file import ConvertFileService
+from conversion.conversion.domain.document_model import Page, Table, TextBlock, TextKind
 from conversion.conversion.domain.exceptions import RouteNotFoundError
 from conversion.conversion.domain.formats import Format, Representation
 from conversion.conversion.domain.options import ConversionOptions, PageRange
-from conversion.conversion.domain.ports import StepRequest, StepResult
+from conversion.conversion.domain.ports import StepContext, StepRequest, StepResult
 from conversion.conversion.domain.route import OCR_CONVERTERS, Converter, Fidelity, Route, Step
 from conversion.conversion.domain.route_planner import RoutePlanner, RouteVariant
 from conversion.conversion.infrastructure.registry import ConverterNotRegisteredError, ConverterRegistry
@@ -160,3 +162,69 @@ def test_turns_word_tables_into_sheets_when_converting_docx_to_xlsx(
     sheet = openpyxl.load_workbook(result.outputs[0])["Table 1"]
     assert [[c.value for c in row] for row in sheet.iter_rows()] == [["item", "qty"], ["Paper", 10]]
     assert result.route.converters == (Converter.DOCX_TO_MODEL, Converter.MODEL_TO_XLSX)
+
+
+class _FakePageReader:
+    """Stands in for ai-gateway's page-read: one heading and one table per page, made up."""
+
+    def __init__(self) -> None:
+        self.contexts: list[StepContext] = []
+
+    def read_page(self, image: Path, number: int, context: StepContext) -> Page:
+        self.contexts.append(context)
+        table = Table(rows=(("Item", "Amount"), ("Test item", "45.00")), header_rows=1)
+        return Page(blocks=(TextBlock(text=f"Scanned page {number}", kind=TextKind.HEADING), table))
+
+
+def _scanned_pdf(tmp_path: Path) -> Path:
+    import pypdfium2 as pdfium  # noqa: PLC0415 - only this test draws a PDF
+
+    document = pdfium.PdfDocument.new()
+    document.new_page(595, 842)
+    path = tmp_path / "scan.pdf"
+    document.save(str(path))
+    return path
+
+
+def test_converts_a_scanned_pdf_to_word_through_the_page_reader_with_the_jobs_context(tmp_path: Path) -> None:
+    from conversion.conversion.infrastructure.converters.ocr_to_model import ModelFirstOcrConverter  # noqa: PLC0415
+
+    reader = _FakePageReader()
+    registry = build_converter_registry(Settings(_env_file=None))
+    ocr = ModelFirstOcrConverter(reader, render_dpi=72, max_pages=5, max_pixels=50_000_000)
+    service = ConvertFileService(RoutePlanner(), ConverterRegistry([ocr, registry.get(Converter.MODEL_TO_DOCX)]))
+    context = StepContext(account_id=uuid4(), key_prefix="acct/job/item")
+
+    result = service.convert(
+        ConvertFileCommand(
+            source=Format.PDF,
+            target=Format.DOCX,
+            inputs=(_scanned_pdf(tmp_path),),
+            output_dir=tmp_path / "result",
+            pdf_is_scanned=True,
+            context=context,
+        )
+    )
+
+    document = docx.Document(str(result.outputs[0]))
+    assert [p.text for p in document.paragraphs if p.text] == ["Scanned page 1"]
+    assert document.tables[0].rows[1].cells[1].text == "45.00"
+    assert reader.contexts == [context]
+    assert result.route.converters[0] is Converter.OCR_TO_MODEL
+
+
+def test_registers_the_scanned_reader_only_when_the_gateway_and_storage_are_configured() -> None:
+    plain = build_converter_registry(Settings(_env_file=None))
+    configured = Settings.model_validate(
+        {
+            "ai_gateway": {"url": "http://ai-gateway:8002"},
+            "service_auth": {"token_url": "http://keycloak:8080/realms/idp/token", "client_secret": "test-secret"},
+            "storage": {"endpoint": "http://minio:9000", "access_key": "k", "secret_key": "s"},
+        }
+    )
+
+    with pytest.raises(ConverterNotRegisteredError):
+        plain.get(Converter.OCR_TO_MODEL)
+    with pytest.raises(ConverterNotRegisteredError):  # no storage handed in: still off
+        build_converter_registry(configured).get(Converter.OCR_TO_MODEL)
+    assert build_converter_registry(configured, storage=object()).get(Converter.OCR_TO_MODEL)

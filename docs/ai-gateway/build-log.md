@@ -93,3 +93,16 @@ make check
 
 Result (`make check` on the dev machine, with Docker): 92 tests pass (85 unit, 7 for the mock among them: every
 gateway task passes its own answer checks against it; 7 Redis integration), 97.2% coverage.
+
+## Entry 3: `page-read`, for conversion-service's scanned routes (2026-11-02)
+
+A whole page picture as blocks. The prompt and the answer's shape are Sumukh's model-first reading (PR #20,
+`services/conversions/prompts/read_page.v1.md`, copied as the system prompt): an analysis first (block count, column
+counts), then headings, paragraphs, lists and tables with how each looks. Two additions to the gateway:
+
+- **`thinking` in a prompt's front matter**, sent on every call as `chat_template_kwargs.enable_thinking`: a server
+  restarted with thinking on had spent the whole output budget reasoning (Sumukh's finding).
+- **A larger picture for whole pages** (`MODEL__PAGE_READ_MAX_SIDE_PX`, 2048) than for cards (1280), and its own
+  timeout (`MODEL__TIMEOUTS__PAGE_READ`, 180 s).
+
+The mock model has a recorded page (made-up text). Result here: 89 unit tests pass.

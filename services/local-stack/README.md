@@ -31,7 +31,7 @@ make reset        # stop and delete the data: databases, buckets, queues
 |---|---|---|
 | `extraction-api` | 8000 | templates, designer, mobile bundle; `/health/ready`, `/metrics`, `/docs` |
 | `extraction-intake`, `-relay`, `-worker`, `-worker-ai` | — | messages in, events out, the pipeline, deep analysis |
-| `conversion-intake`, `-relay`, `-worker` | — | messages in, events out, the conversions |
+| `conversion-intake`, `-relay`, `-worker`, `-worker-ocr` | — | messages in, events out, the conversions; `-ocr` runs the scanned routes through ai-gateway |
 | `conversion-health` | 8001 | `/health/ready` |
 | `ai-gateway` | 8002 (this machine only) | internal: only extraction calls it |
 | `mock-model` | — | stands in for the AI model server; made-up answers |
