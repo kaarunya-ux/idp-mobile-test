@@ -93,8 +93,8 @@ def _error_doc(description: str, code: str, message: str) -> dict:
 
 
 ERROR_RESPONSES = {
-    400: _error_doc("Empty file or not a readable image (HEIC is not supported).", "INVALID_IMAGE",
-                    "Could not read the image. Send a JPEG, PNG or WebP file."),
+    400: _error_doc("Empty file, not a readable image or PDF (HEIC is not supported), or a password-protected PDF.",
+                    "INVALID_IMAGE", "Could not read the image. Send a PDF, JPEG, PNG or WebP file."),
     413: _error_doc("Image larger than 15 MB.", "IMAGE_TOO_LARGE", "Image is larger than 15 MB."),
     422: _error_doc("No 'file' field in the multipart body.", "INVALID_REQUEST",
                     "Send the image as multipart/form-data in a field named 'file'."),
@@ -112,7 +112,9 @@ Send a photo or scan of an **Indian identity document** to the endpoint for its 
   same request; both sides are read together into one result.
 * HTTP 200 returns the fields of that type; every key is always present, `null` when not printed or not readable.
 * Any other status returns `{"error": {"code": ..., "message": ...}}`.
-* The API trims the white margin itself. JPEG, PNG or WebP up to 15 MB; allow a 30 s client timeout.
+* The API trims the white margin itself. PDF, JPEG, PNG or WebP up to 15 MB; allow a 30 s client timeout.
+* A PDF's first page is read. For Aadhaar and DL, a PDF sent without `back` has its second page (if any) read
+  as the back. Password-protected PDFs (such as e-Aadhaar downloads) are rejected: remove the password first.
 """
 
 
@@ -171,7 +173,7 @@ async def health():
     return {"status": "ok" if ready else "model_unavailable", "model": app.state.model_name}
 
 
-async def _run(doc_type: str, file: UploadFile, back: UploadFile | None, debug: bool):
+async def _run(doc_type: str, file: UploadFile, back: UploadFile | None, debug: bool, two_sided: bool):
     start = time.perf_counter()
     raw = await file.read(MAX_UPLOAD_BYTES + 1)
     raw_back = await back.read(MAX_UPLOAD_BYTES + 1) if back is not None else None
@@ -183,7 +185,7 @@ async def _run(doc_type: str, file: UploadFile, back: UploadFile | None, debug: 
         if len(data_) > MAX_UPLOAD_BYTES:
             return error(413, "IMAGE_TOO_LARGE", f"The {which} is larger than {MAX_UPLOAD_BYTES // 1024 // 1024} MB.")
 
-    url, size = await asyncio.to_thread(extract.prepare, raw, raw_back)
+    url, size = await asyncio.to_thread(extract.prepare, raw, raw_back, two_sided)
     prep_ms = round((time.perf_counter() - start) * 1000)
     fields, stats = await extract.extract(app.state.client, doc_type, url)
     total_ms = round((time.perf_counter() - start) * 1000)
@@ -203,7 +205,7 @@ def _add_route(doc_type: str, label: str, model: type[BaseModel], two_sided: boo
     responses = {200: {"model": model, "content": {"application/json": {"example": EXAMPLES[doc_type]}}},
                  **ERROR_RESPONSES}
     file_doc = (f"Photo or scan of the {label}" + (" (the front, when `back` is also sent)" if two_sided else "")
-                + ": JPEG, PNG or WebP, up to 15 MB.")
+                + ": PDF, JPEG, PNG or WebP, up to 15 MB.")
 
     if two_sided:
         async def handler(
@@ -213,13 +215,13 @@ def _add_route(doc_type: str, label: str, model: type[BaseModel], two_sided: boo
             # Internal: the test page adds ?debug=true to also get timings. Hidden from Swagger.
             debug: bool = Query(False, include_in_schema=False),
         ):
-            return await _run(doc_type, file, back, debug)
+            return await _run(doc_type, file, back, debug, True)
     else:
         async def handler(
             file: UploadFile = File(..., description=file_doc),
             debug: bool = Query(False, include_in_schema=False),
         ):
-            return await _run(doc_type, file, None, debug)
+            return await _run(doc_type, file, None, debug, False)
 
     handler.__name__ = f"extract_{doc_type}"
     app.post(f"/api/v1/{doc_type}/extract", response_model=None, summary=f"Extract the fields of a {label}",

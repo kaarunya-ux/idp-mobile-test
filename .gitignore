@@ -61,3 +61,8 @@ Final Payslip.pdf
 .venv-mlx/
 .venv-optiq/
 *.code-workspace
+# Personal files and real test documents kept in the repo folder
+*Mail.pdf
+NID female -Jamican .png
+National Identification Card.png
+Payslip new .pdf

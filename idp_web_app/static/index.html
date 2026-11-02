@@ -40,6 +40,7 @@
           padding: 12px; color: var(--muted); }
   #drop.over { border-color: var(--accent); background: var(--soft); }
   #drop img { max-width: 100%; max-height: 380px; border-radius: 6px; display: block; }
+  .pdf { font-weight: 600; color: var(--text); word-break: break-all; }
   #backWrap { margin-top: 14px; }
   #dropBack { border: 2px dashed var(--border); border-radius: 10px; min-height: 110px; display: flex;
               align-items: center; justify-content: center; text-align: center; cursor: pointer;
@@ -95,10 +96,10 @@
   <section class="panel">
     <h2 id="imageTitle">Image</h2>
     <div id="drop" tabindex="0"></div>
-    <input id="file" type="file" accept="image/*" hidden>
+    <input id="file" type="file" accept="image/*,application/pdf" hidden>
     <div id="backWrap" hidden>
       <div id="dropBack" tabindex="0">Back side (optional): click or drop the back of the same card</div>
-      <input id="fileBack" type="file" accept="image/*" hidden>
+      <input id="fileBack" type="file" accept="image/*,application/pdf" hidden>
       <button id="removeBack" class="link" hidden>Remove back side</button>
     </div>
     <div class="actions">
@@ -199,35 +200,53 @@
     for (const b of document.querySelectorAll(".tabs button"))
       b.setAttribute("aria-selected", String(b.dataset.kind === k));
     $("#imageTitle").textContent = KINDS[k].title + " image";
-    if (!file) $("#drop").textContent = `Click, drop or paste a ${KINDS[k].title} image`;
+    if (!file) $("#drop").textContent = `Click, drop or paste a ${KINDS[k].title} image or PDF`;
     $("#backWrap").hidden = !KINDS[k].twoSided;
-    $("#run").disabled = $("#loadRun").disabled = !file;
+    setButtons();
     clearResult();
   }
 
-  function setFile(f) {
-    if (!f || !f.type.startsWith("image/")) return;
-    file = f;
+  const isPdf = (f) => f.type === "application/pdf";
+  const accepted = (f) => f && (f.type.startsWith("image/") || isPdf(f));
+
+  // The several-users test makes unique copies by redrawing the image, which a PDF cannot be.
+  function setButtons() {
+    $("#run").disabled = !file;
+    $("#loadRun").disabled = !file || isPdf(file) || (KINDS[kind].twoSided && !!backFile && isPdf(backFile));
+  }
+
+  // An image previews as itself; a PDF (read on the server: page 1, and page 2 as the back) by its name.
+  function preview(f) {
+    if (isPdf(f)) {
+      const p = document.createElement("div");
+      p.className = "pdf";
+      p.textContent = `PDF: ${f.name}`;
+      return p;
+    }
     const img = document.createElement("img");
     img.src = URL.createObjectURL(f);
     img.alt = f.name;
-    $("#drop").replaceChildren(img);
-    $("#run").disabled = $("#loadRun").disabled = false;
+    return img;
+  }
+
+  function setFile(f) {
+    if (!accepted(f)) return;
+    file = f;
+    $("#drop").replaceChildren(preview(f));
+    setButtons();
     // Selecting an image only previews it; extraction runs when Extract is clicked.
     clearResult();
   }
 
   function setBack(f) {
-    backFile = f && f.type.startsWith("image/") ? f : null;
+    backFile = accepted(f) ? f : null;
     if (backFile) {
-      const img = document.createElement("img");
-      img.src = URL.createObjectURL(backFile);
-      img.alt = backFile.name;
-      $("#dropBack").replaceChildren(img);
+      $("#dropBack").replaceChildren(preview(backFile));
     } else {
       $("#dropBack").textContent = "Back side (optional): click or drop the back of the same card";
     }
     $("#removeBack").hidden = !backFile;
+    setButtons();
     clearResult();
   }
 
@@ -273,7 +292,7 @@
       $("#error").hidden = false;
     } finally {
       clearInterval(timer);
-      $("#run").disabled = $("#loadRun").disabled = !file;
+      setButtons();
     }
   }
 
@@ -365,7 +384,7 @@
     const first = results.find((r) => r.body);
     if (first && kind === k) showLoadResult(first);
     $("#loadStatus").textContent = "";
-    $("#run").disabled = $("#loadRun").disabled = !file;
+    setButtons();
   }
 
   async function checkHealth() {

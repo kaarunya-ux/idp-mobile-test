@@ -12,6 +12,7 @@ import os
 import re
 
 import httpx
+import pypdfium2 as pdfium
 from PIL import Image, ImageChops, ImageOps
 
 import doc_schemas as S
@@ -25,6 +26,7 @@ MIN_EDGE = int(os.getenv("MIN_EDGE", "768"))   # small images are enlarged to th
 # image tokens a Qwen3.5 model reads at 1.
 IMAGE_SCALE = float(os.getenv("IMAGE_SCALE", "1"))
 SIDE_GAP = 24            # white strip between front and back when two images are stacked
+RENDER_EDGE = 2000       # PDF pages are rendered at this long side, then shrunk like photos
 MAX_TOKENS = 400
 # llama-server reuses the work of an identical earlier prompt prefix (the prompt text, and the image if
 # it is the same file). Keep on; false only to measure without any reuse.
@@ -45,11 +47,32 @@ def trim_white(img: Image.Image, threshold: int = 235, pad: int = 8) -> Image.Im
     return img.crop((max(x0 - pad, 0), max(y0 - pad, 0), min(x1 + pad, img.width), min(y1 + pad, img.height)))
 
 
-def _decode(raw: bytes, which: str) -> Image.Image:
+def pdf_pages(raw: bytes, which: str, limit: int) -> list[Image.Image]:
+    """The first `limit` pages of a PDF, rendered to images."""
     try:
-        return ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+        pdf = pdfium.PdfDocument(raw)
+    except pdfium.PdfiumError as e:
+        if "password" in str(e).lower():
+            raise ModelError(400, "INVALID_IMAGE", f"The {which} is a password-protected PDF (as e-Aadhaar "
+                                                   "downloads are). Send it without the password, or as an image.")
+        raise ModelError(400, "INVALID_IMAGE", f"Could not read the {which} as a PDF.")
+    pages = []
+    for i in range(min(len(pdf), limit)):
+        page = pdf[i]
+        pages.append(page.render(scale=RENDER_EDGE / max(page.get_size())).to_pil().convert("RGB"))
+    if not pages:
+        raise ModelError(400, "INVALID_IMAGE", f"The {which} has no pages.")
+    return pages
+
+
+def _decode(raw: bytes, which: str, limit: int = 1) -> list[Image.Image]:
+    """The image, or the first `limit` pages of a PDF."""
+    if raw[:5] == b"%PDF-":
+        return pdf_pages(raw, which, limit)
+    try:
+        return [ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")]
     except Exception:
-        raise ModelError(400, "INVALID_IMAGE", f"Could not read the {which}. Send a JPEG, PNG or WebP file.")
+        raise ModelError(400, "INVALID_IMAGE", f"Could not read the {which}. Send a PDF, JPEG, PNG or WebP file.")
 
 
 def stack_sides(front: Image.Image, back: Image.Image) -> Image.Image:
@@ -63,13 +86,16 @@ def stack_sides(front: Image.Image, back: Image.Image) -> Image.Image:
     return out
 
 
-def prepare(raw: bytes, raw_back: bytes | None = None) -> tuple[str, tuple[int, int]]:
-    """Decode (fixing phone rotation), trim the white margin, stack front and back when both are
-    given, shrink to EXTRACT_EDGE; return (data_url, size)."""
+def prepare(raw: bytes, raw_back: bytes | None = None, two_sided: bool = False) -> tuple[str, tuple[int, int]]:
+    """Decode (fixing phone rotation; a PDF's first page), trim the white margin, stack front and back when
+    both are given, shrink to EXTRACT_EDGE; return (data_url, size). For a two-sided card sent as one PDF
+    without `back`, the PDF's second page, if any, is the back."""
     if raw_back is None:
-        card = trim_white(_decode(raw, "image"))
+        sides = _decode(raw, "image", 2 if two_sided else 1)
     else:
-        card = stack_sides(trim_white(_decode(raw, "front image")), trim_white(_decode(raw_back, "back image")))
+        sides = _decode(raw, "front image")[:1] + _decode(raw_back, "back image")[:1]
+    sides = [trim_white(s) for s in sides]
+    card = sides[0] if len(sides) == 1 else stack_sides(*sides)
     if max(card.size) > EXTRACT_EDGE:
         card.thumbnail((EXTRACT_EDGE, EXTRACT_EDGE), Image.LANCZOS)
     elif max(card.size) < MIN_EDGE:
