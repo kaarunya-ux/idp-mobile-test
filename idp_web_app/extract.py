@@ -1,13 +1,15 @@
 """Read the fields of one Indian document (PAN, Aadhaar, driving licence); see doc_schemas.py.
 
-One model call: the image (trimmed of its white margin, front and back stacked into one picture when
-both are sent, shrunk to EXTRACT_EDGE) plus the prompt for that document type, answered as a JSON array
+When two sides are sent, a quick call on small images first finds which is the front (front_first).
+Then one model call: the image (trimmed of its white margin, front stacked above back when both are
+sent, shrunk to EXTRACT_EDGE) plus the prompt for that document type, answered as a JSON array
 of values constrained by its schema and turned back into the keyed fields here.
 """
 
 import base64
 import io
 import json
+import logging
 import os
 import re
 
@@ -19,6 +21,7 @@ import doc_schemas as S
 import llm
 from llm import ModelError
 
+log = logging.getLogger("uvicorn.error")
 EXTRACT_EDGE = int(os.getenv("EXTRACT_EDGE", "1280"))   # longest side sent to the model
 MIN_EDGE = int(os.getenv("MIN_EDGE", "768"))   # small images are enlarged to this: tiny print is misread
 # Final scale on every image, after the limits above. Models cut images into pieces of different size
@@ -27,7 +30,14 @@ MIN_EDGE = int(os.getenv("MIN_EDGE", "768"))   # small images are enlarged to th
 IMAGE_SCALE = float(os.getenv("IMAGE_SCALE", "1"))
 SIDE_GAP = 24            # white strip between front and back when two images are stacked
 RENDER_EDGE = 2000       # PDF pages are rendered at this long side, then shrunk like photos
+CHECK_EDGE = 512         # the front check needs little detail
 MAX_TOKENS = 400
+LABELS = {"aadhaar": "Aadhaar card", "dl": "driving licence"}
+FRONT_PROMPT = ("Image 1 and image 2 are the two sides of one Indian {label}. Which image is the front (the side "
+                "with the holder's photo and name)? Answer in compact JSON on one line: {{\"front_image\": 1}} "
+                "or {{\"front_image\": 2}}.")
+FRONT_SCHEMA = {"type": "object", "properties": {"front_image": {"enum": [1, 2]}},
+                "required": ["front_image"], "additionalProperties": False}
 # llama-server reuses the work of an identical earlier prompt prefix (the prompt text, and the image if
 # it is the same file). Keep on; false only to measure without any reuse.
 CACHE_PROMPT = os.getenv("CACHE_PROMPT", "true").lower() != "false"
@@ -86,15 +96,54 @@ def stack_sides(front: Image.Image, back: Image.Image) -> Image.Image:
     return out
 
 
-def prepare(raw: bytes, raw_back: bytes | None = None, two_sided: bool = False) -> tuple[str, tuple[int, int]]:
-    """Decode (fixing phone rotation; a PDF's first page), trim the white margin, stack front and back when
-    both are given, shrink to EXTRACT_EDGE; return (data_url, size). For a two-sided card sent as one PDF
-    without `back`, the PDF's second page, if any, is the back."""
+def load_sides(raw: bytes, raw_back: bytes | None = None, two_sided: bool = False) -> list[Image.Image]:
+    """Decode (fixing phone rotation; a PDF's first page) and trim the white margin of each side. For a
+    two-sided card sent as one PDF without `back`, the PDF's second page, if any, is the back."""
     if raw_back is None:
         sides = _decode(raw, "image", 2 if two_sided else 1)
     else:
         sides = _decode(raw, "front image")[:1] + _decode(raw_back, "back image")[:1]
-    sides = [trim_white(s) for s in sides]
+    return [trim_white(s) for s in sides]
+
+
+def _small_url(img: Image.Image) -> str:
+    img = img.copy()
+    img.thumbnail((CHECK_EDGE, CHECK_EDGE), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+async def front_first(client: httpx.AsyncClient, doc_type: str, sides: list[Image.Image]) -> tuple[list, bool]:
+    """(sides with the front first, whether they were swapped). Clients sometimes send the back as `file` and
+    the front as `back`; stacked back above front, the model mixes up the fields. One quick call on small
+    images asks which is the front; if that call fails or its answer is unclear, the order is kept."""
+    if len(sides) != 2:
+        return sides, False
+    body = {
+        "messages": [{"role": "user", "content": [
+            *({"type": "image_url", "image_url": {"url": _small_url(s)}} for s in sides),
+            {"type": "text", "text": FRONT_PROMPT.format(label=LABELS[doc_type])}]}],
+        "temperature": 0, "max_tokens": 20,
+        "chat_template_kwargs": {"enable_thinking": False}, "enable_thinking": False,
+    }
+    if SEND_SCHEMA:
+        body["response_format"] = {"type": "json_schema", "json_schema": {"name": "front", "schema": FRONT_SCHEMA}}
+    if llm.LLAMA_MODEL:
+        body["model"] = llm.LLAMA_MODEL
+    try:
+        p = await llm.chat(client, body)
+        swapped = _parse(p["choices"][0]["message"]["content"])["front_image"] == 2
+    except ModelError:
+        raise
+    except Exception:
+        log.warning("Front check gave no clear answer; keeping the order sent")
+        return sides, False
+    return (sides[::-1], True) if swapped else (sides, False)
+
+
+def card_url(sides: list[Image.Image]) -> tuple[str, tuple[int, int]]:
+    """Stack front above back when there are two sides, shrink to EXTRACT_EDGE; return (data_url, size)."""
     card = sides[0] if len(sides) == 1 else stack_sides(*sides)
     if max(card.size) > EXTRACT_EDGE:
         card.thumbnail((EXTRACT_EDGE, EXTRACT_EDGE), Image.LANCZOS)

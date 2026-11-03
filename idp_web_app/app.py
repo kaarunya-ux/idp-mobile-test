@@ -185,20 +185,24 @@ async def _run(doc_type: str, file: UploadFile, back: UploadFile | None, debug: 
         if len(data_) > MAX_UPLOAD_BYTES:
             return error(413, "IMAGE_TOO_LARGE", f"The {which} is larger than {MAX_UPLOAD_BYTES // 1024 // 1024} MB.")
 
-    url, size = await asyncio.to_thread(extract.prepare, raw, raw_back, two_sided)
-    prep_ms = round((time.perf_counter() - start) * 1000)
+    sides = await asyncio.to_thread(extract.load_sides, raw, raw_back, two_sided)
+    t0 = time.perf_counter()
+    sides, swapped = await extract.front_first(app.state.client, doc_type, sides)
+    check_ms = round((time.perf_counter() - t0) * 1000) if len(sides) == 2 else 0
+    url, size = await asyncio.to_thread(extract.card_url, sides)
+    prep_ms = round((time.perf_counter() - start) * 1000) - check_ms
     fields, stats = await extract.extract(app.state.client, doc_type, url)
     total_ms = round((time.perf_counter() - start) * 1000)
     # Document type, timings and which fields were found, never their values or the file name:
     # both can hold personal data.
-    log.info("extract-%s %s sides=%d %dx%d %dms prep=%dms %s found=%s", doc_type, uuid.uuid4().hex[:12],
-             1 if raw_back is None else 2, size[0], size[1], total_ms, prep_ms, stats,
+    log.info("extract-%s %s sides=%d swapped=%s %dx%d %dms prep=%dms check=%dms %s found=%s", doc_type,
+             uuid.uuid4().hex[:12], len(sides), swapped, size[0], size[1], total_ms, prep_ms, check_ms, stats,
              ",".join(k for k, v in fields.items() if v) or "none")
     if not debug:
         return fields
-    return {**fields, "meta": {"model": app.state.model_name, "processing_ms": total_ms,
+    return {**fields, "meta": {"model": app.state.model_name, "processing_ms": total_ms, "swapped": swapped,
                                "image": {"width": size[0], "height": size[1]},
-                               "timings": {"image_prep_ms": prep_ms, **stats}}}
+                               "timings": {"image_prep_ms": prep_ms, "front_check_ms": check_ms, **stats}}}
 
 
 def _add_route(doc_type: str, label: str, model: type[BaseModel], two_sided: bool):

@@ -62,7 +62,7 @@ schema itself. The app also turns off Qwen3.5's "thinking" mode on every request
 | `POST /api/v1/dl/extract` | `file`, optional `back` | `license_number, name, dob, address, issue_date, validity_nt, validity_tr, blood_group, organ_donor, vehicle_classes` |
 
 - Body is `multipart/form-data`. `back` is the back side of the same card, sent in the same request;
-  both sides are read together into one result.
+  both sides are read together into one result. The sides may come in either order (see below).
 - Files: **PDF**, JPEG, PNG or WebP, up to 15 MB (HEIC is rejected). A PDF's first page is read; for Aadhaar and
   DL, a PDF sent without `back` has its second page (if any) read as the back. Password-protected PDFs (such
   as e-Aadhaar downloads) are rejected: remove the password first.
@@ -71,6 +71,23 @@ schema itself. The app also turns off Qwen3.5's "thinking" mode on every request
   `INVALID_REQUEST` 422, `INTERNAL_ERROR` 500, `MODEL_ERROR` / `MODEL_OUTPUT_INVALID` 502,
   `MODEL_UNAVAILABLE` 503, `MODEL_TIMEOUT` 504).
 - Test page at `/` (PAN / Aadhaar / Driving licence tabs), Swagger at `/docs`, `GET /health`.
+
+### Front / back order check
+
+Clients sometimes send the back as `file` and the front as `back`. Stacked back above front, the model mixes
+up the fields: a swapped Kerala DL came back with 8 of 10 fields wrong. So when two sides arrive (`file` +
+`back`, or a 2-page PDF), the app first asks the model which is the front (the side with the photo and name),
+on both sides shrunk to 512 px, and swaps them if image 2 is the front. Then it stacks front above back and
+extracts as before. If the check's answer is unclear, the order sent is kept. Single images and PAN skip it.
+
+- Tested on one DL and one Aadhaar pair, in order and swapped: both orders gave identical fields.
+- Cost on this Mac (MLX, Qwen3.5-4B): **1.6-2.2 s** per two-sided request (total about 7-10 s instead of 6-8 s).
+  The same check in the VMBS service (llama.cpp, Qwen3-VL-4B, on the .18 Mac mini) takes about 0.3 s.
+- **Not yet measured:** whether that gap is the engine (MLX vs llama.cpp), the machine, or the model. Next
+  step: run Qwen3.5-4B GGUF (Q4_K_M + mmproj, not on this Mac yet, ~3.3 GB) with llama-server on a spare port
+  here and time the check.
+- The log line has `swapped=` and `check=<ms>`; with `?debug=true` the response meta has `swapped` and
+  `timings.front_check_ms`.
 
 ## Settings (`.env`)
 
@@ -139,7 +156,7 @@ Prompts were written and tuned on Qwen3.5-4B.
 
 ```
 app.py            API, Swagger models, error handling
-extract.py        image / PDF prep (render PDF pages, trim margin, stack front + back, resize) and the model call
+extract.py        image / PDF prep (render PDF pages, trim margin, front check, stack front + back, resize) and the model call
 doc_schemas.py    fields, prompts and JSON schemas per document type
 llm.py            model host client (based on the VMBS one)
 static/           test page
