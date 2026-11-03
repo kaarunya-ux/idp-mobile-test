@@ -39,6 +39,11 @@ class ErrorCode(StrEnum):
     SAMPLES_MISSING = "EXT-409-SAMPLE-002"  # new: a test run needs samples with expected values
     TEST_RUN_NOT_FOUND = "EXT-404-TESTRUN-001"  # new
     TIMEOUT = "EXT-504-PIPELINE-001"  # IDP-03 ch. 2.12: the item ran past its time limit
+    # new: the synchronous extract route (ADR 0009); the backend calls them TOO_LARGE, UNSUPPORTED_TYPE and so on
+    FILE_TOO_LARGE = "EXT-413-FILE-001"  # an uploaded file, or both together, is over the limit
+    FILE_TYPE_UNSUPPORTED = "EXT-415-FILE-001"  # not a PDF, JPEG or PNG, or a PDF sent with a back image
+    AI_BUSY = "EXT-429-BUSY-001"  # no model slot within the short wait: send it the queued way (RabbitMQ) instead
+    AI_LIMIT_REACHED = "EXT-429-AI-001"  # the account's daily AI calls are used up
 
     @property
     def http_status(self) -> int:

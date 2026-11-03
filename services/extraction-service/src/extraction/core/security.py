@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from extraction.core.config import AuthSettings
 from extraction.core.errors import PermissionDeniedError, UnauthenticatedError
-from extraction.core.permissions import STANDARD_TEMPLATE_WRITE, permissions_for
+from extraction.core.permissions import STANDARD_TEMPLATE_WRITE, Plan, permissions_for, plan_for
 
 ALGORITHMS = ("RS256", "ES256")
 _KINDS: dict[str, Literal["user", "service", "api_key"]] = {"user": "user", "service": "service", "api_key": "api_key"}
@@ -27,6 +27,7 @@ class Principal(NamedTuple):
     tenant_id: UUID | None  # account_id; None for platform staff and users still onboarding
     permissions: frozenset[str]
     kind: Literal["user", "service", "api_key", "anonymous"]
+    plan: Plan = "PERSONAL"  # which daily AI allowance applies, from the roles (IDP-00 ch. 7.9)
 
     @property
     def is_platform_admin(self) -> bool:
@@ -78,7 +79,11 @@ def principal_from_claims(claims: Mapping[str, Any]) -> Principal:
     except ValueError:
         raise UnauthenticatedError from None
     return Principal(
-        actor_id=str(claims["sub"]), tenant_id=tenant, permissions=permissions_for(roles, scopes), kind=kind
+        actor_id=str(claims["sub"]),
+        tenant_id=tenant,
+        permissions=permissions_for(roles, scopes),
+        kind=kind,
+        plan=plan_for(roles, kind),
     )
 
 

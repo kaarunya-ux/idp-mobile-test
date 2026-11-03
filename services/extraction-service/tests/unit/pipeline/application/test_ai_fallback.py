@@ -2,18 +2,19 @@
 
 import threading
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
 
 from extraction.pipeline.application.commands import ExtractDocumentCommand
-from extraction.pipeline.application.services.extract_document import AiAssist, ExtractDocumentService
+from extraction.pipeline.application.services.extract_document import AiAssist, AiCrops, ExtractDocumentService
 from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.domain.models import PreparationSteps, PreparedPage
-from extraction.pipeline.domain.ports import AiCallContext, AiClassification, AiReading
+from extraction.pipeline.domain.ports import AiCallContext, AiClassification, AiFieldCrop, AiReading
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.stages import Stage
 from extraction.pipeline.domain.standard_templates import STANDARD_TEMPLATES
@@ -339,3 +340,91 @@ def test_uses_the_named_template_without_classifying_when_the_request_names_one(
     result = extractor.extract(forced)
 
     assert result["documentType"] == {"code": "PAN_CARD", "confidence": 1.0}
+
+
+# --- stage 7 with crops (ADR 0009): only the unsure fields, each cut out and read alone ---------------------------
+
+
+class FakeCropAi:
+    def __init__(self, answer: dict[str, str | None] | None = None, *, down: bool = False) -> None:
+        self.answer, self.down = answer or {}, down
+        self.crops: list[tuple[str, str, dict[str, str | None]]] = []  # (key, crop key, readings)
+
+    def read_crop(self, field: AiFieldCrop, context: AiCallContext) -> AiReading:
+        self.crops.append((field.key, field.crop.key, dict(field.readings)))
+        if self.down:
+            raise AiUnavailableError("down")
+        return AiReading(
+            values={field.key: self.answer.get(field.key)}, model_id="vl-test", prompt_version="field-read.v1"
+        )
+
+
+class FakeCropStore:
+    def __init__(self) -> None:
+        self.saved: dict[str, PageImage] = {}
+
+    def save_page(self, ref: ObjectRef, page: PageImage) -> None:
+        self.saved[ref.key] = page
+
+
+def _crop_command() -> ExtractDocumentCommand:
+    base = command()
+    folder = ObjectRef(bucket="idp-derived", key="acct/doc/item/crops")
+    return ExtractDocumentCommand(
+        pages=base.pages, qualities=base.qualities, ai_context=replace(CONTEXT, crop_folder=folder)
+    )
+
+
+def _with_crops(crop_ai: FakeCropAi, store: FakeCropStore) -> AiAssist:
+    return AiAssist(reader=FakeAi(), confidence=0.9, crops=AiCrops(reader=crop_ai, store=store, padding=0.5, workers=2))
+
+
+def test_sends_only_the_disagreeing_fields_crop_with_both_readings_when_crops_are_set_up() -> None:
+    crop_ai, store = FakeCropAi({"pan_number": "ABCPE1234F"}), FakeCropStore()
+
+    result = service(_disagreeing_engines(), Progress(), ai=_with_crops(crop_ai, store)).extract(_crop_command())
+
+    pan = fields_of(result)["pan_number"]
+    assert [(key, crop) for key, crop, _ in crop_ai.crops] == [("pan_number", "acct/doc/item/crops/pan_number.png")]
+    assert crop_ai.crops[0][2] == {"A": "ABCPE1234F", "B": "ABCPE9999Z"}
+    assert (pan["value"], pan["source"], pan["status"]) == ("ABCPE1234F", "AI", "ACCEPTED")
+    assert store.saved["acct/doc/item/crops/pan_number.png"].width < command().pages[0].clean.width
+    assert result["provenance"]["models"] == [{"id": "vl-test", "promptVersion": "field-read.v1"}]
+
+
+def test_sends_a_field_both_engines_read_too_faintly_to_the_ai_as_a_crop() -> None:
+    engines = {"A": FakeEngine("A", PAN_LINES, confidence=0.6), "B": FakeEngine("B", PAN_LINES, confidence=0.6)}
+    crop_ai = FakeCropAi({"pan_number": "ABCPE1234F"})
+
+    service(engines, Progress(), ai=_with_crops(crop_ai, FakeCropStore())).extract(_crop_command())
+
+    assert "pan_number" in [key for key, _, _ in crop_ai.crops]  # agreed, but under the review confidence
+
+
+def test_asks_nothing_when_both_engines_agree_with_confidence() -> None:
+    engines = {"A": FakeEngine("A", PAN_LINES), "B": FakeEngine("B", PAN_LINES)}
+    crop_ai = FakeCropAi()
+
+    service(engines, Progress(), ai=_with_crops(crop_ai, FakeCropStore())).extract(_crop_command())
+
+    assert crop_ai.crops == []
+
+
+def test_keeps_the_ocr_decision_when_the_crop_gets_no_answer() -> None:
+    crop_ai = FakeCropAi(down=True)
+
+    result = service(_disagreeing_engines(), Progress(), ai=_with_crops(crop_ai, FakeCropStore())).extract(
+        _crop_command()
+    )
+
+    assert fields_of(result)["pan_number"]["status"] == "NEEDS_REVIEW"
+    assert result["provenance"]["models"] == []
+
+
+def test_reads_the_whole_page_when_the_command_has_no_crop_folder() -> None:
+    crop_ai, page_ai = FakeCropAi(), FakeAi({"pan_number": "ABCPE1234F"})
+    ai = AiAssist(reader=page_ai, confidence=0.9, crops=AiCrops(reader=crop_ai, store=FakeCropStore()))
+
+    service(_disagreeing_engines(), Progress(), ai=ai).extract(command())
+
+    assert (crop_ai.crops, page_ai.asked) == ([], [("PAN_CARD", ("pan_number",))])

@@ -303,3 +303,40 @@ cd services/extraction-service && make check
 
 Result (`make check` on the dev machine, with Docker): 598 tests pass (592 unit, 6 integration), 92.9% coverage; one
 converts a hand-made Word file with the real LibreOffice and reads its text back.
+
+## Entry 8: The synchronous extract and the AI step on field crops (2026-11-03)
+
+**Goal:** the backend's direct HTTP call for one document, answered on the same request, read the way the team
+planned for both paths: two OCR engines first, and only the fields they disagree on or are unsure of cut out and sent
+to the AI. A document no template knows goes to the AI whole. Decisions: ADR 0009 (and ai-gateway ADR 0003).
+
+### What we did
+
+- **The AI step reads crops** (`AiAssist.assist_with_crops`, `pipeline/domain/crops.py`, `GatewayCropReader`): each
+  field still NEEDS_REVIEW is cut out of the page (its box, moved with its anchor, plus a margin), stored under
+  `crops/`, and read alone through ai-gateway's `field-read` single form with both engines' readings as hints; up to
+  3 at once. `AI_GATEWAY__READ_MODE=page` keeps the whole-page request to compare. Both paths use it.
+- **The `extraction-sync` process** (`sync_main.py`, worker image, port 8003) serves `POST /api/v1/extract`: the
+  OCR engines load once; each request runs the pipeline in a worker thread, two at once, one more answers 429.
+- **The `quick/` feature**: the file checks; the use case (pipeline, then `generic-read` when no template matched;
+  the workspace folder deleted whatever happened); the workspace, the pipeline runner (INTERACTIVE lane, the crops
+  folder, PDFs over 2 pages refused) and the sync ai-gateway client; the route. The slim API no longer has it.
+- Permission `document:write` for every role; the plan for the daily AI allowance from the token's roles.
+- **`POST /api/v1/extract/generic`**, straight to the model: the pages prepared (no OCR, no quality gate) and read
+  whole by ai-gateway's `generic-read`; same inputs, limits and answer. The stack check has a twelfth check for it.
+
+New error codes `EXT-413-FILE-001`, `EXT-415-FILE-001`, `EXT-429-BUSY-001`, `EXT-429-AI-001`; new settings
+`QUICK__*`, `AI_GATEWAY__READ_MODE`, `AI_GATEWAY__CROP_PADDING`, `AI_GATEWAY__CROP_CONCURRENCY`; new dependency
+`python-multipart`; two new import contracts. The local stack runs `extraction-sync`, and `make check` has two new
+checks: the card through `POST /api/v1/extract` and `POST /api/v1/extract/generic` with the user's token.
+
+### Check it
+
+```bash
+cd services/extraction-service && make check
+cd services/local-stack && make prepare && make up && make check
+```
+
+Result here (no Docker): ruff, mypy and the 10 import contracts clean; 649 unit tests pass, 89% coverage, the new code
+97–100%. The database integration tests and the stack check need Docker. Until the real model server is in, the mock
+model answers the crops (with null: the fields stay for review) and the generic read (a made-up PAN).

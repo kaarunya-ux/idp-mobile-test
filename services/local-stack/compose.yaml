@@ -207,6 +207,19 @@ services:
     volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]
     depends_on: *extraction-ready
 
+  # The synchronous extract (ADR 0009): POST /api/v1/extract, OCR first, the AI for the unsure fields' crops
+  extraction-sync:
+    image: idp-local/extraction-service:worker
+    build: {<<: *extraction-build, target: worker}
+    command: ["uvicorn", "--factory", "extraction.sync_main:create_sync_app", "--host", "0.0.0.0", "--port", "8003"]
+    environment: *extraction-env
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]
+    ports: ["8003:8003"]
+    depends_on: *extraction-ready
+    healthcheck:
+      <<: *python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health/ready')"]
+
   # --- conversion-service ------------------------------------------------------------------------------------
   conversion-migrate:
     image: idp-local/conversion-service:service

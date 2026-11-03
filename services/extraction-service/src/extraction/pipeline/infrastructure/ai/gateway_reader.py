@@ -1,5 +1,5 @@
-"""The AI ports on ai-gateway (IDP-03 ch. 4.2): ``field-read`` (batch form, ai-gateway ADR 0002), ``classify`` and
-``page-analysis``.
+"""The AI ports on ai-gateway (IDP-03 ch. 4.2): ``field-read`` (its single form on one field's crop, ADR 0009, and
+its batch form on the whole page, ai-gateway ADR 0002), ``classify`` and ``page-analysis``.
 
 Pages are already in the derived bucket (the worker stores them before any AI step), so only their keys are sent.
 The gateway owns the prompts, the model and the queue; it answers with the values and the model and prompt version
@@ -16,7 +16,7 @@ import structlog
 from extraction.core.service_auth import ServiceTokenError, ServiceTokenProvider
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.jobs import ObjectRef
-from extraction.pipeline.domain.ports import AiAnalysis, AiCallContext, AiClassification, AiReading
+from extraction.pipeline.domain.ports import AiAnalysis, AiCallContext, AiClassification, AiFieldCrop, AiReading
 from idp_ocr_engines.model import PageImage
 
 log = structlog.get_logger(__name__)
@@ -24,6 +24,8 @@ log = structlog.get_logger(__name__)
 FIELD_READ = "/internal/v1/ai/field-read"
 CLASSIFY = "/internal/v1/ai/classify"
 PAGE_ANALYSIS = "/internal/v1/ai/page-analysis"
+_SLOTS = frozenset({"A", "B", "C"})  # the engines' readings the gateway takes as hints
+_READING_LENGTH = 400  # the gateway's limit for one hint
 
 
 class AiGatewayClient:
@@ -55,7 +57,9 @@ class AiGatewayClient:
 
 
 def caller(context: AiCallContext) -> dict[str, str]:
-    return {"accountId": str(context.account_id), "priority": "PRIORITY" if context.priority else "STANDARD"}
+    """Whose call it is, and which of ai-gateway's lanes it waits in: INTERACTIVE when a person waits (ADR 0009)."""
+    lane = "INTERACTIVE" if context.interactive else "PRIORITY" if context.priority else "STANDARD"
+    return {"accountId": str(context.account_id), "priority": lane} | ({"plan": context.plan} if context.plan else {})
 
 
 def ref(found: ObjectRef) -> dict[str, str]:
@@ -85,6 +89,31 @@ class GatewayFieldReader:
                 prompt_version=str(answer["promptVersion"]),
             )
         except (KeyError, TypeError) as exc:
+            raise AiUnavailableError("ai-gateway's answer could not be read") from exc
+
+
+class GatewayCropReader:
+    """One field from its crop, with the engines' readings as hints. The model's own confidence is not used: the
+    caller gives an AI value its confidence (``AI_GATEWAY__CONFIDENCE``, ML-07), as for the batch form."""
+
+    def __init__(self, gateway: AiGatewayClient) -> None:
+        self._gateway = gateway
+
+    def read_crop(self, field: AiFieldCrop, context: AiCallContext) -> AiReading:
+        hints = {slot: text[:_READING_LENGTH] for slot, text in field.readings.items() if text and slot in _SLOTS}
+        body = caller(context) | {
+            "crop": ref(field.crop),
+            "field": {"key": field.key, "label": field.label, "type": field.type},
+            "readings": hints,
+        }
+        answer = self._gateway.post(FIELD_READ, body)
+        try:
+            return AiReading(
+                values={field.key: _text(answer.get("value"))},
+                model_id=str(answer["model"]),
+                prompt_version=str(answer["promptVersion"]),
+            )
+        except (KeyError, TypeError, AttributeError) as exc:
             raise AiUnavailableError("ai-gateway's answer could not be read") from exc
 
 
