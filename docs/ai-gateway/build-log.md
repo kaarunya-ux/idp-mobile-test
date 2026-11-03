@@ -136,3 +136,32 @@ cd services/ai-gateway && make check
 Result here (no Docker): ruff, mypy and import contracts clean; 105 unit tests pass, 95% coverage. The semaphore's
 integration tests (11, four new for the lane) passed against an in-memory Redis with Lua; they still need the real
 Redis run (`make check` with Docker).
+
+## Entry 5: The Mac mini's model as the model server (2026-11-03)
+
+**Goal:** real AI answers in the local stack when the backend tests, from the Qwen3.5-4B model the Mac mini already
+serves (`http://10.0.3.99:8082/v1`, mlx_vlm.server), while the Mac mini's own web app keeps running there.
+
+### What we did
+
+- **`MODEL__SEND_SCHEMA`** (default true): false leaves `response_format` out, because mlx_vlm.server's schema
+  enforcement corrupts the first value (found by the web extraction app). Every answer is still validated here, with
+  one repair attempt.
+- **`MODEL__THINKING`** (default false): thinking off for every task whose prompt doesn't say, sent in both servers'
+  forms (`chat_template_kwargs.enable_thinking` for llama.cpp, `enable_thinking` for mlx_vlm.server). Qwen3.5 is a
+  hybrid model: left on, it reasons before answering and spends the output budget.
+- The local stack: `MODEL_NAME` maps all three model roles to the one model; `make use-mac-model` /
+  `make use-mock-model` switch ai-gateway alone.
+
+### Check it
+
+Against the Mac mini's model, with a made-up PAN card, through the gateway's own services (no Docker):
+
+| Task | Result | Time |
+|---|---|---|
+| field-read, whole card | all 4 fields right | 6.3 s |
+| field-read, one field | right | 4.5 s |
+| generic-read | `pan`, 6 fields, all right | 13.8 s |
+| classify | **wrong**: answers by the candidates' order, not the image (it names the card right, then picks another) | 3.9 s |
+
+classify needs a different question for this model: the type in its own words, matched to the candidates in code.

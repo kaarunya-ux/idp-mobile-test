@@ -60,6 +60,8 @@ Callers treat every 5xx as "AI unavailable": the fields stay for review, and the
 | `MODEL__TIMEOUTS__FIELD_READ`, `__CLASSIFY`, `__PAGE_ANALYSIS`, `__TEMPLATE_SUGGEST`, `__PAGE_READ`, `__GENERIC_READ`, `__CONNECT` | 30 s, 30 s, 90 s, 90 s, 180 s, 40 s, 2 s | ISO 8601 durations or seconds |
 | `MODEL__PAGE_READ_MAX_SIDE_PX` | 2048 | A whole page is sent larger than a card, so small print stays readable |
 | `MODEL__MAX_IMAGE_SIDE_PX`, `MODEL__MAX_IMAGE_BYTES` | 1280, 20 MiB | |
+| `MODEL__SEND_SCHEMA` | `true` | `false` leaves the JSON schema out of `response_format`: mlx_vlm.server's enforcement corrupts the first value. Answers are checked against the schema here either way |
+| `MODEL__THINKING` | `false` | Hybrid models' reasoning when the prompt doesn't set it, sent as `chat_template_kwargs.enable_thinking` (llama.cpp) and `enable_thinking` (mlx_vlm.server); unset sends neither |
 | `MODEL__MIN_IMAGE_SIDE_PX` | 768 | field-read and generic-read enlarge a smaller card picture (after trimming its white margin): tiny print is misread |
 | `QUEUE__WAIT_TIMEOUT`, `QUEUE__PRIORITY_SHARE`, `QUEUE__LEASE` | 20 s, 3, 3 min | |
 | `QUEUE__INTERACTIVE_RESERVED_SLOTS`, `QUEUE__INTERACTIVE_WAIT_TIMEOUT` | 1, 5 s | Slots only INTERACTIVE may use (lower than `MODEL__VL_MAX_CONCURRENT`), and its wait before busy |

@@ -109,6 +109,18 @@ If Ubuntu's firewall is on (`sudo ufw status`), open the ports the backend uses:
 sudo ufw allow 5672,15672,9000,9001,8080,8000,8001,8003/tcp
 ```
 
+## Real AI answers: the Mac mini's model
+
+`make use-mac-model` points ai-gateway at the Qwen3.5-4B model on the Mac mini (`http://10.0.3.99:8082/v1`, an
+mlx_vlm.server), restarting only ai-gateway; `make use-mock-model` (or the next `make up`) puts the mock back. The Mac
+mini's own web app keeps running beside it, and both share that one model, so they slow each other down when both are
+busy. To keep the real model across restarts, set `MODEL_BASE_URL`, `MODEL_NAME` and `MODEL_SEND_SCHEMA` in `.env`
+(see `.env.example`).
+
+Known with that model: the AI's `classify` picks from the candidate list by position, not by the image (it names the
+card right, then chooses wrongly). OCR keywords recognise PAN, Aadhaar and DL first, so it is asked only for pages
+the keywords don't match; a fix (the type in the model's own words, matched to the list in code) is the next step.
+
 ## When the real model server is ready
 
 Set `MODEL_BASE_URL=http://10.0.3.66:4000/v1` in `.env` and `make up` again; nothing else changes.

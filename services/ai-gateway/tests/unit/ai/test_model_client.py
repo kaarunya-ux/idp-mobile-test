@@ -1,6 +1,7 @@
 """The model server client on recorded replies (respx, TST-04)."""
 
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -87,3 +88,31 @@ async def test_raises_unavailable_when_the_reply_has_no_choices() -> None:
 
     with pytest.raises(ModelUnavailableError):
         await _client().complete(REQUEST, timeout_s=10)
+
+
+@respx.mock
+async def test_leaves_the_schema_out_when_the_host_breaks_it() -> None:
+    route = respx.post(f"{BASE}chat/completions").mock(return_value=httpx.Response(200, json=REPLY))
+    http = httpx.AsyncClient(base_url=BASE, timeout=httpx.Timeout(5, connect=1))
+    breaker = CircuitBreaker(failures=2, window_s=30, reset_after_s=30)
+
+    await OpenAiModelClient(http, models={ModelRole.VL: "vl"}, breaker=breaker, send_schema=False).complete(
+        REQUEST, timeout_s=10
+    )
+
+    assert "response_format" not in json.loads(route.calls[0].request.content)
+
+
+@respx.mock
+async def test_switches_thinking_off_in_both_servers_forms_unless_the_prompt_says_otherwise() -> None:
+    route = respx.post(f"{BASE}chat/completions").mock(return_value=httpx.Response(200, json=REPLY))
+    http = httpx.AsyncClient(base_url=BASE, timeout=httpx.Timeout(5, connect=1))
+    breaker = CircuitBreaker(failures=5, window_s=30, reset_after_s=30)
+    client = OpenAiModelClient(http, models={ModelRole.VL: "vl"}, breaker=breaker, thinking=False)
+
+    await client.complete(REQUEST, timeout_s=10)
+    await client.complete(replace(REQUEST, thinking=True), timeout_s=10)
+
+    default, prompt_says = (json.loads(call.request.content) for call in route.calls)
+    assert (default["chat_template_kwargs"], default["enable_thinking"]) == ({"enable_thinking": False}, False)
+    assert (prompt_says["chat_template_kwargs"], prompt_says["enable_thinking"]) == ({"enable_thinking": True}, True)

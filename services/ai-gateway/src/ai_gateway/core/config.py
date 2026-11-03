@@ -42,6 +42,8 @@ class ModelSettings(BaseModel):
     page_read_max_side_px: int = Field(2048, ge=256, le=4096)  # whole pages: small print needs more pixels than a card
     min_image_side_px: int = Field(768, ge=0, le=2048)  # smaller card pictures are enlarged (the web app's MIN_EDGE)
     max_image_bytes: ByteSize = ByteSize(20 * 1024 * 1024)  # larger page images are refused (AIG-422-INPUT-001)
+    send_schema: bool = True  # false for mlx_vlm.server, whose schema enforcement corrupts the first value
+    thinking: bool | None = False  # hybrid models' reasoning when the prompt doesn't say; None sends nothing
 
 
 class QueueSettings(BaseModel):
