@@ -27,9 +27,19 @@ class ModelPort(Protocol):
 class ImageStorePort(Protocol):
     """Page images by key. Raises ``InputInvalidError`` for a missing, foreign-bucket, unreadable or too large file."""
 
-    async def load(self, refs: Sequence[ImageRef], *, stack: bool, max_side_px: int | None = None) -> Sequence[Image]:
-        """The images, each resized to the long-side limit (``max_side_px`` instead of the default when given);
-        ``stack`` puts two sides into one image."""
+    async def load(
+        self,
+        refs: Sequence[ImageRef],
+        *,
+        stack: bool,
+        max_side_px: int | None = None,
+        tidy: bool = False,
+    ) -> Sequence[Image]:
+        """The images, each resized to the long-side limit (``max_side_px`` instead of the default when given).
+
+        ``stack`` puts two sides into one image. ``tidy`` trims the white margin around a card and enlarges a small
+        picture to the minimum side, as the benchmarked web extraction app did (tiny print is misread).
+        """
         ...
 
 

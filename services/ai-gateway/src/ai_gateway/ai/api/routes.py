@@ -15,6 +15,8 @@ from ai_gateway.ai.api.schemas import (
     FieldReadBatchResponse,
     FieldReadRequest,
     FieldReadSingleResponse,
+    GenericReadRequest,
+    GenericReadResponse,
     PageAnalysisRequest,
     PageAnalysisResponse,
     PageReadRequest,
@@ -24,6 +26,7 @@ from ai_gateway.ai.api.schemas import (
 )
 from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
+from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
@@ -51,6 +54,7 @@ type Classifier = Annotated[ClassifyPageService, _service("classify", ClassifyPa
 type Analyser = Annotated[AnalysePageService, _service("analyse", AnalysePageService)]
 type Suggester = Annotated[SuggestTemplateService, _service("suggest", SuggestTemplateService)]
 type PageReader = Annotated[ReadPageService, _service("read_page", ReadPageService)]
+type DocumentReader = Annotated[ReadDocumentService, _service("read_document", ReadDocumentService)]
 
 
 @router.post(
@@ -109,3 +113,14 @@ async def template_suggest(
 async def page_read(body: PageReadRequest, principal: Service, service: PageReader) -> PageReadResponse:
     answer = await service.read(mappers.caller_of(body, principal), mappers.image_ref(body.page))
     return mappers.to_page_read_response(answer)
+
+
+@router.post(
+    "/generic-read",
+    summary="Read any document: its type and every field",
+    response_model=GenericReadResponse,
+    responses=_ERRORS,
+)
+async def generic_read(body: GenericReadRequest, principal: Service, service: DocumentReader) -> GenericReadResponse:
+    pages = [mappers.image_ref(p) for p in body.pages]
+    return mappers.to_generic_read_response(await service.read(mappers.caller_of(body, principal), pages))

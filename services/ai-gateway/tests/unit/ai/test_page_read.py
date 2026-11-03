@@ -35,9 +35,9 @@ class RecordingImages(FakeImages):
         super().__init__()
         self.sides: list[int | None] = []
 
-    async def load(self, refs, *, stack, max_side_px=None):
+    async def load(self, refs, *, stack, max_side_px=None, tidy=False):
         self.sides.append(max_side_px)
-        return await super().load(refs, stack=stack)
+        return await super().load(refs, stack=stack, tidy=tidy)
 
 
 async def test_returns_the_pages_blocks_with_thinking_off_and_the_larger_picture() -> None:

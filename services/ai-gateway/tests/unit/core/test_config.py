@@ -28,3 +28,8 @@ def test_reads_nested_variables_when_they_are_set(monkeypatch: pytest.MonkeyPatc
 def test_raises_when_storage_is_required_but_not_set() -> None:
     with pytest.raises(MissingSettingsError):
         Settings(_env_file=None).require_storage()  # type: ignore[call-arg]  # pydantic-settings' init-only argument
+
+
+def test_refuses_to_reserve_every_model_slot_for_the_synchronous_path() -> None:
+    with pytest.raises(ValueError, match="INTERACTIVE_RESERVED_SLOTS"):
+        Settings(model={"vl_max_concurrent": 2}, queue={"interactive_reserved_slots": 2})

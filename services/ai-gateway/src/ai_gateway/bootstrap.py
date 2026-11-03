@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from ai_gateway.ai.application.runner import ModelCallRunner
 from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
+from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
@@ -42,6 +43,7 @@ class AiServices:
     analyse: AnalysePageService
     suggest: SuggestTemplateService
     read_page: ReadPageService
+    read_document: ReadDocumentService
 
 
 @dataclass(slots=True, kw_only=True)
@@ -93,6 +95,8 @@ def build(settings: Settings, clock: Clock) -> Container:
             wait_timeout_s=settings.queue.wait_timeout.total_seconds(),
             lease_s=settings.queue.lease.total_seconds(),
             priority_share=settings.queue.priority_share,
+            interactive_reserved=settings.queue.interactive_reserved_slots,
+            interactive_wait_timeout_s=settings.queue.interactive_wait_timeout.total_seconds(),
         ),
         caps=RedisCaps(redis, limits=_limits(settings)),
         prompts=prompts,
@@ -104,6 +108,7 @@ def build(settings: Settings, clock: Clock) -> Container:
             Task.PAGE_ANALYSIS: model.timeouts.page_analysis.total_seconds(),
             Task.TEMPLATE_SUGGEST: model.timeouts.template_suggest.total_seconds(),
             Task.PAGE_READ: model.timeouts.page_read.total_seconds(),
+            Task.GENERIC_READ: model.timeouts.generic_read.total_seconds(),
         },
     )
     images = S3ImageStore(
@@ -111,6 +116,7 @@ def build(settings: Settings, clock: Clock) -> Container:
         allowed_buckets=settings.storage.allowed_buckets,
         max_bytes=int(model.max_image_bytes),
         max_side_px=model.max_image_side_px,
+        min_side_px=model.min_image_side_px,
     )
     services = AiServices(
         read_fields=ReadFieldsService(runner=runner, images=images, prompts=prompts),
@@ -120,6 +126,7 @@ def build(settings: Settings, clock: Clock) -> Container:
         read_page=ReadPageService(
             runner=runner, images=images, prompts=prompts, max_side_px=model.page_read_max_side_px
         ),
+        read_document=ReadDocumentService(runner=runner, images=images, prompts=prompts),
     )
     return Container(ai=services, http=http, redis=redis)
 

@@ -106,3 +106,33 @@ counts), then headings, paragraphs, lists and tables with how each looks. Two ad
   timeout (`MODEL__TIMEOUTS__PAGE_READ`, 180 s).
 
 The mock model has a recorded page (made-up text). Result here: 89 unit tests pass.
+
+## Entry 4: The INTERACTIVE lane and `generic-read`, for extraction's synchronous path (2026-11-03)
+
+**Goal:** the backend calls extraction-service directly for one document and waits for the answer (extraction ADR
+0009). The model must serve that person first, and read any document without a template. Decisions: ADR 0003.
+
+### What we did
+
+- **A third priority, `INTERACTIVE`.** The semaphore's Lua script got a third waiting queue, served before PRIORITY
+  and STANDARD, and a second holder set for the queued lanes: together they may hold at most
+  `MODEL__VL_MAX_CONCURRENT - QUEUE__INTERACTIVE_RESERVED_SLOTS` slots (default 3 of 4), so one is always free for a
+  person. INTERACTIVE waits only `QUEUE__INTERACTIVE_WAIT_TIMEOUT` (5 s) before `AIG-503-BUSY-001`. Settings refuse
+  reserving every slot.
+- **`POST /internal/v1/ai/generic-read`**, prompt `generic-read.v1.md` (thinking off): the document type as a
+  lower snake_case code and every field `{key, label, type, value, confidence}`, tables as `{headers, rows}`, Hindi
+  kept in Devanagari. The answer is tidied: one field per key (front and back are one document), no confidence
+  without a value. The mock model has a made-up recorded answer.
+- **The image store**: photos are turned upright from EXIF; `tidy` trims the white margin and enlarges a picture
+  under `MODEL__MIN_IMAGE_SIDE_PX` (768), from the web extraction app (`feature/visiting_card_extraction`).
+  field-read (both forms: a single field's crop is small) and generic-read use it.
+
+### Check it
+
+```bash
+cd services/ai-gateway && make check
+```
+
+Result here (no Docker): ruff, mypy and import contracts clean; 105 unit tests pass, 95% coverage. The semaphore's
+integration tests (11, four new for the lane) passed against an in-memory Redis with Lua; they still need the real
+Redis run (`make check` with Docker).

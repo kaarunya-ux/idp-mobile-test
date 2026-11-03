@@ -76,9 +76,18 @@ class FakeCaps:
 class FakeImages:
     def __init__(self) -> None:
         self.loaded: list[tuple[list[ImageRef], bool]] = []
+        self.options: list[dict[str, object]] = []  # tidy of each load
 
-    async def load(self, refs: Sequence[ImageRef], *, stack: bool, max_side_px: int | None = None) -> Sequence[Image]:
+    async def load(
+        self,
+        refs: Sequence[ImageRef],
+        *,
+        stack: bool,
+        max_side_px: int | None = None,
+        tidy: bool = False,
+    ) -> Sequence[Image]:
         self.loaded.append((list(refs), stack))
+        self.options.append({"tidy": tidy})
         count = 1 if stack else len(refs)
         return [Image(data=b"jpeg") for _ in range(count)]
 

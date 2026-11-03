@@ -5,9 +5,9 @@ Every variable is listed in README.md (CFG-05). Nested groups use a double under
 
 from datetime import timedelta
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr
+from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,7 @@ class ModelTimeouts(BaseModel):
     page_analysis: timedelta = Field(timedelta(seconds=90), ge=timedelta(seconds=1), le=timedelta(minutes=10))
     template_suggest: timedelta = Field(timedelta(seconds=90), ge=timedelta(seconds=1), le=timedelta(minutes=10))
     page_read: timedelta = Field(timedelta(seconds=180), ge=timedelta(seconds=1), le=timedelta(minutes=15))
+    generic_read: timedelta = Field(timedelta(seconds=40), ge=timedelta(seconds=1), le=timedelta(minutes=5))
     connect: timedelta = Field(timedelta(seconds=2), ge=timedelta(milliseconds=100), le=timedelta(seconds=30))
 
 
@@ -39,6 +40,7 @@ class ModelSettings(BaseModel):
     timeouts: ModelTimeouts = Field(default_factory=ModelTimeouts)
     max_image_side_px: int = Field(1280, ge=256, le=4096)  # IDP-03 ch. 4.3
     page_read_max_side_px: int = Field(2048, ge=256, le=4096)  # whole pages: small print needs more pixels than a card
+    min_image_side_px: int = Field(768, ge=0, le=2048)  # smaller card pictures are enlarged (the web app's MIN_EDGE)
     max_image_bytes: ByteSize = ByteSize(20 * 1024 * 1024)  # larger page images are refused (AIG-422-INPUT-001)
 
 
@@ -48,6 +50,10 @@ class QueueSettings(BaseModel):
     wait_timeout: timedelta = Field(timedelta(seconds=20), ge=timedelta(seconds=1), le=timedelta(minutes=5))
     priority_share: int = Field(3, ge=1, le=10)  # PRIORITY is served this many times for every STANDARD
     lease: timedelta = Field(timedelta(minutes=3), ge=timedelta(seconds=10))  # a slot held longer is freed (crash)
+    # The synchronous path (ADR 0003): served first, with slots the queued lanes may not take, and a short wait before
+    # the caller is told to send the work the queued way instead
+    interactive_reserved_slots: int = Field(1, ge=0, le=255)
+    interactive_wait_timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(seconds=1), le=timedelta(minutes=1))
 
 
 class CapsSettings(BaseModel):
@@ -113,6 +119,12 @@ class Settings(BaseSettings):
     auth: AuthSettings = Field(default_factory=AuthSettings)
     redis: RedisSettings | None = None
     storage: StorageSettings | None = None
+
+    @model_validator(mode="after")
+    def _queued_lanes_keep_a_slot(self) -> Self:
+        if self.queue.interactive_reserved_slots >= self.model.vl_max_concurrent:
+            raise ValueError("QUEUE__INTERACTIVE_RESERVED_SLOTS must be lower than MODEL__VL_MAX_CONCURRENT")
+        return self
 
     def require_redis(self) -> RedisSettings:
         return _required(self.redis, "REDIS__URL")

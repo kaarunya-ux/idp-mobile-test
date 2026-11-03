@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
+from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
@@ -46,6 +47,7 @@ def _client(model: FakeModel, caps: FakeCaps | None = None, *, available: bool =
                 analyse=AnalysePageService(runner=shared, images=images, prompts=prompts),
                 suggest=SuggestTemplateService(runner=shared, images=images, prompts=prompts),
                 read_page=ReadPageService(runner=shared, images=images, prompts=prompts, max_side_px=2048),
+                read_document=ReadDocumentService(runner=shared, images=images, prompts=prompts),
             )
         )
 
@@ -229,3 +231,40 @@ def test_returns_a_pages_blocks_in_camel_case_when_reading_a_page() -> None:
         assert body["analysis"] == {"nBlocks": 2, "tableColumnCounts": [2]}
         assert body["blocks"][1]["hasHeader"] is True
         assert body["promptVersion"] == "page-read.v1"
+
+
+def test_returns_the_type_and_every_field_when_reading_any_document(client: TestClient, model: FakeModel) -> None:
+    table = {"headers": ["Item", "Qty"], "rows": [["Paper", "2"]]}
+    model.answers.append(
+        json.dumps(
+            {
+                "document_type": "Tax Invoice",
+                "document_confidence": 0.9,
+                "fields": [
+                    {
+                        "key": "invoice_number",
+                        "label": "Invoice No",
+                        "type": "string",
+                        "value": "INV-1",
+                        "confidence": 0.9,
+                    },
+                    {"key": "line_items", "label": "Line Items", "type": "table", "value": table, "confidence": 0.8},
+                ],
+            }
+        )
+    )
+    body = {"accountId": str(ACCOUNT), "priority": "INTERACTIVE", "pages": [PAGE, PAGE]}
+
+    response = client.post("/internal/v1/ai/generic-read", json=body)
+
+    found = response.json()
+    assert (found["documentType"], found["documentConfidence"]) == ("tax_invoice", 0.9)
+    assert [f["key"] for f in found["fields"]] == ["invoice_number", "line_items"]
+    assert found["fields"][1]["value"] == table
+    assert found["promptVersion"] == "generic-read.v1"
+
+
+def test_answers_400_when_generic_read_has_more_than_two_pages(client: TestClient) -> None:
+    body = {"accountId": str(ACCOUNT), "pages": [PAGE, PAGE, PAGE]}
+
+    assert client.post("/internal/v1/ai/generic-read", json=body).status_code == 400

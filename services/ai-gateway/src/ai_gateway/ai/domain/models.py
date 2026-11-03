@@ -13,11 +13,17 @@ class Task(StrEnum):
     PAGE_ANALYSIS = "page-analysis"
     TEMPLATE_SUGGEST = "template-suggest"
     PAGE_READ = "page-read"  # a whole page as blocks, for conversion-service's scanned routes
+    GENERIC_READ = "generic-read"  # any document, every field it shows: extraction's synchronous path (ADR 0003)
 
 
 class Priority(StrEnum):
-    """Which waiting queue a call joins (IDP-03 ch. 4.5): PRIORITY is served 3:1 over STANDARD."""
+    """Which waiting queue a call joins (IDP-03 ch. 4.5): PRIORITY is served 3:1 over STANDARD.
 
+    INTERACTIVE is a person waiting on an open HTTP request (the synchronous path, ADR 0003): it is served before
+    both queued lanes, may use the slots kept for it, and waits only briefly before it is told to go the queued way.
+    """
+
+    INTERACTIVE = "INTERACTIVE"
     PRIORITY = "PRIORITY"
     STANDARD = "STANDARD"
 
