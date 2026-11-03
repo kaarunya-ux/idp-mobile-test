@@ -25,6 +25,9 @@ dependencies = [
     # The API sends template sample and test-run tasks and reads sample OCR words from storage (E6)
     "celery>=5.4",
     "boto3>=1.35",
+    # Not in the standard's ch. 22.3 list: FastAPI reads multipart file uploads with it (the synchronous extract route,
+    # ADR 0009). Apache-2.0
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -192,6 +195,21 @@ forbidden_modules = [
     "extraction.pipeline.infrastructure", "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3",
     "botocore", "httpx", "cv2", "onnxruntime", "PIL",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Quick extract domain is pure (no framework, storage or HTTP client)"
+type = "forbidden"
+source_modules = ["extraction.quick.domain"]
+forbidden_modules = [
+    "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "httpx", "boto3", "botocore", "structlog",
+    "extraction.core.config", "extraction.quick.infrastructure", "extraction.quick.api",
+]
+
+[[tool.importlinter.contracts]]
+name = "Quick extract application depends on ports, not adapters"
+type = "forbidden"
+source_modules = ["extraction.quick.application"]
+forbidden_modules = ["extraction.quick.infrastructure", "extraction.quick.api", "httpx", "boto3", "botocore", "fastapi"]
 
 [[tool.importlinter.contracts]]
 name = "Runtime code imports no dev-only packages (type stubs are for TYPE_CHECKING blocks)"

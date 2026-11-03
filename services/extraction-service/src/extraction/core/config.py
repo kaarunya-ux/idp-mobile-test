@@ -184,6 +184,23 @@ class AiGatewaySettings(BaseModel):
     confidence: float = Field(0.9, gt=0, le=1)  # given to an AI value that passes the field's rule (ML-07)
     max_fields_per_document: int = Field(10, ge=1, le=50)  # IDP-03 ch. 2.7: more unresolved -> review, not AI
     classify_min_confidence: float = Field(0.8, gt=0, le=1)  # an AI classification below this stays unknown
+    # ADR 0009: "crop" sends each field the two engines left unsure, cut out of the page, alone; "page" sends every
+    # unsettled field together on the whole page (the earlier way, kept to compare the two)
+    read_mode: Literal["crop", "page"] = "crop"
+    crop_padding: float = Field(0.5, ge=0, le=5)  # the crop's margin on every side, in field heights
+    crop_concurrency: int = Field(3, ge=1, le=10)  # crops of one document read at the same time
+
+
+class QuickExtractSettings(BaseModel):
+    """The synchronous extract route of the ``extraction-sync`` process (ADR 0009): one document, OCR first, read
+    while the caller waits. Bigger work goes the queued way (``ExtractionRequested``)."""
+
+    max_file_size: ByteSize = ByteSize(20 * 1024 * 1024)  # each file
+    max_total_size: ByteSize = ByteSize(30 * 1024 * 1024)  # front and back together (the backend's limit)
+    max_pages: int = Field(2, ge=1, le=20)  # a longer PDF is refused: send it as a job
+    max_concurrent: int = Field(2, ge=1, le=32)  # documents read at once; one more is told busy (429) at once
+    # generic-read: ai-gateway's short wait for a slot (5 s) and its timeout (40 s), with a margin
+    timeout: timedelta = Field(timedelta(seconds=50), ge=timedelta(seconds=5), le=timedelta(minutes=5))
 
 
 class ServiceAuthSettings(BaseModel):
@@ -229,6 +246,7 @@ class Settings(BaseSettings):
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
+    quick: QuickExtractSettings = Field(default_factory=QuickExtractSettings)
     metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     templates: TemplatesSettings = Field(default_factory=TemplatesSettings)
     office: OfficeSettings = Field(default_factory=OfficeSettings)

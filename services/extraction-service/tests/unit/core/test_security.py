@@ -84,3 +84,24 @@ def test_gives_platform_staff_the_standard_template_permission_and_api_keys_thei
     assert STANDARD_TEMPLATE_WRITE in staff.permissions
     assert key.kind == "api_key"
     assert key.permissions == {TEMPLATE_READ, TEMPLATE_WRITE}  # API keys can't publish
+
+
+@pytest.mark.parametrize(
+    ("roles", "kind", "plan"),
+    [
+        (["GUEST"], "user", "GUEST"),
+        (["PERSONAL"], "user", "PERSONAL"),
+        (["MEMBER"], "user", "CORPORATE"),
+        ([], "api_key", "CORPORATE"),
+        ([], "user", "PERSONAL"),
+    ],
+)
+def test_reads_the_plan_from_the_roles(roles: list[str], kind: str, plan: str) -> None:
+    principal = principal_from_claims({"sub": "u", "roles": roles, "kind": kind, "account_id": str(ACCOUNT)})
+
+    assert principal.plan == plan
+
+
+def test_lets_every_account_role_write_documents() -> None:
+    for role in ("GUEST", "PERSONAL", "MEMBER", "REVIEWER", "DEVELOPER", "ORG_ADMIN", "ORG_OWNER"):
+        assert "document:write" in principal_from_claims({"sub": "u", "roles": [role]}).permissions

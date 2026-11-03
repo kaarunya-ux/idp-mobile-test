@@ -1,5 +1,5 @@
-"""The shared model semaphore and the daily caps on a real Redis (TST-02): capacity, 3:1 fairness, timeouts,
-leases of crashed holders, cap exhaustion."""
+"""The shared model semaphore and the daily caps on a real Redis (TST-02): capacity, 3:1 fairness, the interactive
+lane first and its reserved slots, timeouts, leases of crashed holders, cap exhaustion."""
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
@@ -32,8 +32,16 @@ async def redis(redis_url: str) -> AsyncIterator[Redis]:
     await client.aclose()
 
 
-def _slots(redis: Redis, *, capacity: int = 1, wait_s: float = 5, lease_s: float = 60) -> RedisSlots:
-    return RedisSlots(redis, capacity=capacity, wait_timeout_s=wait_s, lease_s=lease_s, priority_share=3, poll_s=0.01)
+def _slots(redis: Redis, *, capacity: int = 1, wait_s: float = 5, lease_s: float = 60, reserved: int = 0) -> RedisSlots:
+    return RedisSlots(
+        redis,
+        capacity=capacity,
+        wait_timeout_s=wait_s,
+        lease_s=lease_s,
+        priority_share=3,
+        interactive_reserved=reserved,
+        poll_s=0.01,
+    )
 
 
 async def test_never_holds_more_slots_than_the_capacity_when_many_calls_arrive(redis: Redis) -> None:
@@ -72,6 +80,68 @@ async def test_serves_priority_three_to_one_over_standard_when_both_queues_wait(
     first_four = order[:4]
     assert first_four.count(Priority.PRIORITY) == 3
     assert order.count(Priority.STANDARD) == 4
+
+
+async def test_serves_interactive_before_both_queued_lanes_when_all_wait(redis: Redis) -> None:
+    slots, order = _slots(redis), []
+    blocker = slots.slot(ModelRole.VL, Priority.STANDARD)
+    await blocker.__aenter__()
+
+    async def call(priority: Priority) -> None:
+        async with slots.slot(ModelRole.VL, priority):
+            order.append(priority)
+            await asyncio.sleep(0.01)
+
+    tasks = [asyncio.create_task(call(p)) for p in (Priority.PRIORITY, Priority.STANDARD)]
+    await asyncio.sleep(0.03)  # the queued lanes were there first
+    tasks.append(asyncio.create_task(call(Priority.INTERACTIVE)))
+    await asyncio.sleep(0.03)
+    await blocker.__aexit__(None, None, None)
+    await asyncio.gather(*tasks)
+
+    assert order[0] is Priority.INTERACTIVE
+
+
+async def test_keeps_the_reserved_slot_for_interactive_when_queued_work_fills_the_rest(redis: Redis) -> None:
+    slots = _slots(redis, capacity=2, wait_s=0.2, reserved=1)
+    async with slots.slot(ModelRole.VL, Priority.PRIORITY):
+        with pytest.raises(BusyError):  # the second slot is the interactive lane's
+            async with slots.slot(ModelRole.VL, Priority.STANDARD):
+                pass
+        async with slots.slot(ModelRole.VL, Priority.INTERACTIVE):
+            pass
+
+    assert await redis.zcard("{aig:sem:global:vl}:holders:queued") == 0
+
+
+async def test_lets_interactive_use_every_slot_when_no_queued_work_runs(redis: Redis) -> None:
+    slots = _slots(redis, capacity=2, wait_s=0.2, reserved=1)
+    async with slots.slot(ModelRole.VL, Priority.INTERACTIVE), slots.slot(ModelRole.VL, Priority.INTERACTIVE):
+        pass
+
+
+async def test_raises_busy_after_the_short_interactive_wait(redis: Redis) -> None:
+    slots = RedisSlots(
+        redis, capacity=1, wait_timeout_s=30, lease_s=60, priority_share=3, interactive_wait_timeout_s=0.2, poll_s=0.01
+    )
+    async with slots.slot(ModelRole.VL, Priority.STANDARD):
+        with pytest.raises(BusyError):
+            async with slots.slot(ModelRole.VL, Priority.INTERACTIVE):
+                pass
+
+    assert await redis.zcard("{aig:sem:global:vl}:wait:interactive") == 0
+
+
+def test_refuses_to_reserve_every_slot_for_interactive(redis_url: str) -> None:
+    with pytest.raises(ValueError, match="interactive_reserved"):
+        RedisSlots(
+            Redis.from_url(redis_url),
+            capacity=2,
+            wait_timeout_s=1,
+            lease_s=10,
+            priority_share=3,
+            interactive_reserved=2,
+        )
 
 
 async def test_raises_busy_and_leaves_the_queue_when_no_slot_frees_up(redis: Redis) -> None:

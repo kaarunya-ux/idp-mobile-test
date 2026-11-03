@@ -10,6 +10,9 @@ from ai_gateway.ai.api.schemas import (
     FieldReadBatchResponse,
     FieldReadSingleResponse,
     FieldValueBody,
+    GenericFieldBody,
+    GenericReadResponse,
+    GenericTableBody,
     ImageRefBody,
     PageAnalysisBody,
     PageAnalysisResponse,
@@ -23,6 +26,8 @@ from ai_gateway.ai.api.schemas import (
 )
 from ai_gateway.ai.application.answer_models import (
     ClassifyAnswer,
+    GenericReadAnswer,
+    GenericTable,
     PageAnalysisAnswer,
     PageReadAnswer,
     PageTableBlock,
@@ -108,3 +113,25 @@ def to_page_read_response(answer: Answer[PageReadAnswer]) -> PageReadResponse:
         n_blocks=found.analysis.n_blocks, table_column_counts=found.analysis.table_column_counts
     )
     return PageReadResponse(analysis=analysis, blocks=blocks, **_provenance(answer.provenance))
+
+
+def to_generic_read_response(answer: Answer[GenericReadAnswer]) -> GenericReadResponse:
+    found = answer.value
+    fields = [
+        GenericFieldBody(
+            key=f.key,
+            label=f.label,
+            type=f.type,
+            value=GenericTableBody(headers=f.value.headers, rows=f.value.rows)
+            if isinstance(f.value, GenericTable)
+            else f.value,
+            confidence=f.confidence,
+        )
+        for f in found.fields
+    ]
+    return GenericReadResponse(
+        document_type=found.document_type,
+        document_confidence=found.document_confidence,
+        fields=fields,
+        **_provenance(answer.provenance),
+    )

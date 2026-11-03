@@ -46,7 +46,7 @@ class ReadFieldsService:
 
     async def read(self, caller: Caller, query: FieldReadQuery) -> Answer[list[FieldValue]]:
         prompt = self._prompts.get(PROMPT)
-        images = await self._images.load(query.pages, stack=True)
+        images = await self._images.load(query.pages, stack=True, tidy=True)
         keys = [f.key for f in query.fields]
         profile = self._profiles.get(query.document_type or "")
         hints = _readings(query.readings)
@@ -73,7 +73,7 @@ class ReadFieldsService:
         self, caller: Caller, crop: ImageRef, field: FieldSpec, readings: Mapping[str, str | None]
     ) -> Answer[FieldValue]:
         prompt = self._prompts.get(PROMPT)
-        images = await self._images.load([crop], stack=False)
+        images = await self._images.load([crop], stack=False, tidy=True)  # a small crop is enlarged
         text = (
             'The image is a crop around one field, described in the data block "field". Read its value. Answer '
             'with a JSON object: "value" (the text, or null), "confidence" (0 to 1, how sure you are) and "reason" '

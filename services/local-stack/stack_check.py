@@ -8,6 +8,9 @@
 4. One conversion: a generated image becomes a PDF (``ConversionRequested`` -> ``ConversionCompleted``).
 5. One scanned conversion: a generated photo of a page becomes a Word file, read by the model through ai-gateway's
    ``page-read`` (the mock model answers in this stack).
+6. One synchronous extract: the card goes to extraction-sync's ``POST /api/v1/extract`` with the user's token, the
+   way the backend calls it, and the type and fields come back on the same request (OCR first, the AI for what OCR
+   leaves unsure); and once more through ``POST /api/v1/extract/generic``, straight to the model (no OCR).
 
 It plays the Java side the way ``conversion-service/scripts/send_job.py`` does. Exit code 0 only if every step passed.
 """
@@ -32,6 +35,7 @@ from PIL import Image, ImageDraw, ImageFont
 ACCOUNT = UUID("0192f0aa-0000-7000-8000-00000000a001")  # the test account in keycloak/idp-realm.json
 HEALTH = {
     "extraction-api": "http://extraction-api:8000/health/ready",
+    "extraction-sync": "http://extraction-sync:8003/health/ready",
     "ai-gateway": "http://ai-gateway:8002/health/ready",
     "conversion-health": "http://conversion-health:8001/health/ready",
 }
@@ -53,7 +57,8 @@ def check_health() -> None:
             step(f"{name} ready", False, type(exc).__name__)
 
 
-def check_api() -> None:
+def check_api() -> str | None:
+    """The user token, for the synchronous extract, or None when Keycloak gave none."""
     try:
         token = httpx.post(
             os.environ["CHECK_TOKEN_URL"],
@@ -67,7 +72,7 @@ def check_api() -> None:
         ).json()["access_token"]
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         step("keycloak user token", False, type(exc).__name__)
-        return
+        return None
     step("keycloak user token", True)
     headers = {"Authorization": f"Bearer {token}"}
     templates = httpx.get("http://extraction-api:8000/api/v1/templates", headers=headers, timeout=10)
@@ -81,6 +86,33 @@ def check_api() -> None:
     )
     codes = (bundle.status_code, again.status_code)
     step("mobile bundle with ETag", codes == (200, 304), f"{codes[0]}, then {codes[1]}")
+    return token
+
+
+def check_quick_extract(token: str | None, route: str = "/api/v1/extract") -> None:
+    name = f"synchronous extract (POST {route})"
+    if token is None:
+        step(name, False, "no user token")
+        return
+    started = time.monotonic()
+    try:
+        response = httpx.post(
+            f"http://extraction-sync:8003{route}",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("card.png", card_image(), "image/png")},
+            timeout=60,
+        )
+    except httpx.HTTPError as exc:
+        step(name, False, type(exc).__name__)
+        return
+    seconds = f"{time.monotonic() - started:.1f} s"
+    if response.status_code != httpx.codes.OK:
+        step(name, False, f"HTTP {response.status_code} {response.json().get('code', '')} after {seconds}")
+        return
+    found = response.json()
+    fields = len(found.get("fields", []))
+    detail = f"{found.get('documentType')}, {fields} fields, read by {found.get('readBy')}, {seconds}"
+    step(name, bool(found.get("fields")), detail)
 
 
 def card_image() -> bytes:
@@ -232,7 +264,9 @@ def guarded(name: str, check: Callable[[], None]) -> None:
 
 if __name__ == "__main__":
     check_health()
-    check_api()
+    user_token = check_api()
+    check_quick_extract(user_token)
+    check_quick_extract(user_token, "/api/v1/extract/generic")
     guarded("extraction end to end", check_extraction)
     guarded("conversion end to end", check_conversion)
     guarded("scanned conversion end to end (model through ai-gateway)", check_scanned_conversion)

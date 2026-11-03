@@ -1,10 +1,11 @@
 """The shape each task's answer must have (LLM-03): a Pydantic model to validate it, and the JSON schema sent as
 ``response_format`` so a host that enforces schemas can only answer in this shape."""
 
+import re
 from collections.abc import Callable, Sequence
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ai_gateway.ai.domain.answers import parse_json
 from ai_gateway.ai.domain.exceptions import AnswerShapeError
@@ -144,3 +145,60 @@ class PageTableBlock(_Answer):
 class PageReadAnswer(_Answer):
     analysis: PageAnalysis  # first: the field order is the order the model writes them (see the prompt)
     blocks: list[Annotated[PageTextBlock | PageTableBlock, Field(discriminator="kind")]] = Field(max_length=_MAX_BLOCKS)
+
+
+# --- generic-read: any document, every field it shows (extraction's synchronous path, ADR 0003) ------------------
+
+_DOCUMENT_TYPE_LENGTH = 64
+_UNSAFE_TYPE_CHARACTERS = re.compile(r"[^a-z0-9]+")
+
+
+class GenericTable(_Answer):
+    headers: list[str] = Field(max_length=_MAX_TABLE_COLUMNS)
+    rows: list[list[str]] = Field(max_length=_MAX_TABLE_ROWS)
+
+
+class GenericField(_Answer):
+    key: str = Field(pattern=_KEY)
+    label: str = Field(max_length=120)
+    type: Literal["string", "number", "date", "table"]
+    value: str | GenericTable | None
+    confidence: float | None = Field(None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _value_fits_the_type(self) -> Self:
+        is_table = isinstance(self.value, GenericTable)
+        if self.value is not None and is_table != (self.type == "table"):
+            raise ValueError("a table field needs headers and rows, any other field a text value")
+        if isinstance(self.value, str) and len(self.value) > _VALUE_LENGTH * 5:
+            raise ValueError("a value is too long")
+        return self
+
+
+class GenericReadAnswer(_Answer):
+    """The model writes the type first, then the fields; ``tidied`` turns that into what callers get."""
+
+    document_type: str | None = Field(max_length=_DOCUMENT_TYPE_LENGTH)
+    document_confidence: float | None = Field(None, ge=0, le=1)
+    fields: list[GenericField] = Field(max_length=_MAX_FIELDS)
+
+    def tidied(self) -> "GenericReadAnswer":
+        """The type as a lower snake_case code (``"Aadhaar Card"`` -> ``"aadhaar_card"``), no confidence without a
+        value, empty text as null, and only the first field with each key (front and back read as one document)."""
+        code = _UNSAFE_TYPE_CHARACTERS.sub("_", (self.document_type or "").lower()).strip("_")
+        seen: set[str] = set()
+        fields: list[GenericField] = []
+        for found in self.fields:
+            if found.key in seen:
+                continue
+            seen.add(found.key)
+            value = " ".join(found.value.split()) or None if isinstance(found.value, str) else found.value
+            confidence = found.confidence if value is not None else None
+            fields.append(found.model_copy(update={"value": value, "confidence": confidence}))
+        return self.model_copy(
+            update={
+                "document_type": code or None,
+                "document_confidence": self.document_confidence if code else None,
+                "fields": fields,
+            }
+        )

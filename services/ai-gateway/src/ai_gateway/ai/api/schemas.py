@@ -50,7 +50,7 @@ class ImageRefBody(_Body):
 class CallerBody(_Body):
     account_id: UUID
     priority: Priority = Priority.STANDARD
-    plan: Plan | None = None  # which daily cap applies; when absent, PRIORITY means CORPORATE, STANDARD PERSONAL
+    plan: Plan | None = None  # which daily cap applies; when absent, PRIORITY means CORPORATE, the others PERSONAL
 
 
 class FieldBody(_Body):
@@ -212,3 +212,28 @@ class PageBlockBody(_Body):
 class PageReadResponse(_ProvenanceBody):
     analysis: PageAnalysisBody
     blocks: list[PageBlockBody]
+
+
+class GenericReadRequest(CallerBody):
+    """A document's page images: one, or a card's front and back (stacked and read as one document)."""
+
+    pages: list[ImageRefBody] = Field(min_length=1, max_length=2)
+
+
+class GenericTableBody(_Body):
+    headers: list[str]
+    rows: list[list[str]]
+
+
+class GenericFieldBody(_Body):
+    key: str
+    label: str
+    type: str  # string, number, date or table
+    value: str | GenericTableBody | None
+    confidence: float | None
+
+
+class GenericReadResponse(_ProvenanceBody):
+    document_type: str | None  # a lower snake_case code such as "aadhaar", or null when the model couldn't tell
+    document_confidence: float | None
+    fields: list[GenericFieldBody]

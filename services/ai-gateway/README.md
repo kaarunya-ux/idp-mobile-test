@@ -25,6 +25,12 @@ All `POST`, JSON, `Authorization: Bearer <service token>`. Every answer also has
 | `/internal/v1/ai/page-analysis` | `accountId, priority?, plan?, pages[1..5], currentResult, question?` | `fields[], summary, warnings[]` |
 | `/internal/v1/ai/template-suggest` | `accountId, priority?, plan?, page, ocrWords[{text, box}]` | `fields[], tables[]` |
 | `/internal/v1/ai/page-read` | `accountId, priority?, plan?, page` | `analysis{nBlocks, tableColumnCounts}, blocks[]`: headings, paragraphs, lists (text, align, size, bold) and tables (hasHeader, header, rows). For conversion-service's scanned routes |
+| `/internal/v1/ai/generic-read` | `accountId, priority?, plan?, pages[1..2]`: a document's page images (a card's front and back are read as one) | `documentType` (a lower snake_case code, or null), `documentConfidence`, `fields[{key, label, type, value, confidence}]`; a `table` field's value is `{headers, rows}`. Any document, when no template matched it: extraction-service's synchronous path (ADR 0003) |
+
+`priority` is `STANDARD` (the default), `PRIORITY` (served 3:1 over STANDARD) or `INTERACTIVE`: a person waiting on an
+open request (extraction-service's synchronous path). INTERACTIVE goes before both, may use the slots the queued lanes
+may not take (`QUEUE__INTERACTIVE_RESERVED_SLOTS`), and waits at most `QUEUE__INTERACTIVE_WAIT_TIMEOUT` before
+`AIG-503-BUSY-001`, so the caller can send the work the queued way instead.
 
 Images are `{bucket, key}` in MinIO: callers never send bytes. Errors are RFC 9457 problem details:
 
@@ -36,7 +42,7 @@ Images are `{bucket, key}` in MinIO: callers never send bytes. Errors are RFC 94
 | `AIG-429-CAP-001` | 429 | The account has used its AI calls for today |
 | `AIG-502-OUTPUT-001` | 502 | The model's answer wasn't the schema, also after one repair attempt |
 | `AIG-503-MODEL-001` | 503 | The model server is down (breaker open) |
-| `AIG-503-BUSY-001` | 503 | No model slot within 20 s |
+| `AIG-503-BUSY-001` | 503 | No model slot within 20 s (5 s for INTERACTIVE) |
 | `AIG-503-DEPENDENCY-001` | 503 | Redis or storage isn't configured or reachable |
 
 Callers treat every 5xx as "AI unavailable": the fields stay for review, and the job never fails because of it.
@@ -51,10 +57,12 @@ Callers treat every 5xx as "AI unavailable": the fields stay for review, and the
 | `MODEL__API_KEY` | none | Sent as a bearer token when set |
 | `MODEL__VL_MODEL`, `MODEL__SMART_MODEL`, `MODEL__AUTO_MODEL` | `vl`, `smart`, `auto` | The names the server knows |
 | `MODEL__VL_MAX_CONCURRENT` | 4 | The server's capacity, shared by all replicas |
-| `MODEL__TIMEOUTS__FIELD_READ`, `__CLASSIFY`, `__PAGE_ANALYSIS`, `__TEMPLATE_SUGGEST`, `__PAGE_READ`, `__CONNECT` | 30 s, 30 s, 90 s, 90 s, 180 s, 2 s | ISO 8601 durations or seconds |
+| `MODEL__TIMEOUTS__FIELD_READ`, `__CLASSIFY`, `__PAGE_ANALYSIS`, `__TEMPLATE_SUGGEST`, `__PAGE_READ`, `__GENERIC_READ`, `__CONNECT` | 30 s, 30 s, 90 s, 90 s, 180 s, 40 s, 2 s | ISO 8601 durations or seconds |
 | `MODEL__PAGE_READ_MAX_SIDE_PX` | 2048 | A whole page is sent larger than a card, so small print stays readable |
 | `MODEL__MAX_IMAGE_SIDE_PX`, `MODEL__MAX_IMAGE_BYTES` | 1280, 20 MiB | |
+| `MODEL__MIN_IMAGE_SIDE_PX` | 768 | field-read and generic-read enlarge a smaller card picture (after trimming its white margin): tiny print is misread |
 | `QUEUE__WAIT_TIMEOUT`, `QUEUE__PRIORITY_SHARE`, `QUEUE__LEASE` | 20 s, 3, 3 min | |
+| `QUEUE__INTERACTIVE_RESERVED_SLOTS`, `QUEUE__INTERACTIVE_WAIT_TIMEOUT` | 1, 5 s | Slots only INTERACTIVE may use (lower than `MODEL__VL_MAX_CONCURRENT`), and its wait before busy |
 | `CAPS__GUEST`, `CAPS__PERSONAL`, `CAPS__CORPORATE` | 10, 30, 5000 | Calls per account per UTC day |
 | `BREAKER__FAILURES`, `BREAKER__WINDOW`, `BREAKER__RESET_AFTER` | 5, 30 s, 30 s | |
 | `REDIS__URL` | none | Without it the AI routes answer 503 |

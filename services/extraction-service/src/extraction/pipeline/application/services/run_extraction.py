@@ -141,7 +141,10 @@ class RunExtractionService:
         templates = self._pipeline.catalog.templates_for(request.context.tenant_id, request.template_id)
         stored = self._store_pages(request, pages)  # before the AI step: ai-gateway reads the pages by key
         context = AiCallContext(
-            account_id=request.context.tenant_id, priority=request.priority, page_refs=tuple(stored)
+            account_id=request.context.tenant_id,
+            priority=request.priority,
+            page_refs=tuple(stored),
+            crop_folder=ObjectRef(bucket=self._derived_bucket, key=request.derived_key("crops")),
         )
         command = ExtractDocumentCommand(
             pages=pages,

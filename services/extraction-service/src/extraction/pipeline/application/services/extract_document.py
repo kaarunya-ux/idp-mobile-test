@@ -10,6 +10,7 @@ from datetime import date
 from extraction.core.clock import Clock
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.domain.classify import Classification, classify_page
+from extraction.pipeline.domain.crops import crop_page, padded
 from extraction.pipeline.domain.decisions import (
     FieldDecision,
     FieldSource,
@@ -19,8 +20,18 @@ from extraction.pipeline.domain.decisions import (
     decide_with_ai,
 )
 from extraction.pipeline.domain.exceptions import AiUnavailableError
+from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.domain.models import PreparedPage
-from extraction.pipeline.domain.ports import AiCallContext, AiClassifierPort, AiFieldReaderPort, ProgressReporterPort
+from extraction.pipeline.domain.ports import (
+    AiCallContext,
+    AiClassifierPort,
+    AiCropReaderPort,
+    AiFieldCrop,
+    AiFieldReaderPort,
+    AiReading,
+    PageImageStorePort,
+    ProgressReporterPort,
+)
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.reading import Reading, field_box, read_field, shift_for
 from extraction.pipeline.domain.result import PageSummary, Provenance, build_result
@@ -37,14 +48,26 @@ _DIGITAL = "digital"  # the slot name for a PDF's text layer
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class AiCrops:
+    """Stage 7 with crops (ADR 0009): each unsure field is cut out of the page, stored, and read alone by the AI."""
+
+    reader: AiCropReaderPort
+    store: PageImageStorePort
+    padding: float = 0.5  # the crop's margin, in field heights (AI_GATEWAY__CROP_PADDING)
+    workers: int = 3  # crops read at the same time (AI_GATEWAY__CROP_CONCURRENCY)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AiAssist:
-    """Stage 7's AI step: every field the engines left unsettled goes to the AI reader in one request."""
+    """Stage 7's AI step. With ``crops``, each field the two engines left unsure is cut out and read alone; without,
+    every unsettled field goes to ``reader`` in one request on the whole page (``AI_GATEWAY__READ_MODE=page``)."""
 
     reader: AiFieldReaderPort
     confidence: float  # given to an AI value that passes its rule (settings: AI_GATEWAY__CONFIDENCE)
     max_fields: int = 10  # more unsettled fields than this go to review instead (AI_GATEWAY__MAX_FIELDS_PER_DOCUMENT)
     classifier: AiClassifierPort | None = None
     classify_min_confidence: float = 0.8  # an AI classification below this leaves the document unknown
+    crops: AiCrops | None = None
 
     def classify(
         self, templates: Sequence[TemplateDefinition], context: AiCallContext
@@ -96,6 +119,55 @@ class AiAssist:
             for d in decisions
         ], (reading.model_id, reading.prompt_version)
 
+    def assist_with_crops(
+        self,
+        template: TemplateDefinition,
+        decisions: list[FieldDecision],
+        page: PageImage,
+        boxes: Mapping[str, Box],
+        today: date,
+        context: AiCallContext,
+    ) -> tuple[list[FieldDecision], list[tuple[str, str]]]:
+        """The decisions with every unsure field read again by AI from its crop, and the (model, prompt version)
+        pairs that answered.
+
+        Unsure is NEEDS_REVIEW: the engines disagreed, agreed below the review confidence, or missed a required field.
+        The crop is the area the engines read the field in (moved with its anchor), with a margin; the engines'
+        readings go along as hints. An AI value still has to pass the field's rule. A crop without an answer leaves
+        that field as OCR left it.
+        """
+        crops, folder = self.crops, context.crop_folder
+        unsure = [d for d in decisions if d.status is FieldStatus.NEEDS_REVIEW]
+        if crops is None or folder is None or not unsure or len(unsure) > self.max_fields:
+            return decisions, []
+        definitions = {d.key: d for d in template.fields}
+
+        def read(decision: FieldDecision) -> tuple[str, AiReading | None]:
+            ref = ObjectRef(bucket=folder.bucket, key=f"{folder.key}/{decision.key}.png")
+            crops.store.save_page(ref, crop_page(page, padded(boxes[decision.key], padding=crops.padding)))
+            definition = definitions[decision.key]
+            crop = AiFieldCrop(
+                key=decision.key,
+                label=definition.label,
+                type=definition.type.value,
+                crop=ref,
+                readings=decision.readings,
+            )
+            try:
+                return decision.key, crops.reader.read_crop(crop, context)
+            except AiUnavailableError:
+                return decision.key, None
+
+        with ThreadPoolExecutor(max_workers=min(crops.workers, len(unsure))) as pool:
+            answers = dict(pool.map(read, unsure))
+        decided = [
+            decide_with_ai(definitions[d.key], d, found.values.get(d.key), confidence=self.confidence, today=today)
+            if (found := answers.get(d.key)) is not None
+            else d
+            for d in decisions
+        ]
+        return decided, sorted({(a.model_id, a.prompt_version) for a in answers.values() if a is not None})
+
 
 class ExtractDocumentService:
     """Reads the first page, picks the matching template, and decides each field (IDP-03 ch. 2.6, stages 5 to 7).
@@ -145,14 +217,13 @@ class ExtractDocumentService:
         first = pages[sorted(pages)[0]]
         classification, models = self._classify(command, first.text, page.clean)
         self._progress.report(Stage.CLASSIFY, _DONE)
-        decisions = self._decide(classification.template, pages, page.clean, digital=digital) if classification else []
+        decisions, boxes = (
+            self._decide(classification.template, pages, page.clean, digital=digital) if classification else ([], {})
+        )
         self._progress.report(Stage.VERIFY, _DONE)
-        if classification and self._ai is not None and command.ai_context is not None:
-            sides = [p.clean for p in command.pages[:2]]  # a card's front and back
-            context = dataclasses.replace(command.ai_context, page_refs=command.ai_context.page_refs[:2])
-            today = self._clock.now().date()
-            decisions, answered = self._ai.assist(classification.template, decisions, sides, today, context)
-            models += [answered] if answered else []
+        if classification:
+            decisions, answered = self._ai_step(command, classification.template, decisions, boxes)
+            models += answered
         self._progress.report(Stage.AI_ASSIST, _DONE)
         result = build_result(
             classification=classification,
@@ -182,6 +253,25 @@ class ExtractDocumentService:
         found, answered = self._ai.classify(self._templates, command.ai_context)
         return found, [answered] if answered else []
 
+    def _ai_step(
+        self,
+        command: ExtractDocumentCommand,
+        template: TemplateDefinition,
+        decisions: list[FieldDecision],
+        boxes: Mapping[str, Box],
+    ) -> tuple[list[FieldDecision], list[tuple[str, str]]]:
+        """Stage 7: the unsure fields' crops when crops are set up (ADR 0009), else the whole page in one request."""
+        if self._ai is None or command.ai_context is None:
+            return decisions, []
+        today = self._clock.now().date()
+        if self._ai.crops is not None and command.ai_context.crop_folder is not None:
+            page = command.pages[0].clean  # the fields are read on the first page
+            return self._ai.assist_with_crops(template, decisions, page, boxes, today, command.ai_context)
+        sides = [p.clean for p in command.pages[:2]]  # a card's front and back
+        context = dataclasses.replace(command.ai_context, page_refs=command.ai_context.page_refs[:2])
+        decided, answered = self._ai.assist(template, decisions, sides, today, context)
+        return decided, [answered] if answered else []
+
     def _read_pages(self, image: PageImage) -> dict[str, OcrPage]:
         """Every engine except the tie-breaker reads the page, all at once; one that fails twice is left out."""
         slots = [slot for slot in sorted(self._engines) if slot != _TIE_BREAKER]
@@ -204,7 +294,8 @@ class ExtractDocumentService:
 
     def _decide(
         self, template: TemplateDefinition, pages: Mapping[str, OcrPage], image: PageImage, *, digital: bool = False
-    ) -> list[FieldDecision]:
+    ) -> tuple[list[FieldDecision], dict[str, Box]]:
+        """Each field's decision, and the box it was looked for in (moved with its anchor), for the AI's crops."""
         today = self._clock.now().date()
         shifts = {}
         for anchor in template.anchors:
@@ -212,11 +303,12 @@ class ExtractDocumentService:
             if found is not None:
                 shifts[anchor.id] = found
         decisions: list[FieldDecision] = []
+        boxes: dict[str, Box] = {}
         slots = [*pages, *([_TIE_BREAKER] if _TIE_BREAKER in self._engines else [])]
         used: dict[str, dict[str, Box]] = {slot: {} for slot in slots}  # slot -> field key -> where it was read
         tie_page = _LazyPage(lambda: self._read_tie_breaker(image))
         for definition in template.fields:
-            box = field_box(definition, shifts)
+            box = boxes[definition.key] = field_box(definition, shifts)
             if digital:
                 decisions.append(self._decide_digital(definition, pages[_DIGITAL], box, used, today))
                 continue
@@ -230,7 +322,7 @@ class ExtractDocumentService:
                     readings[_TIE_BREAKER] = self._read_field(definition, page_c, _TIE_BREAKER, box, used, today)
                     decision = decide_field(definition, readings, thresholds=self._thresholds, today=today)
             decisions.append(decision)
-        return decisions
+        return decisions, boxes
 
     def _decide_digital(
         self,

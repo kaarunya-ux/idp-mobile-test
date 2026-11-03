@@ -15,6 +15,7 @@ Reads documents into structured fields: standard and organisation templates, the
 | standard templates (after migrating, safe to repeat) | `python -m extraction.seed` | `service` |
 | `worker-pipeline` (Celery: extraction, recheck, template samples and test runs) | `celery -A extraction.worker worker -Q pipeline -c 4 --prefetch-multiplier 1` | `worker` (mount the models at `/models`) |
 | `worker-ai` (Celery: deep analysis, waits on ai-gateway) | `celery -A extraction.worker worker -Q ai -c 8 --prefetch-multiplier 1` | `worker` |
+| `extraction-sync` (the synchronous `POST /api/v1/extract`, ADR 0009) | `uvicorn --factory extraction.sync_main:create_sync_app --port 8003` | `worker` (mount the models at `/models`) |
 
 Workers serve Prometheus metrics on `METRICS__PORT` when `PROMETHEUS_MULTIPROC_DIR` names an empty folder (one per worker).
 
@@ -85,6 +86,11 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `SERVICE_AUTH__TOKEN_URL` / `SERVICE_AUTH__CLIENT_SECRET` | — | | Keycloak client credentials for the gateway; needed with `AI_GATEWAY__URL` |
 | `SERVICE_AUTH__CLIENT_ID` / `SERVICE_AUTH__AUDIENCE` | `extraction-service` / `ai-gateway` | | |
 | `AI_FALLBACK__URL`, `__API_KEY`, `__MODEL`, `__TIMEOUT`, `__MAX_EDGE_PX`, `__CONFIDENCE` | — (off) | | Local only, without the gateway: the model host directly, as the web app did |
+| `QUICK__MAX_FILE_SIZE` / `QUICK__MAX_TOTAL_SIZE` | `20MiB` / `30MiB` | | extraction-sync's `POST /api/v1/extract`: each file, and front and back together (ADR 0009) |
+| `QUICK__MAX_PAGES` / `QUICK__MAX_CONCURRENT` | `2` / `2` | 1–20 / 1–32 | A longer PDF is refused (send it as a job); documents read at once, one more answers 429 |
+| `QUICK__TIMEOUT` | `50` s | 5 s–5 min | How long the generic read waits for ai-gateway (its 5 s slot wait and 40 s generic-read, plus margin) |
+| `AI_GATEWAY__READ_MODE` | `crop` | `crop` / `page` | The AI step: each unsure field's crop alone, or every unsettled field on the whole page (ADR 0009) |
+| `AI_GATEWAY__CROP_PADDING` / `AI_GATEWAY__CROP_CONCURRENCY` | `0.5` / `3` | 0–5 / 1–10 | A crop's margin in field heights; crops of one document read at once |
 
 ## Dependencies
 
@@ -129,6 +135,19 @@ manages standard templates). Errors are RFC 9457 problem details.
 | `DELETE` | `/api/v1/templates/{id}` | `template:write` | archives; never deletes |
 
 
+## The synchronous extract (`extraction-sync`, ADR 0009)
+
+`POST /api/v1/extract` on port 8003, with the person's token (permission `document:write`; the backend forwards it).
+Multipart `file` (one PDF of at most 2 pages, or the front JPG/PNG) and optional `back`. The same pipeline as a job:
+the quality gate, both OCR engines, the template's fields; each field they leave unsure is cut out and read alone by
+the AI through ai-gateway's INTERACTIVE lane. A document no template matches goes to ai-gateway's `generic-read`.
+Nothing is kept. `POST /api/v1/extract/generic` takes the same and sends the document **straight to the model** (no
+OCR, no quality gate): any document's type and every field, through `generic-read`. The answer: `documentType`, `documentConfidence`, `readBy` (`OCR`, `OCR_AND_AI` or `AI`), `model`,
+`promptVersion`, and `fields[{key, label, type, value, confidence, status, source}]` (a table's value is
+`{headers, rows}`). Errors: 413 `EXT-413-FILE-001`, 415 `EXT-415-FILE-001`, 422 `EXT-422-FILE-001` /
+`EXT-422-PAGES-001` / `EXT-422-QUALITY-00x`, 429 `EXT-429-BUSY-001` (send it as a job instead) or `EXT-429-AI-001`
+(the account's AI calls for today are used), 503 `EXT-503-AI-001`.
+
 ## Layout
 
 ```
@@ -137,6 +156,9 @@ src/extraction/
   health.py        probe router
   core/            config.py, logging.py (+ correlation id), errors.py (DomainError), problem_details.py (RFC 9457
                    handlers), error_codes.py, clock.py, ids.py
+  sync_main.py     the extraction-sync process (the synchronous extract, with the OCR engines)
+  quick/           the synchronous extract (ADR 0009): domain (files, models, ports), application, infrastructure
+                   (workspace in MinIO, the pipeline runner, ai-gateway generic-read), api (POST /api/v1/extract)
   rule/            pure field rules, no framework and no I/O: pan.py, aadhaar.py, dates.py, checksum.py (Verhoeff),
                    normalizers.py, outcome.py (RuleOutcome), exceptions.py
 src/idp_ocr_engines/  the OCR engine library (IDP-03 ch. 1, `idp-ocr-engines`); imports nothing from `extraction`

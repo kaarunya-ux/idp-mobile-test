@@ -12,12 +12,14 @@ from extraction.core.config import ServiceAuthSettings
 from extraction.core.service_auth import ServiceTokenError, ServiceTokenProvider
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.jobs import ObjectRef
-from extraction.pipeline.domain.ports import AiCallContext
+from extraction.pipeline.domain.ports import AiCallContext, AiFieldCrop
 from extraction.pipeline.infrastructure.ai.gateway_reader import (
     AiGatewayClient,
     GatewayClassifier,
+    GatewayCropReader,
     GatewayFieldReader,
     GatewayPageAnalyser,
+    caller,
 )
 from idp_ocr_engines.model import PageImage
 
@@ -182,3 +184,36 @@ def test_raises_ai_unavailable_when_classify_or_analysis_answers_garbage() -> No
         GatewayPageAnalyser(_gateway(lambda _: httpx.Response(200, json=[1]))[0]).analyse(
             CONTEXT.page_refs, {}, None, CONTEXT
         )
+
+
+def test_sends_one_fields_crop_with_the_engines_readings_and_returns_its_value() -> None:
+    reply = {
+        "value": "ABCPE1234F",
+        "confidence": 0.7,
+        "reason": "clear",
+        "model": "vl",
+        "promptVersion": "field-read.v1",
+    }
+    gateway, sent = _gateway(lambda _: httpx.Response(200, json=reply))
+    crop = AiFieldCrop(
+        key="pan_number",
+        label="PAN",
+        type="ID",
+        crop=ObjectRef(bucket="idp-derived", key="a/d/i/crops/pan_number.png"),
+        readings={"A": "ABCPE1234F", "B": "ABCPE9999Z", "ai": None},
+    )
+
+    found = GatewayCropReader(gateway).read_crop(crop, CONTEXT)
+
+    body = json.loads(sent[0].content)
+    assert body["crop"] == {"bucket": "idp-derived", "key": "a/d/i/crops/pan_number.png"}
+    assert body["field"] == {"key": "pan_number", "label": "PAN", "type": "ID"}
+    assert body["readings"] == {"A": "ABCPE1234F", "B": "ABCPE9999Z"}  # engine slots only
+    assert (found.values, found.prompt_version) == ({"pan_number": "ABCPE1234F"}, "field-read.v1")
+
+
+def test_waits_in_the_interactive_lane_with_the_plan_when_a_person_waits() -> None:
+    interactive = AiCallContext(account_id=ACCOUNT, priority=True, page_refs=(), interactive=True, plan="GUEST")
+
+    assert caller(interactive) == {"accountId": str(ACCOUNT), "priority": "INTERACTIVE", "plan": "GUEST"}
+    assert caller(CONTEXT)["priority"] == "PRIORITY"

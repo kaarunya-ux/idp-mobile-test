@@ -76,6 +76,9 @@ class AiCallContext:
     priority: bool
     page_refs: tuple[ObjectRef, ...]  # the same pages as ``pages``, in the derived bucket
     labels: Mapping[str, str] = field(default_factory=dict)
+    crop_folder: ObjectRef | None = None  # where field crops are stored for the AI to read (key: a folder); None: none
+    interactive: bool = False  # a person waits on an open request: ai-gateway's INTERACTIVE lane (ADR 0009)
+    plan: str | None = None  # which daily AI allowance applies; None lets ai-gateway take it from the priority
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -100,6 +103,26 @@ class AiFieldReaderPort(Protocol):
     ) -> AiReading:
         """The value of each key as printed, or None. ``pages`` are the document's sides (a card's front and back);
         the reader sees them together. Keys the reader doesn't know come back None."""
+        ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AiFieldCrop:
+    """One field the OCR engines didn't settle, cut out of the page, with what each engine read as hints."""
+
+    key: str
+    label: str
+    type: str
+    crop: ObjectRef
+    readings: Mapping[str, str | None]  # engine slot (A, B, C) -> text
+
+
+class AiCropReaderPort(Protocol):
+    """ai-gateway's ``field-read`` single form: one field read from its crop (stage 7 with crops, ADR 0009)."""
+
+    def read_crop(self, field: AiFieldCrop, context: AiCallContext) -> AiReading:
+        """``values`` holds the one key. Raises ``AiUnavailableError`` when it can't answer: the field then keeps
+        what OCR gave it."""
         ...
 
 

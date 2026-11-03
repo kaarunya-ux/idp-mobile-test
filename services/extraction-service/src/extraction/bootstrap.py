@@ -26,17 +26,18 @@ from extraction.core.outbox import OutboxRelay
 from extraction.core.service_auth import ServiceTokenProvider
 from extraction.pipeline.application.services.accept_extraction import AcceptExtractionService
 from extraction.pipeline.application.services.designer_work import DesignerWorkService
-from extraction.pipeline.application.services.extract_document import AiAssist, ExtractDocumentService
+from extraction.pipeline.application.services.extract_document import AiAssist, AiCrops, ExtractDocumentService
 from extraction.pipeline.application.services.prepare_document import PrepareDocumentService
 from extraction.pipeline.application.services.run_deep_analysis import RunDeepAnalysisService
 from extraction.pipeline.application.services.run_extraction import RunExtractionService
 from extraction.pipeline.domain.decisions import Thresholds
-from extraction.pipeline.domain.ports import ProgressReporterPort, UnitOfWorkFactory
+from extraction.pipeline.domain.ports import PageImageStorePort, ProgressReporterPort, UnitOfWorkFactory
 from extraction.pipeline.domain.quality import QualityThresholds
 from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.pipeline.infrastructure.ai.gateway_reader import (
     AiGatewayClient,
     GatewayClassifier,
+    GatewayCropReader,
     GatewayFieldReader,
     GatewayPageAnalyser,
 )
@@ -55,6 +56,11 @@ from extraction.pipeline.infrastructure.quality.opencv_quality_gate import OpenC
 from extraction.pipeline.infrastructure.quality.page_loader import DocumentPageLoader
 from extraction.pipeline.infrastructure.storage.s3_storage import S3ObjectStorage
 from extraction.pipeline.infrastructure.tasks import CeleryTaskQueue, WorkerServices
+from extraction.quick.application.quick_extract import QuickExtractService
+from extraction.quick.domain.models import UploadLimits
+from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
+from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner
+from extraction.quick.infrastructure.workspace import S3Workspace
 from extraction.template.domain.definition_json import parse_definition
 from idp_ocr_engines import ModelRegistry, RuntimeLimits
 from idp_ocr_engines.engines.ppocr import PpOcrEngine, PpOcrModels
@@ -79,7 +85,9 @@ def pipeline_version() -> str:
 class PipelineServices:
     """``PipelineFactory``: the engines and models, loaded once; services built per run."""
 
-    def __init__(self, settings: Settings, clock: Clock, catalog: SqlTemplateCatalog) -> None:
+    def __init__(
+        self, settings: Settings, clock: Clock, catalog: SqlTemplateCatalog, pages: PageImageStorePort | None = None
+    ) -> None:
         self._catalog = catalog
         registry = ModelRegistry.from_file(Path(settings.ocr.models_file))
         limits = RuntimeLimits(threads=settings.ocr.threads)
@@ -113,8 +121,13 @@ class PipelineServices:
             require_document_edges=quality.require_document_edges,
         )
         self._gateway = build_gateway(settings)
-        self._ai = build_ai_assist(settings, self._gateway)
+        self._ai = build_ai_assist(settings, self._gateway, pages)
         self._digital = PdfiumTextReader(dpi=settings.limits.pdf_dpi)
+
+    @property
+    def loader(self) -> DocumentPageLoader:
+        """Files to page images (PDF pages rendered, photos upright), for the straight-to-the-model extract."""
+        return self._loader
 
     @property
     def sample_engine(self) -> OcrEnginePort:
@@ -190,17 +203,28 @@ def build_gateway(settings: Settings) -> AiGatewayClient | None:
     return AiGatewayClient(client, tokens)
 
 
-def build_ai_assist(settings: Settings, gateway: AiGatewayClient | None) -> AiAssist | None:
-    """The AI fallback: ai-gateway when ``AI_GATEWAY__URL`` is set; on a laptop without it, the model host directly
+def build_ai_assist(
+    settings: Settings, gateway: AiGatewayClient | None, pages: PageImageStorePort | None = None
+) -> AiAssist | None:
+    """The AI fallback: ai-gateway when ``AI_GATEWAY__URL`` is set, reading the unsure fields' crops (stored with
+    ``pages``) unless ``AI_GATEWAY__READ_MODE=page``; on a laptop without it, the model host directly
     (``AI_FALLBACK__URL``, local only, ADR 0006); otherwise None (unsettled fields then stay NEEDS_REVIEW)."""
     ai = settings.ai_gateway
     if gateway is not None:
+        crops = (
+            AiCrops(
+                reader=GatewayCropReader(gateway), store=pages, padding=ai.crop_padding, workers=ai.crop_concurrency
+            )
+            if ai.read_mode == "crop" and pages is not None
+            else None
+        )
         return AiAssist(
             reader=GatewayFieldReader(gateway),
             confidence=ai.confidence,
             max_fields=ai.max_fields_per_document,
             classifier=GatewayClassifier(gateway),
             classify_min_confidence=ai.classify_min_confidence,
+            crops=crops,
         )
     direct = settings.ai_fallback
     if direct.url is None or settings.environment != "local":
@@ -247,7 +271,7 @@ def build_worker_services(settings: Settings, sessions: SessionFactory) -> Worke
     objects = S3ObjectStorage(build_s3_client(storage), max_input_size=int(storage.max_input_size))
     units, metrics = build_units(sessions, clock), PrometheusPipelineMetrics()
     office = LibreOfficePdfConverter(binary=settings.office.binary, timeout=settings.office.timeout)
-    pipeline = PipelineServices(settings, clock, SqlTemplateCatalog(sessions))
+    pipeline = PipelineServices(settings, clock, SqlTemplateCatalog(sessions), pages=objects)
     gateway = pipeline.gateway
     extraction = RunExtractionService(
         units,
@@ -285,6 +309,30 @@ def build_worker_services(settings: Settings, sessions: SessionFactory) -> Worke
         office=office,
     )
     return WorkerServices(extraction=extraction, deep_analysis=deep_analysis, designer=designer, designer_store=store)
+
+
+def build_quick_extract(settings: Settings, sessions: SessionFactory) -> QuickExtractService:
+    """The synchronous extract (ADR 0009), for the ``extraction-sync`` process: the pipeline with its OCR engines
+    (loaded here, once), storage for the call's pages and crops, and ai-gateway for the crops and the generic read."""
+    storage = settings.require_storage()
+    gateway = settings.ai_gateway
+    if gateway.url is None:
+        raise MissingSettingsError("extraction-sync needs AI_GATEWAY__URL")
+    auth = _required_service_auth(settings)
+    objects = S3ObjectStorage(build_s3_client(storage), max_input_size=int(storage.max_input_size))
+    pipeline = PipelineServices(settings, SystemClock(), SqlTemplateCatalog(sessions), pages=objects)
+    tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
+    seconds = settings.quick.timeout.total_seconds()
+    client = httpx.Client(base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=2.0))
+    quick = settings.quick
+    return QuickExtractService(
+        workspace=S3Workspace(build_s3_client(storage), bucket=storage.bucket_derived),
+        pipeline=PipelineDocumentRunner(
+            pipeline, pipeline.loader, objects, bucket=storage.bucket_derived, max_pages=quick.max_pages
+        ),
+        reader=GatewayDocumentReader(client, tokens),
+        limits=UploadLimits(max_file_bytes=int(quick.max_file_size), max_total_bytes=int(quick.max_total_size)),
+    )
 
 
 def build_s3_client(storage: StorageSettings) -> "S3Client":
