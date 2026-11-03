@@ -46,6 +46,9 @@ class QualitySettings(BaseModel):
     saturation_level: int = Field(250, ge=200, le=255)  # grey level from which a pixel counts as saturated
     glare_soft_edge_gradient: float = Field(15.0, gt=0)  # grey levels per pixel: softer-edged saturated blobs are glare
     require_document_edges: bool = False  # refuse a page whose edges cannot be found (see the README: off by default)
+    # Refuse a photo too dark, too bright or with glare (IDP-03); false notes it and reads on. PDF pages are never
+    # judged on lighting: their white paper reads as glare
+    lighting_rejects: bool = True
 
     @model_validator(mode="after")
     def _brightness_range_is_ordered(self) -> "QualitySettings":

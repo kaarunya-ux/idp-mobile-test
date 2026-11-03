@@ -9,6 +9,7 @@ from extraction.pipeline.domain.quality import QualityScores, QualityThresholds,
 from extraction.pipeline.domain.stages import Stage
 
 _DONE = 100
+_PDF = b"%PDF-"  # a rendered page: Office files arrive here already turned into a PDF
 
 
 class PrepareDocumentService:
@@ -40,9 +41,10 @@ class PrepareDocumentService:
         self._progress.report(Stage.SCAN, _DONE)
 
         qualities: list[QualityScores] = []
+        photographed = not command.content.startswith(_PDF)
         for position, image in enumerate(images):
             scores = self._assessor.assess(image)
-            issues = list_quality_issues(scores, self._thresholds)
+            issues = list_quality_issues(scores, self._thresholds, photographed=photographed)
             if issues:
                 raise quality_error_for(issues[0], image.page_index)
             qualities.append(scores)

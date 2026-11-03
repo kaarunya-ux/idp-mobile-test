@@ -340,3 +340,18 @@ cd services/local-stack && make prepare && make up && make check
 Result here (no Docker): ruff, mypy and the 10 import contracts clean; 649 unit tests pass, 89% coverage, the new code
 97–100%. The database integration tests and the stack check need Docker. Until the real model server is in, the mock
 model answers the crops (with null: the fields stay for review) and the generic read (a made-up PAN).
+
+## Entry 9: No lighting checks on PDF pages (2026-11-03)
+
+**Goal:** the backend's clear Aadhaar PDFs were all refused with `EXT-422-QUALITY-003` (glare): the white A4 paper
+measured as 68% glare. Decisions: ADR 0010.
+
+### What we did
+
+`list_quality_issues(..., photographed=False)` skips brightness and glare; `PrepareDocumentService` passes it for a
+PDF (Office files arrive as one). New setting `QUALITY__LIGHTING_REJECTS` (default true): false notes a photo's
+lighting instead of refusing it; the local stack sets false.
+
+### Check it
+
+The backend's PDF through the real quality gate: refused before (glare 0.68), prepared now. Unit tests for both.

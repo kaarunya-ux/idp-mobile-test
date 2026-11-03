@@ -119,6 +119,7 @@ class PipelineServices:
             glare_max=quality.glare_max,
             min_short_side_px=quality.min_short_side_px,
             require_document_edges=quality.require_document_edges,
+            lighting_rejects=quality.lighting_rejects,
         )
         self._gateway = build_gateway(settings)
         self._ai = build_ai_assist(settings, self._gateway, pages)
