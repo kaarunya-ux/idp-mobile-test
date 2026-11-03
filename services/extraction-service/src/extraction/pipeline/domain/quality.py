@@ -2,6 +2,11 @@
 
 Measuring is infrastructure (it needs OpenCV); judging the numbers is a business rule and lives here as pure code.
 The thresholds come from settings, never from literals (ML-07).
+
+Brightness and glare are about the light a photo was taken in. A page rendered from a PDF (or an Office file turned
+into one) had no light: its white paper reads as glare and overexposure, so those checks are skipped for it, and only
+sharpness and resolution are judged. ``lighting_rejects`` off notes a photo's lighting in the result (the scores are
+kept) instead of refusing it.
 """
 
 from dataclasses import dataclass
@@ -29,6 +34,7 @@ class QualityThresholds:
     glare_max: float
     min_short_side_px: int
     require_document_edges: bool
+    lighting_rejects: bool = True  # a photo too dark, too bright or with glare is refused (QUALITY__LIGHTING_REJECTS)
 
 
 class QualityIssue(StrEnum):
@@ -42,16 +48,20 @@ class QualityIssue(StrEnum):
     EDGES_NOT_FOUND = "EDGES_NOT_FOUND"
 
 
-def list_quality_issues(scores: QualityScores, thresholds: QualityThresholds) -> tuple[QualityIssue, ...]:
-    """Every check the page fails, in code order; an empty result means the page passes."""
+def list_quality_issues(
+    scores: QualityScores, thresholds: QualityThresholds, *, photographed: bool = True
+) -> tuple[QualityIssue, ...]:
+    """Every check the page fails, in code order; an empty result means the page passes. ``photographed`` is False
+    for a page rendered from a PDF: no lighting checks then."""
     issues: list[QualityIssue] = []
+    lighting = photographed and thresholds.lighting_rejects
     if scores.blur < thresholds.blur_min:
         issues.append(QualityIssue.BLURRED)
-    if scores.brightness < thresholds.brightness_min:
+    if lighting and scores.brightness < thresholds.brightness_min:
         issues.append(QualityIssue.TOO_DARK)
-    if scores.brightness > thresholds.brightness_max:
+    if lighting and scores.brightness > thresholds.brightness_max:
         issues.append(QualityIssue.TOO_BRIGHT)
-    if scores.glare > thresholds.glare_max:
+    if lighting and scores.glare > thresholds.glare_max:
         issues.append(QualityIssue.GLARE)
     if scores.short_side_px < thresholds.min_short_side_px:
         issues.append(QualityIssue.LOW_RESOLUTION)

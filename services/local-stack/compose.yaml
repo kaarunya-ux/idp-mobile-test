@@ -38,6 +38,8 @@ x-extraction-env: &extraction-env
   SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
   SERVICE_AUTH__CLIENT_ID: extraction-service
   SERVICE_AUTH__CLIENT_SECRET: ${EXTRACTION_CLIENT_SECRET:-local-extraction-secret}
+  # Integration testing: a photo's lighting is noted, not refused (the service's default refuses; ADR 0010)
+  QUALITY__LIGHTING_REJECTS: ${QUALITY_LIGHTING_REJECTS:-false}
 
 x-conversion-env: &conversion-env
   <<: *common-env

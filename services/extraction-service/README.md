@@ -89,6 +89,7 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `QUICK__MAX_FILE_SIZE` / `QUICK__MAX_TOTAL_SIZE` | `20MiB` / `30MiB` | | extraction-sync's `POST /api/v1/extract`: each file, and front and back together (ADR 0009) |
 | `QUICK__MAX_PAGES` / `QUICK__MAX_CONCURRENT` | `2` / `2` | 1–20 / 1–32 | A longer PDF is refused (send it as a job); documents read at once, one more answers 429 |
 | `QUICK__TIMEOUT` | `50` s | 5 s–5 min | How long the generic read waits for ai-gateway (its 5 s slot wait and 40 s generic-read, plus margin) |
+| `QUALITY__LIGHTING_REJECTS` | `true` | | A photo too dark, too bright or with glare is refused; `false` notes it in the result and reads on. PDF pages are never judged on lighting (ADR 0010) |
 | `AI_GATEWAY__READ_MODE` | `crop` | `crop` / `page` | The AI step: each unsure field's crop alone, or every unsettled field on the whole page (ADR 0009) |
 | `AI_GATEWAY__CROP_PADDING` / `AI_GATEWAY__CROP_CONCURRENCY` | `0.5` / `3` | 0–5 / 1–10 | A crop's margin in field heights; crops of one document read at once |
 

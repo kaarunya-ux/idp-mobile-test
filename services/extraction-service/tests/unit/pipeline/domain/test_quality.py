@@ -1,5 +1,7 @@
 """When a page is too poor to read, and which error says so (IDP-03 ch. 2.6 stage 2, ch. 2.12)."""
 
+from dataclasses import replace
+
 import pytest
 
 from extraction.core.error_codes import ErrorCode
@@ -101,3 +103,19 @@ def test_maps_each_issue_to_its_error_code_when_a_page_is_refused(issue: Quality
 
 def test_counts_pages_from_one_in_the_message_when_the_third_page_is_refused() -> None:
     assert quality_error_for(QualityIssue.BLURRED, 2).detail.startswith("Page 3 ")
+
+
+@pytest.mark.parametrize("changes", [{"glare": 0.68}, {"brightness": 0.95}, {"brightness": 0.1}])
+def test_never_judges_the_lighting_of_a_page_rendered_from_a_pdf(changes: dict[str, float]) -> None:
+    assert list_quality_issues(_scores(**changes), THRESHOLDS, photographed=False) == ()
+
+
+def test_still_refuses_a_blurred_pdf_page() -> None:
+    assert list_quality_issues(_scores(blur=10.0), THRESHOLDS, photographed=False) == (QualityIssue.BLURRED,)
+
+
+def test_notes_a_photos_lighting_instead_of_refusing_it_when_the_setting_says_so() -> None:
+    noting = replace(THRESHOLDS, lighting_rejects=False)
+
+    assert list_quality_issues(_scores(glare=0.5, brightness=0.95), noting) == ()
+    assert list_quality_issues(_scores(glare=0.5), THRESHOLDS) == (QualityIssue.GLARE,)  # the default refuses

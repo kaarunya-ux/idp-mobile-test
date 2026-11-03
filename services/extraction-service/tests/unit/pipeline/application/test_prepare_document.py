@@ -124,3 +124,24 @@ def test_lets_a_file_error_through_when_the_loader_rejects_the_file() -> None:
         )
 
     assert assessor.calls == 0
+
+
+def test_prepares_a_white_pdf_page_that_a_photo_check_would_call_glare() -> None:
+    white = QualityScores(blur=1129.0, brightness=0.883, glare=0.68, short_side_px=2550, edges_found=True)
+    preparer = FakePreparer()
+
+    result = _service(FakeLoader(1), FakeAssessor([white]), preparer, RecordingProgress()).prepare(
+        PrepareDocumentCommand(content=b"%PDF-1.7 made up")
+    )
+
+    assert preparer.prepared == [0]
+    assert result.qualities[0].glare == 0.68  # still measured and kept in the result
+
+
+def test_refuses_a_photo_with_the_same_glare() -> None:
+    glare = QualityScores(blur=1129.0, brightness=0.6, glare=0.68, short_side_px=900, edges_found=True)
+
+    with pytest.raises(QualityRejectedError):
+        _service(FakeLoader(1), FakeAssessor([glare]), FakePreparer(), RecordingProgress()).prepare(
+            PrepareDocumentCommand(content=b"\xff\xd8\xff made up photo")
+        )
