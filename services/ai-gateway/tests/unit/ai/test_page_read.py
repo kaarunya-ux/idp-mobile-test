@@ -93,4 +93,4 @@ async def test_sends_the_thinking_switch_only_when_the_prompt_sets_it() -> None:
 
     first, second = (json.loads(call.request.content) for call in route.calls)
     assert first["chat_template_kwargs"] == {"enable_thinking": False}
-    assert "chat_template_kwargs" not in second
+    assert "chat_template_kwargs" not in second  # this client has no default (MODEL__THINKING unset)

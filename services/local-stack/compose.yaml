@@ -142,6 +142,11 @@ services:
     environment:
       <<: *common-env
       MODEL__BASE_URL: ${MODEL_BASE_URL:-http://mock-model:4000/v1}
+      # One model serves every task on a single-model host (the Mac mini); the mock answers to any name
+      MODEL__VL_MODEL: ${MODEL_NAME:-vl}
+      MODEL__SMART_MODEL: ${MODEL_NAME:-smart}
+      MODEL__AUTO_MODEL: ${MODEL_NAME:-auto}
+      MODEL__SEND_SCHEMA: ${MODEL_SEND_SCHEMA:-true}
       REDIS__URL: redis://redis:6379/0
       AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
     ports: ["127.0.0.1:8002:8002"]  # internal service: only this machine, for debugging

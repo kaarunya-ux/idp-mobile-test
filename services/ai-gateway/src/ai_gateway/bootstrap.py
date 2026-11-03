@@ -88,7 +88,9 @@ def build(settings: Settings, clock: Clock) -> Container:
     models = {ModelRole.VL: model.vl_model, ModelRole.SMART: model.smart_model, ModelRole.AUTO: model.auto_model}
     prompts = PromptFiles.load()
     runner = ModelCallRunner(
-        model=OpenAiModelClient(http, models=models, breaker=breaker),
+        model=OpenAiModelClient(
+            http, models=models, breaker=breaker, send_schema=model.send_schema, thinking=model.thinking
+        ),
         slots=RedisSlots(
             redis,
             capacity=model.vl_max_concurrent,

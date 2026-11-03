@@ -2,6 +2,8 @@
   "realm": "idp",
   "enabled": true,
   "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 86400,
+  "ssoSessionMaxLifespan": 86400,
   "roles": {
     "realm": [
       {"name": "ORG_ADMIN"},
@@ -51,6 +53,7 @@
       "publicClient": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": true,
+      "attributes": {"access.token.lifespan": "86400"},
       "protocolMappers": [
         {
           "name": "audience idp-api",

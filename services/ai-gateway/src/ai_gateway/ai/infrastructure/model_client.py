@@ -1,8 +1,14 @@
 """``ModelPort`` on the local model server: OpenAI-style ``POST /chat/completions`` (IDP-03 ch. 4.3).
 
 The answer's JSON schema goes in ``response_format``, so a host that enforces schemas (llama-server turns it into a
-grammar) can only answer in that shape; the application validates it again anyway. Timeouts, connection errors,
-5xx and 429 count as failures for the circuit breaker; a 4xx is our mistake, so it doesn't open the breaker.
+grammar) can only answer in that shape; the application validates it again anyway. ``MODEL__SEND_SCHEMA=false`` leaves
+it out, for a host whose enforcement is broken (mlx_vlm.server corrupts the first value; the prompts say the shape
+too, and a wrong answer gets one repair attempt). Hybrid models' thinking is switched by the prompt, or else by
+``MODEL__THINKING`` (off by default: these tasks want the answer, not the reasoning), sent both as llama.cpp's
+``chat_template_kwargs`` and as mlx_vlm.server's ``enable_thinking``; each server ignores the other's.
+
+Timeouts, connection errors, 5xx and 429 count as failures for the circuit breaker; a 4xx is our mistake, so it doesn't
+open the breaker.
 """
 
 import base64
@@ -20,17 +26,27 @@ log = structlog.get_logger(__name__)
 
 
 class OpenAiModelClient:
-    def __init__(self, client: httpx.AsyncClient, *, models: Mapping[ModelRole, str], breaker: CircuitBreaker) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        models: Mapping[ModelRole, str],
+        breaker: CircuitBreaker,
+        send_schema: bool = True,
+        thinking: bool | None = None,
+    ) -> None:
         self._client = client  # base URL (…/v1), key and connect timeout are set in bootstrap
         self._models = models
         self._breaker = breaker
+        self._send_schema = send_schema
+        self._thinking = thinking  # when the prompt doesn't say
 
     async def complete(self, request: ModelRequest, *, timeout_s: float) -> ModelReply:
         self._breaker.before_call()
         try:
             response = await self._client.post(
                 "chat/completions",
-                json=_body(request, self._models[request.role]),
+                json=self._body(request),
                 timeout=httpx.Timeout(timeout_s, connect=self._client.timeout.connect),
             )
         except httpx.HTTPError as exc:  # timeout or unreachable: the details go to the log, not the caller
@@ -51,6 +67,19 @@ class OpenAiModelClient:
         self._breaker.succeeded()
         return _reply(response, self._models[request.role])
 
+    def _body(self, request: ModelRequest) -> dict[str, Any]:
+        body = _body(request, self._models[request.role])
+        thinking = request.thinking if request.thinking is not None else self._thinking
+        if thinking is not None:
+            body["chat_template_kwargs"] = {"enable_thinking": thinking}  # llama.cpp
+            body["enable_thinking"] = thinking  # mlx_vlm.server
+        if self._send_schema:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": request.schema_name, "schema": dict(request.schema), "strict": True},
+            }
+        return body
+
 
 def _body(request: ModelRequest, model: str) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": request.text}]  # text first: the host caches it
@@ -63,16 +92,9 @@ def _body(request: ModelRequest, model: str) -> dict[str, Any]:
         {"role": "user", "content": content},
         *({"role": role, "content": text} for role, text in request.follow_up),
     ]
-    extra: dict[str, Any] = {}
-    if request.thinking is not None:  # llama.cpp's chat template switch for hybrid models (Qwen3)
-        extra["chat_template_kwargs"] = {"enable_thinking": request.thinking}
-    return extra | {
+    return {
         "model": model,
         "messages": messages,
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {"name": request.schema_name, "schema": dict(request.schema), "strict": True},
-        },
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
     }

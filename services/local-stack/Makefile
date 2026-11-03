@@ -1,5 +1,5 @@
 # The local integration stack. `make prepare` does every slow step ahead of time; `make up` then only starts.
-.PHONY: prepare env models pull build up wait check status logs down reset
+.PHONY: prepare env models pull build up wait check status logs down reset use-mac-model use-mock-model
 
 prepare: env models pull build  ## once, and after pulling new code: everything ready, nothing left to build
 	@echo "Ready. Start it with: make up"
@@ -37,6 +37,20 @@ status:
 
 logs:  ## every service, newest lines; one service: make logs s=extraction-worker
 	docker compose logs -f --tail 100 $(s)
+
+# The Mac mini's model (Qwen3.5-4B on mlx_vlm.server), for when the backend tests with real answers. Only ai-gateway
+# restarts; `make up` or `make use-mock-model` puts the mock back. mlx_vlm.server breaks enforced schemas: none is sent.
+MAC_MODEL_URL ?= http://10.0.3.99:8082/v1
+MAC_MODEL_NAME ?= models/Qwen3.5-4B-MLX-4bit
+
+use-mac-model:  ## AI answers from the Mac mini's real model (until the next `make up`)
+	MODEL_BASE_URL=$(MAC_MODEL_URL) MODEL_NAME=$(MAC_MODEL_NAME) MODEL_SEND_SCHEMA=false \
+		docker compose up -d --no-build --no-deps ai-gateway
+	@echo "ai-gateway now uses $(MAC_MODEL_NAME) at $(MAC_MODEL_URL)"
+
+use-mock-model:  ## back to the mock model's made-up answers
+	docker compose up -d --no-build --no-deps ai-gateway
+	@echo "ai-gateway now uses the mock model"
 
 down:  ## stop, keep the data
 	docker compose down
