@@ -72,8 +72,10 @@ if TYPE_CHECKING:  # boto3-stubs is a dev dependency: type hints only, not in th
     from mypy_boto3_s3 import S3Client
 
 STALE_MARGIN = timedelta(minutes=2)  # a RUNNING item untouched this long past the task's hard limit is orphaned
-# Slot A reads English with PP-OCRv6; slot B reads English and Hindi with PP-OCRv5 (Sumukh's benchmark choice).
-# Slot C is empty while Indra is parked (extraction-service ADR 0002).
+# Slot A reads English with PP-OCRv6; slot B English and Hindi with PP-OCRv5 (Sumukh's benchmark choice). The product
+# extracts English only, but B keeps its Devanagari model: Aadhaar lines mix the scripts ("जन्म तिथि/DOB: ..."), and
+# English-only B lost the date of birth and two more fields on a bilingual card (build log, entry 15). Slot C is empty
+# while Indra is parked (ADR 0002).
 _ENGINE_LANGUAGES = {"A": ("en",), "B": ("en", "hi")}
 
 
@@ -106,6 +108,7 @@ class PipelineServices:
             max_pixels=settings.limits.max_image_pixels,
             pdf_dpi=settings.limits.pdf_dpi,
             pdf_max_side_px=settings.limits.pdf_max_side_px,
+            pdf_picture_min_fraction=settings.limits.pdf_picture_min_fraction,
         )
         quality = settings.quality
         self._assessor = OpenCvQualityAssessor(
@@ -131,7 +134,10 @@ class PipelineServices:
         )
         self._gateway = build_gateway(settings, inline)
         self._ai = build_ai_assist(settings, self._gateway, pages)
-        self._digital = PdfiumTextReader(dpi=settings.limits.pdf_dpi, max_side_px=settings.limits.pdf_max_side_px)
+        pdf = settings.limits
+        self._digital = PdfiumTextReader(
+            dpi=pdf.pdf_dpi, max_side_px=pdf.pdf_max_side_px, picture_min_fraction=pdf.pdf_picture_min_fraction
+        )
 
     @property
     def loader(self) -> DocumentPageLoader:

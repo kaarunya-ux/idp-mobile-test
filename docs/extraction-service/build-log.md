@@ -420,3 +420,41 @@ wide (4.5 MP, nine times the photo): OCR took 3 s and left a field unsure, so th
 
 The PAN photo saved as a PDF: 2.8 s, all four fields by OCR (before: 3.3 s and one AI call). A test for the cap. Still
 open: a card on an A4 page is not cut out of it, so OCR finds none of its fields there.
+
+## Entry 14: A photo saved as a PDF is read from the photo (2026-11-04)
+
+**Goal:** the backend's Aadhaar PDF took 11 s: one picture (768 x 972 px) covering 80% of a letter page was rendered as
+the whole page at 300 DPI (2550 x 3301 px, eleven times the pixels, with margins), so OCR was slow and missed fields.
+
+### What we did
+
+`pdf_pictures.picture_of`: a page whose largest image covers `LIMITS__PDF_PICTURE_MIN_FRACTION` (0.3) of it, placed
+upright, is a picture page. The page loader takes that picture's own pixels; the text-layer reader skips the page.
+
+### Check it
+
+A made-up card as a picture PDF: 1.65 s and the same fields as the photo itself (1.76 s). The backend's PDF: OCR on
+768 x 972 px in 3.1 s (before about 8 s), six of eight fields by OCR, the address among them; the two Hindi fields still
+go to the AI. Three tests (picture page, small image rendered as before, no text layer on a picture page).
+
+## Entry 15: English only (2026-11-04)
+
+**Goal:** the product extracts English only for now.
+
+### What we did
+
+- The standard Aadhaar template is version 2, without `name_hi` and `address_hi` (PAN and DL had no Hindi fields). The
+  field-language mechanism stays for organisations' own templates; its tests use Hindi fields of their own
+  (`tests/support/hindi_fields.py`).
+- `seed` publishes a newer shipped version of a standard template and retires the old one, but only while every stored
+  version is the seed's own (an admin's change is never overwritten); a fresh database stores the shipped version
+  number. Two integration tests.
+- Engine B keeps reading Devanagari, though no Hindi is extracted: Aadhaar lines mix the scripts, and English-only B,
+  tried on the backend's bilingual PDF, lost the date of birth and read gender and PIN code too faintly (3 of 6 fields
+  by OCR, against 6 of 6 with it).
+
+### Check it
+
+PAN photo 1.16 s, all four fields by OCR. Aadhaar photo 1.44 s, five of six (engine B reads no address on it, so the
+address goes to the AI). The backend's Aadhaar PDF 3.3 s, six of six by OCR, no AI call (it took 11 s with the Hindi
+fields).

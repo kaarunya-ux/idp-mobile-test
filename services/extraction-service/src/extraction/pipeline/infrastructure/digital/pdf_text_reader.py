@@ -4,14 +4,16 @@ A PDF made by software (e-PAN, e-Aadhaar, a bank letter) carries its text exactl
 Characters are grouped into words at the spaces PDFium reports (and at gaps wider than the text height), then into
 lines and blocks by the engine library's own layout rules, so the rest of the pipeline sees what an OCR engine gives.
 
-``None`` means "read it with OCR": not a PDF, a page with too little text (a scan inside a PDF), or a rotated page
-(its text positions would need turning; rare for software-made PDFs).
+``None`` means "read it with OCR": not a PDF, a page with too little text (a scan inside a PDF), a picture page (a photo
+or scan saved as a PDF: its text is a header or a scan's hidden layer, see ``pdf_pictures``), or a rotated page (its
+text positions would need turning; rare for software-made PDFs).
 """
 
 from dataclasses import dataclass
 
 import pypdfium2 as pdfium
 
+from extraction.pipeline.infrastructure.digital.pdf_pictures import picture_of
 from idp_ocr_engines.layout import RecognizedPiece, assign_line_and_block_ids
 from idp_ocr_engines.model import Box, OcrPage
 
@@ -30,9 +32,10 @@ class _Word:
 
 
 class PdfiumTextReader:
-    def __init__(self, *, dpi: int, max_side_px: int = 10_000) -> None:
+    def __init__(self, *, dpi: int, max_side_px: int = 10_000, picture_min_fraction: float = 1.1) -> None:
         self._scale = dpi / 72  # OcrPage sizes are in pixels at the rendering DPI, as the page images are
         self._max_side_px = max_side_px  # and capped on the long side the same way
+        self._picture_min_fraction = picture_min_fraction  # above 1: no page is a picture page
 
     def read_first_page(self, content: bytes) -> OcrPage | None:
         if not content.startswith(_PDF_MAGIC):
@@ -48,7 +51,7 @@ class PdfiumTextReader:
 
     def _read(self, page: pdfium.PdfPage) -> OcrPage | None:
         try:
-            if page.get_rotation() != 0:
+            if page.get_rotation() != 0 or picture_of(page, min_fraction=self._picture_min_fraction) is not None:
                 return None
             width, height = (float(v) for v in page.get_size())
             text_page = page.get_textpage()

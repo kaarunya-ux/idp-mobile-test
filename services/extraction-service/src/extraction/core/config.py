@@ -75,6 +75,9 @@ class LimitsSettings(BaseModel):
     # A rendered PDF page's long side is capped too: a card saved as a PDF rendered at 300 DPI is 2700 px, nine times
     # the pixels of the photo it came from, and OCR is slower and no better on it. A4 at 2000 px is about 170 DPI
     pdf_max_side_px: int = Field(2000, ge=500, le=10_000)
+    # A page whose largest image covers this much of it is one picture (a photo or scan saved as a PDF): read from that
+    # picture's own pixels, and its text layer ignored. e-PAN and e-Aadhaar photos and QR codes are far smaller
+    pdf_picture_min_fraction: float = Field(0.3, gt=0, le=1)
 
 
 class PrepareSettings(BaseModel):

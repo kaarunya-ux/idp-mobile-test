@@ -56,6 +56,7 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `LIMITS__MAX_IMAGE_PIXELS` | `180000000` | 1M - 1G | Images with more pixels are refused; PDF pages are scaled down to fit |
 | `LIMITS__PDF_DPI` | `300` | 72 - 600 | Resolution PDF pages are rendered at |
 | `LIMITS__PDF_MAX_SIDE_PX` | `2000` | 500–10000 | A rendered PDF page's long side is capped at this: a card saved as a PDF renders at 2700 px at 300 DPI, nine times the pixels of the photo, slower to read and no better. A4 at 2000 px is about 170 DPI |
+| `LIMITS__PDF_PICTURE_MIN_FRACTION` | `0.3` | 0–1 | A PDF page whose largest image covers this much of it is one picture (a photo or scan saved as a PDF): read from the picture's own pixels, without margins, and its text layer ignored. e-PAN and e-Aadhaar photos and QR codes are far smaller |
 | `PREPARE__ORIENTATION_MIN_CONFIDENCE` | `0.6` | 0 - 1 | Below this the page is not turned |
 | `PREPARE__MIN_CARD_AREA_FRACTION` | `0.15` | 0 - 1 | A card must cover at least this much of the photo |
 | `VERIFY__NAME_SIMILARITY` | `0.95` | 0 - 1 | Default threshold for SIMILARITY fields (IDP-03 ch. 2.7) |

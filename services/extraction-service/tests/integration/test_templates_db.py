@@ -3,8 +3,9 @@
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from extraction.pipeline.domain.standard_templates import PAN_CARD, STANDARD_TEMPLATES
+from extraction.pipeline.domain.standard_templates import AADHAAR_CARD, PAN_CARD, STANDARD_TEMPLATES
 from extraction.pipeline.infrastructure.persistence.template_catalog import SqlTemplateCatalog
 from extraction.seed import seed, standard_template_id
 from extraction.template.application.commands import (
@@ -16,6 +17,7 @@ from extraction.template.application.commands import (
 from extraction.template.application.services.template_service import TemplateService
 from extraction.template.domain.definition_json import to_json
 from extraction.template.domain.exceptions import VersionMismatchError
+from extraction.template.infrastructure.orm import TemplateOrm
 from extraction.template.infrastructure.repository import SqlTemplateUnitOfWork
 from support.template_fakes import ORG, STRANGER, Clock
 
@@ -112,3 +114,32 @@ async def test_allows_only_one_published_version_per_template_in_the_database(se
             ),
             {"t": standard_template_id("standard-pan-card")},
         )
+
+
+def _aadhaar_row(session: Session) -> TemplateOrm:
+    row = session.get(TemplateOrm, standard_template_id("standard-aadhaar-card"))
+    assert row is not None
+    return row
+
+
+async def test_publishes_a_newer_shipped_version_over_the_seeds_own_one(sessions, async_sessions) -> None:
+    seed(sessions)
+    with sessions.begin() as session:  # as a database seeded before version 2 was shipped
+        row = _aadhaar_row(session)
+        row.versions[0].number, row.current_version = 1, 1
+
+    assert seed(sessions) == 1
+    with sessions.begin() as session:
+        row = _aadhaar_row(session)
+        assert [(v.number, v.state) for v in row.versions] == [(1, "RETIRED"), (AADHAAR_CARD.version, "PUBLISHED")]
+        assert row.current_version == AADHAAR_CARD.version
+    assert seed(sessions) == 0  # nothing newer now
+
+
+async def test_never_upgrades_a_standard_template_an_admin_changed(sessions, async_sessions) -> None:
+    seed(sessions)
+    with sessions.begin() as session:
+        row = _aadhaar_row(session)
+        row.versions[0].number, row.current_version, row.versions[0].published_by = 1, 1, "platform-admin"
+
+    assert seed(sessions) == 0
