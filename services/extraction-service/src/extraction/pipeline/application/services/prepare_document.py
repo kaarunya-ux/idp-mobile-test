@@ -45,7 +45,7 @@ class PrepareDocumentService:
         for position, image in enumerate(images):
             scores = self._assessor.assess(image)
             issues = list_quality_issues(scores, self._thresholds, photographed=photographed)
-            if issues:
+            if issues and self._thresholds.rejects:
                 raise quality_error_for(issues[0], image.page_index)
             qualities.append(scores)
             self._progress.report(Stage.QUALITY_CHECK, _percent(position + 1, len(images)))

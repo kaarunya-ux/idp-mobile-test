@@ -4,6 +4,8 @@ Every body names the account the call is for: it is used only for caps, never tr
 ``X-Account-Id`` header is ignored (IDP-03 ch. 4.2). Image keys are checked to be safe relative paths (FIL-06).
 """
 
+import base64
+import binascii
 import json
 import re
 from typing import Annotated, Any, Self
@@ -19,6 +21,7 @@ _UNSAFE_KEY = re.compile(r"(^/)|(\.\.)|(\\)|[\x00-\x1f\x7f]")  # absolute, paren
 _KEY = r"^[a-z][a-z0-9_]{0,63}$"
 _DOCUMENT_TYPE = r"^[A-Z][A-Z0-9_]{0,63}$"
 _MAX_CURRENT_RESULT_BYTES = 256 * 1024
+_MAX_INLINE_BASE64 = 28 * 1024 * 1024  # 20 MiB of image as base64; the image store checks the real size limit
 
 type FieldKey = Annotated[str, StringConstraints(pattern=_KEY)]
 type DocumentTypeCode = Annotated[str, StringConstraints(pattern=_DOCUMENT_TYPE)]
@@ -36,15 +39,35 @@ class _Body(BaseModel):
 
 
 class ImageRefBody(_Body):
-    bucket: str = Field(pattern=_BUCKET)
-    key: str = Field(min_length=1, max_length=1024)
+    """``bucket`` and ``key`` of an image in storage, or ``data``: the image itself, base64 (the synchronous lane)."""
+
+    bucket: str | None = Field(None, pattern=_BUCKET)
+    key: str | None = Field(None, min_length=1, max_length=1024)
+    data: str | None = Field(None, min_length=1, max_length=_MAX_INLINE_BASE64)
 
     @field_validator("key")
     @classmethod
-    def _safe(cls, key: str) -> str:
-        if _UNSAFE_KEY.search(key):
+    def _safe(cls, key: str | None) -> str | None:
+        if key is not None and _UNSAFE_KEY.search(key):
             raise ValueError("the key must be a safe relative path")
         return key
+
+    @field_validator("data")
+    @classmethod
+    def _base64(cls, data: str | None) -> str | None:
+        if data is not None:
+            try:
+                base64.b64decode(data, validate=True)
+            except binascii.Error as exc:
+                raise ValueError("data must be base64") from exc
+        return data
+
+    @model_validator(mode="after")
+    def _one_form(self) -> Self:
+        stored = self.bucket is not None and self.key is not None
+        if stored == (self.data is not None) or (self.data is not None and (self.bucket or self.key)):
+            raise ValueError("send either bucket and key, or data")
+        return self
 
 
 class CallerBody(_Body):

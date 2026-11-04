@@ -21,6 +21,7 @@ from extraction.pipeline.infrastructure.ai.gateway_reader import (
     GatewayPageAnalyser,
     caller,
 )
+from extraction.pipeline.infrastructure.ai.inline_images import BUCKET, InlineImages
 from idp_ocr_engines.model import PageImage
 
 ACCOUNT = UUID("0192f0aa-0000-7000-8000-000000000001")
@@ -217,3 +218,19 @@ def test_waits_in_the_interactive_lane_with_the_plan_when_a_person_waits() -> No
 
     assert caller(interactive) == {"accountId": str(ACCOUNT), "priority": "INTERACTIVE", "plan": "GUEST"}
     assert caller(CONTEXT)["priority"] == "PRIORITY"
+
+
+def test_sends_a_crop_held_in_memory_inside_the_request_and_a_stored_one_by_its_key() -> None:
+    reply = {"value": "ABCPE1234F", "confidence": 0.9, "reason": "", "model": "vl", "promptVersion": "field-read.v1"}
+    images = InlineImages()
+    held = ObjectRef(bucket=BUCKET, key="acct/quick/1/crops/pan_number.png")
+    images.save_page(held, PAGE)
+    gateway, sent = _gateway(lambda _: httpx.Response(200, json=reply))
+    inline_gateway = AiGatewayClient(gateway._client, _tokens([]), images)
+    crop = AiFieldCrop(key="pan_number", label="PAN", type="ID", crop=held, readings={})
+
+    GatewayCropReader(inline_gateway).read_crop(crop, CONTEXT)
+    assert list(json.loads(sent[0].content)["crop"]) == ["data"]
+    stored = AiFieldCrop(key="pan_number", label="PAN", type="ID", crop=CONTEXT.page_refs[0], readings={})
+    GatewayCropReader(inline_gateway).read_crop(stored, CONTEXT)
+    assert json.loads(sent[1].content)["crop"] == {"bucket": "idp-derived", "key": "a/d/i/page-0.png"}

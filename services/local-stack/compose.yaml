@@ -38,8 +38,12 @@ x-extraction-env: &extraction-env
   SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
   SERVICE_AUTH__CLIENT_ID: extraction-service
   SERVICE_AUTH__CLIENT_SECRET: ${EXTRACTION_CLIENT_SECRET:-local-extraction-secret}
-  # Integration testing: a photo's lighting is noted, not refused (the service's default refuses; ADR 0010)
-  QUALITY__LIGHTING_REJECTS: ${QUALITY_LIGHTING_REJECTS:-false}
+  # Integration testing (ADR 0011): POST /api/v1/extract without a token is counted on the test account
+  QUICK__REQUIRE_TOKEN: ${QUICK_REQUIRE_TOKEN:-false}
+  QUICK__DEFAULT_ACCOUNT_ID: 0192f0aa-0000-7000-8000-00000000a001
+  # One AI call per document for the fields OCR leaves unsure (on one model server, a call per field's crop is far
+  # slower: 4 crops took 28 s, as the calls share the model); "crop" when a faster model server is in
+  AI_GATEWAY__READ_MODE: ${AI_READ_MODE:-page}
 
 x-conversion-env: &conversion-env
   <<: *common-env

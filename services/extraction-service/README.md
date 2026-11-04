@@ -41,7 +41,7 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `LOGGING__FORMAT` | `json` | `json`, `console` | `console` for readable local logs; JSON everywhere else |
 | `OCR__MODELS_DIR` | `models` | a directory | Where the OCR model files are; every path in `models.yaml` is relative to it (workers only) |
 | `OCR__MODELS_FILE` | `models.yaml` | a file | The model registry (ML-01) |
-| `OCR__THREADS` | `4` | 1-64 | Intra-op CPU threads per model session. A and B run at the same time, so on 8 cores 2 was fastest in a test |
+| `OCR__THREADS` | `2` | 1–64 | Threads per engine. Both engines read at once, and two documents can too: more threads only fight over the cores (on 8 cores, 2 threads read a card in 1.2 s, 4 in 2.2 s) |
 | `OCR__INFERENCE_TIMEOUT` | `PT60S` | 1 s - 10 min (seconds or ISO 8601) | A model run past this is stopped (ML-06) |
 | `OCR__MAX_PIXELS` | `60000000` | 1M - 1G | Pages with more pixels are refused (ML-06) |
 | `QUALITY__BLUR_MIN` | `100.0` | > 0 | Variance of the Laplacian below this is blurred |
@@ -55,6 +55,7 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `LIMITS__MAX_PAGES` | `200` | 1 - 10000 | Files with more pages are refused (`EXT-422-PAGES-001`) |
 | `LIMITS__MAX_IMAGE_PIXELS` | `180000000` | 1M - 1G | Images with more pixels are refused; PDF pages are scaled down to fit |
 | `LIMITS__PDF_DPI` | `300` | 72 - 600 | Resolution PDF pages are rendered at |
+| `LIMITS__PDF_MAX_SIDE_PX` | `2000` | 500–10000 | A rendered PDF page's long side is capped at this: a card saved as a PDF renders at 2700 px at 300 DPI, nine times the pixels of the photo, slower to read and no better. A4 at 2000 px is about 170 DPI |
 | `PREPARE__ORIENTATION_MIN_CONFIDENCE` | `0.6` | 0 - 1 | Below this the page is not turned |
 | `PREPARE__MIN_CARD_AREA_FRACTION` | `0.15` | 0 - 1 | A card must cover at least this much of the photo |
 | `VERIFY__NAME_SIMILARITY` | `0.95` | 0 - 1 | Default threshold for SIMILARITY fields (IDP-03 ch. 2.7) |
@@ -88,8 +89,9 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `AI_FALLBACK__URL`, `__API_KEY`, `__MODEL`, `__TIMEOUT`, `__MAX_EDGE_PX`, `__CONFIDENCE` | — (off) | | Local only, without the gateway: the model host directly, as the web app did |
 | `QUICK__MAX_FILE_SIZE` / `QUICK__MAX_TOTAL_SIZE` | `20MiB` / `30MiB` | | extraction-sync's `POST /api/v1/extract`: each file, and front and back together (ADR 0009) |
 | `QUICK__MAX_PAGES` / `QUICK__MAX_CONCURRENT` | `2` / `2` | 1–20 / 1–32 | A longer PDF is refused (send it as a job); documents read at once, one more answers 429 |
+| `QUICK__REQUIRE_TOKEN` / `QUICK__DEFAULT_ACCOUNT_ID` / `QUICK__DEFAULT_PLAN` | `true` / — / `CORPORATE` | | `false` lets a request without a token into extraction-sync, counted on that account and plan (integration testing, ADR 0011); a request with a token is still checked |
 | `QUICK__TIMEOUT` | `50` s | 5 s–5 min | How long the generic read waits for ai-gateway (its 5 s slot wait and 40 s generic-read, plus margin) |
-| `QUALITY__LIGHTING_REJECTS` | `true` | | A photo too dark, too bright or with glare is refused; `false` notes it in the result and reads on. PDF pages are never judged on lighting (ADR 0010) |
+| `QUALITY__REJECTS` | `false` | | `true` refuses a page that fails the quality gate (IDP-03); off, the scores are only measured and recorded, and the apps check photos where they are taken (ADR 0011). PDF pages are never judged on lighting |
 | `AI_GATEWAY__READ_MODE` | `crop` | `crop` / `page` | The AI step: each unsure field's crop alone, or every unsettled field on the whole page (ADR 0009) |
 | `AI_GATEWAY__CROP_PADDING` / `AI_GATEWAY__CROP_CONCURRENCY` | `0.5` / `3` | 0–5 / 1–10 | A crop's margin in field heights; crops of one document read at once |
 
@@ -139,10 +141,10 @@ manages standard templates). Errors are RFC 9457 problem details.
 ## The synchronous extract (`extraction-sync`, ADR 0009)
 
 `POST /api/v1/extract` on port 8003, with the person's token (permission `document:write`; the backend forwards it).
-Multipart `file` (one PDF of at most 2 pages, or the front JPG/PNG) and optional `back`. The same pipeline as a job:
+Multipart `file` (one PDF of at most 2 pages, or the front JPG/PNG/WebP) and optional `back`. The same pipeline as a job:
 the quality gate, both OCR engines, the template's fields; each field they leave unsure is cut out and read alone by
 the AI through ai-gateway's INTERACTIVE lane. A document no template matches goes to ai-gateway's `generic-read`.
-Nothing is kept. `POST /api/v1/extract/generic` takes the same and sends the document **straight to the model** (no
+No storage is used: pages and crops stay in memory for the request and go inside the ai-gateway calls that need them (ADR 0012). `POST /api/v1/extract/generic` takes the same and sends the document **straight to the model** (no
 OCR, no quality gate): any document's type and every field, through `generic-read`. The answer: `documentType`, `documentConfidence`, `readBy` (`OCR`, `OCR_AND_AI` or `AI`), `model`,
 `promptVersion`, and `fields[{key, label, type, value, confidence, status, source}]` (a table's value is
 `{headers, rows}`). Errors: 413 `EXT-413-FILE-001`, 415 `EXT-415-FILE-001`, 422 `EXT-422-FILE-001` /

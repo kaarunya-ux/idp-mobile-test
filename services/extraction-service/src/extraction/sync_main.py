@@ -47,6 +47,10 @@ def create_sync_app(
     app.state.token_verifier = TokenVerifier(settings.auth)
     app.state.quick_extract_service = service or build_quick_extract(settings, build_session_factory(settings))
     app.state.quick_admission = quick_routes.Admission(settings.quick.max_concurrent)
+    quick = settings.quick
+    app.state.quick_tokens = quick_routes.TokenPolicy(
+        required=quick.require_token, default_account_id=quick.default_account_id, default_plan=quick.default_plan
+    )
     app.include_router(health.router)
     app.include_router(quick_routes.router)
     app.mount("/metrics", make_asgi_app())

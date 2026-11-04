@@ -128,3 +128,15 @@ def test_reads_pixels_that_are_not_all_one_value_when_the_image_has_detail() -> 
     page = LOADER.load_pages(_encoded(Image.fromarray(noise), "PNG"))[0]
 
     assert np.array_equal(to_rgb_array(page), noise)
+
+
+def test_caps_a_rendered_pdf_pages_long_side() -> None:
+    loader = DocumentPageLoader(
+        max_file_bytes=5_000_000, max_pages=3, max_pixels=20_000_000, pdf_dpi=300, pdf_max_side_px=2000
+    )
+
+    a4 = loader.load_pages(_pdf(1))[0]
+    card = loader.load_pages(_pdf(1, size=(645, 404)))[0]  # a card image saved as a PDF at 96 DPI
+
+    assert max(a4.width, a4.height) == pytest.approx(2000, abs=2)
+    assert max(card.width, card.height) == pytest.approx(2000, abs=2)

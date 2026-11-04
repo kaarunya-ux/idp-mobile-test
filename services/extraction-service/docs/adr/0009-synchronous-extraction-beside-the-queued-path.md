@@ -34,7 +34,7 @@ the AI step sent the whole page with every unsettled field; a crop of one field 
    queued work, with a slot queued work may not take. When it has no slot within 5 s, or every synchronous slot here
    is taken, the route answers at once `429 EXT-429-BUSY-001`: the backend sends the document the queued way. The
    daily AI cap is a different code (`429 EXT-429-AI-001`): sending it queued won't help.
-6. **What it takes**: one PDF alone of at most `QUICK__MAX_PAGES` (2) pages, or a JPG/PNG front and optionally its
+6. **What it takes**: one PDF alone of at most `QUICK__MAX_PAGES` (2) pages, or a JPG/PNG/WebP front and optionally its
    back; each file up to 20 MiB, both up to 30 MiB, the type from the content. Quality problems answer at once with
    the pipeline's codes (`EXT-422-QUALITY-00x`), so the person can retake the photo.
 7. **Nothing is kept.** The prepared pages and crops live under `<accountId>/quick/<id>/` in the derived bucket only

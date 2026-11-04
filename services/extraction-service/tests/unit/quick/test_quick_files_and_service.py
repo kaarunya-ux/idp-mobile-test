@@ -26,6 +26,7 @@ from extraction.quick.domain.models import (
 )
 
 PDF, JPEG, PNG = b"%PDF-1.7 made up", b"\xff\xd8\xff\xe0 made up", b"\x89PNG\r\n\x1a\n made up"
+WEBP = b"RIFF\x10\x00\x00\x00WEBPVP8 made up"
 LIMITS = UploadLimits(max_file_bytes=100, max_total_bytes=150)
 CALLER = QuickCaller(account_id=UUID("0192f0aa-0000-7000-8000-000000000001"), plan="PERSONAL")
 BY_OCR = QuickResult(document_type="pan_card", document_confidence=0.97, fields=[], read_by=ReadBy.OCR)
@@ -33,13 +34,24 @@ BY_AI = QuickResult(document_type="invoice", document_confidence=0.8, fields=[],
 PAGES = [StagedFile(bucket="idp-derived", key=f"acct/quick/1/page-{n}.png") for n in range(3)]
 
 
-@pytest.mark.parametrize(("content", "kind"), [(PDF, FileKind.PDF), (JPEG, FileKind.JPEG), (PNG, FileKind.PNG)])
+@pytest.mark.parametrize(
+    ("content", "kind"), [(PDF, FileKind.PDF), (JPEG, FileKind.JPEG), (PNG, FileKind.PNG), (WEBP, FileKind.WEBP)]
+)
 def test_reads_the_kind_from_the_content(content: bytes, kind: FileKind) -> None:
     assert kind_of(content) is kind
 
 
 def test_accepts_a_front_and_back_picture() -> None:
     assert check_uploads(JPEG, PNG, LIMITS) == [FileKind.JPEG, FileKind.PNG]
+
+
+def test_accepts_a_webp_picture() -> None:
+    assert check_uploads(WEBP, None, LIMITS) == [FileKind.WEBP]
+
+
+def test_refuses_another_riff_file_such_as_a_wav() -> None:
+    with pytest.raises(FileTypeUnsupportedError):
+        check_uploads(b"RIFF\x10\x00\x00\x00WAVEfmt made up", None, LIMITS)
 
 
 def test_accepts_a_pdf_alone() -> None:

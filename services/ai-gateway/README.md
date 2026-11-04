@@ -32,7 +32,7 @@ open request (extraction-service's synchronous path). INTERACTIVE goes before bo
 may not take (`QUEUE__INTERACTIVE_RESERVED_SLOTS`), and waits at most `QUEUE__INTERACTIVE_WAIT_TIMEOUT` before
 `AIG-503-BUSY-001`, so the caller can send the work the queued way instead.
 
-Images are `{bucket, key}` in MinIO: callers never send bytes. Errors are RFC 9457 problem details:
+Images are `{bucket, key}` in MinIO, or `{data}`: the image itself, base64, for extraction's synchronous lane, which stores nothing (ADR 0004). Errors are RFC 9457 problem details:
 
 | Code | Status | Meaning |
 |---|---|---|

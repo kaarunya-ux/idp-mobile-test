@@ -1,6 +1,7 @@
 """The synchronous extract's adapters: ai-gateway's generic-read (its codes told apart), the workspace in MinIO, and
 the pipeline runner (the pipeline's result mapped, long PDFs refused, the AI on the INTERACTIVE lane)."""
 
+import base64
 import io
 import json
 from typing import Any
@@ -8,10 +9,11 @@ from uuid import UUID
 
 import httpx
 import pytest
-from botocore.exceptions import EndpointConnectionError
 from PIL import Image
 
 from extraction.pipeline.domain.exceptions import TooManyPagesError
+from extraction.pipeline.domain.jobs import ObjectRef
+from extraction.pipeline.infrastructure.ai.inline_images import BUCKET, InlineImages
 from extraction.quick.domain.exceptions import (
     AiLimitReachedError,
     AiUnavailableError,
@@ -21,7 +23,7 @@ from extraction.quick.domain.exceptions import (
 from extraction.quick.domain.models import QuickCaller, ReadBy, StagedFile, Table
 from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
 from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner, quick_result
-from extraction.quick.infrastructure.workspace import S3Workspace
+from extraction.quick.infrastructure.workspace import MemoryWorkspace
 from idp_ocr_engines.model import PageImage
 from support.pipeline_fakes import RESULT, Pipeline
 
@@ -67,7 +69,7 @@ def _reader(
 
     client = httpx.Client(base_url="http://ai-gateway:8002", transport=httpx.MockTransport(answer))
     tokens = FakeTokens()
-    return GatewayDocumentReader(client, tokens), tokens  # type: ignore[arg-type]  # a stand-in token provider
+    return GatewayDocumentReader(client, tokens, InlineImages()), tokens  # type: ignore[arg-type]  # a stand-in token provider
 
 
 def test_sends_the_pages_on_the_interactive_lane_with_the_plan_and_returns_every_field() -> None:
@@ -123,38 +125,41 @@ def test_answers_unavailable_when_the_gateway_cannot_be_reached() -> None:
 
     client = httpx.Client(base_url="http://ai-gateway:8002", transport=httpx.MockTransport(fail))
     with pytest.raises(AiUnavailableError):
-        GatewayDocumentReader(client, FakeTokens()).read(CALLER, PAGES)  # type: ignore[arg-type]  # a stand-in token provider
+        GatewayDocumentReader(client, FakeTokens(), InlineImages()).read(CALLER, PAGES)  # type: ignore[arg-type]  # a stand-in token provider
 
 
-class FakeS3:
-    def __init__(self, keys: list[str], *, down: bool = False) -> None:
-        self.keys, self.down = keys, down
-
-    def list_objects_v2(self, *, Bucket: str, Prefix: str) -> dict[str, Any]:  # noqa: N803
-        if self.down:
-            raise EndpointConnectionError(endpoint_url="http://minio")
-        return {"Contents": [{"Key": k} for k in self.keys if k.startswith(Prefix)]}
-
-    def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
-        self.keys.remove(Key)
-
-
-def test_opens_a_folder_under_the_account_and_deletes_only_what_is_in_it() -> None:
-    s3 = FakeS3([])
-    workspace = S3Workspace(s3, bucket="idp-derived")  # type: ignore[arg-type]  # a stand-in S3 client
-    folder = workspace.open(CALLER)
-    s3.keys += [f"{folder}/page-0.png", f"{folder}/crops/name.png", "other/quick/2/page-0.png"]
+def test_drops_only_the_requests_own_images_when_the_workspace_is_discarded() -> None:
+    images = InlineImages()
+    workspace = MemoryWorkspace(images)
+    folder, other = workspace.open(CALLER), workspace.open(CALLER)
+    page = PageImage(width=2, height=2, rgb=bytes(12))
+    images.save_page(ObjectRef(bucket=BUCKET, key=f"{folder}/page-0.png"), page)
+    images.save_page(ObjectRef(bucket=BUCKET, key=f"{folder}/crops/name.png"), page)
+    images.save_page(ObjectRef(bucket=BUCKET, key=f"{other}/page-0.png"), page)
 
     workspace.discard(folder)
 
     assert folder.startswith(f"{CALLER.account_id}/quick/")
-    assert s3.keys == ["other/quick/2/page-0.png"]
+    assert len(images) == 1
+    assert images.get(ObjectRef(bucket=BUCKET, key=f"{other}/page-0.png")) is not None
 
 
-def test_never_raises_when_the_folder_cannot_be_deleted() -> None:
-    workspace = S3Workspace(FakeS3([], down=True), bucket="idp-derived")  # type: ignore[arg-type]  # a stand-in S3 client
+def test_sends_a_page_held_in_memory_inside_the_request() -> None:
+    seen: list[httpx.Request] = []
+    images = InlineImages()
+    page = StagedFile(bucket=BUCKET, key="acct/quick/1/page-0.png")
+    images.save_page(ObjectRef(bucket=page.bucket, key=page.key), PageImage(width=2, height=2, rgb=bytes(12)))
 
-    workspace.discard("acct/quick/1")
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=ANSWER)
+
+    client = httpx.Client(base_url="http://ai-gateway:8002", transport=httpx.MockTransport(answer))
+    GatewayDocumentReader(client, FakeTokens(), images).read(CALLER, [page])  # type: ignore[arg-type]  # a stand-in token provider
+
+    sent = json.loads(seen[0].content)["pages"][0]
+    assert set(sent) == {"data"}  # the image itself, no storage key
+    assert base64.b64decode(sent["data"])[:3] == b"\xff\xd8\xff"  # a JPEG
 
 
 def _template_result() -> dict[str, Any]:

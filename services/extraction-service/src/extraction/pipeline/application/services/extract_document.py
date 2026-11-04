@@ -210,9 +210,7 @@ class ExtractDocumentService:
         """The result JSON (IDP-00 ch. 7.8). Raises ``OcrEngineError`` only if no engine could read the page."""
         started = self._monotonic()
         page = command.pages[0]
-        digital = command.digital_page is not None
-        # A digital PDF's text layer is exact: it is read instead of OCR (IDP-03 ch. 2.6 stage 5), as both readings
-        pages = {_DIGITAL: command.digital_page} if command.digital_page is not None else self._read_pages(page.clean)
+        pages, digital = self._read(command, page.clean)
         self._progress.report(Stage.READ, _DONE)
         first = pages[sorted(pages)[0]]
         classification, models = self._classify(command, first.text, page.clean)
@@ -252,6 +250,20 @@ class ExtractDocumentService:
             return found, []
         found, answered = self._ai.classify(self._templates, command.ai_context)
         return found, [answered] if answered else []
+
+    def _read(self, command: ExtractDocumentCommand, image: PageImage) -> tuple[dict[str, OcrPage], bool]:
+        """A digital PDF's text layer is exact: it is read instead of OCR (IDP-03 ch. 2.6 stage 5), as both readings,
+        but only when it shows which document this is (a template's keywords, or the template named in the request).
+        A scan inside a PDF can carry a few words of text, such as a header or a stamp, while the document itself is
+        an image: that layer would hide the page from OCR and leave every field to the AI. Then OCR reads the page."""
+        digital = command.digital_page
+        if digital is not None and (
+            command.template_forced
+            or classify_page(self._templates, page_text=digital.text, width=digital.width, height=digital.height)
+            is not None
+        ):
+            return {_DIGITAL: digital}, True
+        return self._read_pages(image), False
 
     def _ai_step(
         self,

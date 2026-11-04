@@ -1,14 +1,16 @@
 """The AI ports on ai-gateway (IDP-03 ch. 4.2): ``field-read`` (its single form on one field's crop, ADR 0009, and
 its batch form on the whole page, ai-gateway ADR 0002), ``classify`` and ``page-analysis``.
 
-Pages are already in the derived bucket (the worker stores them before any AI step), so only their keys are sent.
+Pages are already in the derived bucket (the worker stores them before any AI step), so only their keys are sent. In
+the synchronous lane they are held in memory (``InlineImages``) and sent inside the request instead (ADR 0012).
 The gateway owns the prompts, the model and the queue; it answers with the values and the model and prompt version
 that produced them. Every failure (busy, model down, cap used, a timeout) is ``AiUnavailableError``: fields stay
 for review, an unknown document stays unknown, and only deep analysis (whose whole job is the AI) fails the item.
 """
 
+import base64
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -18,6 +20,9 @@ from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.domain.ports import AiAnalysis, AiCallContext, AiClassification, AiFieldCrop, AiReading
 from idp_ocr_engines.model import PageImage
+
+if TYPE_CHECKING:  # the type only: the store imports Pillow, which the slim API image has not
+    from extraction.pipeline.infrastructure.ai.inline_images import InlineImages
 
 log = structlog.get_logger(__name__)
 
@@ -29,11 +34,19 @@ _READING_LENGTH = 400  # the gateway's limit for one hint
 
 
 class AiGatewayClient:
-    """One HTTP client and token for every gateway call. Sync: it runs in the Celery workers."""
+    """One HTTP client and token for every gateway call. Sync: it runs in the Celery workers and the sync process."""
 
-    def __init__(self, client: httpx.Client, tokens: ServiceTokenProvider) -> None:
+    def __init__(
+        self, client: httpx.Client, tokens: ServiceTokenProvider, inline: "InlineImages | None" = None
+    ) -> None:
         self._client = client  # base URL and timeouts are set by bootstrap
         self._tokens = tokens
+        self._inline = inline
+
+    def image(self, found: ObjectRef) -> dict[str, str]:
+        """How the gateway gets this image: its bytes in the request when it is held in memory, else its key."""
+        data = self._inline.get(found) if self._inline is not None else None
+        return {"data": base64.b64encode(data).decode()} if data is not None else ref(found)
 
     def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -75,7 +88,7 @@ class GatewayFieldReader:
     ) -> AiReading:
         body = caller(context) | {
             "documentType": document_type,
-            "pages": [ref(page) for page in context.page_refs],
+            "pages": [self._gateway.image(page) for page in context.page_refs],
             "fields": [
                 {"key": key, **({"label": context.labels[key]} if key in context.labels else {})} for key in keys
             ],
@@ -102,7 +115,7 @@ class GatewayCropReader:
     def read_crop(self, field: AiFieldCrop, context: AiCallContext) -> AiReading:
         hints = {slot: text[:_READING_LENGTH] for slot, text in field.readings.items() if text and slot in _SLOTS}
         body = caller(context) | {
-            "crop": ref(field.crop),
+            "crop": self._gateway.image(field.crop),
             "field": {"key": field.key, "label": field.label, "type": field.type},
             "readings": hints,
         }
@@ -122,7 +135,8 @@ class GatewayClassifier:
         self._gateway = gateway
 
     def classify(self, page: ObjectRef, candidates: Sequence[str], context: AiCallContext) -> AiClassification:
-        answer = self._gateway.post(CLASSIFY, caller(context) | {"page": ref(page), "candidates": list(candidates)})
+        body = caller(context) | {"page": self._gateway.image(page), "candidates": list(candidates)}
+        answer = self._gateway.post(CLASSIFY, body)
         try:
             found = answer.get("documentType")
             return AiClassification(
@@ -142,7 +156,7 @@ class GatewayPageAnalyser:
     def analyse(
         self, pages: Sequence[ObjectRef], current: Mapping[str, object], question: str | None, context: AiCallContext
     ) -> AiAnalysis:
-        body = caller(context) | {"pages": [ref(p) for p in pages], "currentResult": dict(current)}
+        body = caller(context) | {"pages": [self._gateway.image(p) for p in pages], "currentResult": dict(current)}
         if question:
             body["question"] = question
         answer = self._gateway.post(PAGE_ANALYSIS, body)

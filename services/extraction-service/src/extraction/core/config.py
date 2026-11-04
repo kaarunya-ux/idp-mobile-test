@@ -8,6 +8,7 @@ from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,7 +26,9 @@ class OcrSettings(BaseModel):
 
     models_dir: Path = Path("models")
     models_file: Path = Path("models.yaml")
-    threads: int = Field(4, ge=1, le=64)
+    # per engine: both engines read at once, and documents in parallel too, so more threads only fight over the cores
+    # (measured on 8 cores: 2 threads read a card in 1.2 s, 4 threads in 2.2 s)
+    threads: int = Field(2, ge=1, le=64)
     inference_timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=1), le=timedelta(minutes=10))
     max_pixels: int = Field(60_000_000, ge=1_000_000, le=1_000_000_000)
 
@@ -46,9 +49,9 @@ class QualitySettings(BaseModel):
     saturation_level: int = Field(250, ge=200, le=255)  # grey level from which a pixel counts as saturated
     glare_soft_edge_gradient: float = Field(15.0, gt=0)  # grey levels per pixel: softer-edged saturated blobs are glare
     require_document_edges: bool = False  # refuse a page whose edges cannot be found (see the README: off by default)
-    # Refuse a photo too dark, too bright or with glare (IDP-03); false notes it and reads on. PDF pages are never
-    # judged on lighting: their white paper reads as glare
-    lighting_rejects: bool = True
+    # Refuse a page that fails a check (IDP-03). Off by default (ADR 0011): the apps check photos where they are
+    # taken, and the server only measures and records the scores. PDF pages are never judged on lighting either way
+    rejects: bool = False
 
     @model_validator(mode="after")
     def _brightness_range_is_ordered(self) -> "QualitySettings":
@@ -69,6 +72,9 @@ class LimitsSettings(BaseModel):
     max_pages: int = Field(200, ge=1, le=10_000)
     max_image_pixels: int = Field(180_000_000, ge=1_000_000, le=1_000_000_000)
     pdf_dpi: int = Field(300, ge=72, le=600)
+    # A rendered PDF page's long side is capped too: a card saved as a PDF rendered at 300 DPI is 2700 px, nine times
+    # the pixels of the photo it came from, and OCR is slower and no better on it. A4 at 2000 px is about 170 DPI
+    pdf_max_side_px: int = Field(2000, ge=500, le=10_000)
 
 
 class PrepareSettings(BaseModel):
@@ -204,6 +210,18 @@ class QuickExtractSettings(BaseModel):
     max_concurrent: int = Field(2, ge=1, le=32)  # documents read at once; one more is told busy (429) at once
     # generic-read: ai-gateway's short wait for a slot (5 s) and its timeout (40 s), with a margin
     timeout: timedelta = Field(timedelta(seconds=50), ge=timedelta(seconds=5), le=timedelta(minutes=5))
+    # ADR 0011: false lets a request without a token in, counted on this account and plan (integration testing, where
+    # the callers have no login yet). A request that does send a token is still checked
+    require_token: bool = True
+    default_account_id: UUID | None = None
+    default_plan: Literal["GUEST", "PERSONAL", "CORPORATE"] = "CORPORATE"
+
+    @model_validator(mode="after")
+    def _tokenless_calls_need_an_account(self) -> "QuickExtractSettings":
+        if not self.require_token and self.default_account_id is None:
+            message = "QUICK__REQUIRE_TOKEN=false needs QUICK__DEFAULT_ACCOUNT_ID"
+            raise ValueError(message)
+        return self
 
 
 class ServiceAuthSettings(BaseModel):

@@ -5,18 +5,25 @@ same document) as multipart/form-data, and answers with the document's type and 
 reads only the crops of the fields the two engines left unsure, or the whole document when no template matches.
 ``POST /api/v1/extract/generic`` takes the same and sends the document straight to the AI: no OCR, any document. The
 backend chooses a route or the queued one (``ExtractionRequested``): ``EXT-429-BUSY-001`` means "send it queued".
-The token is the person's (forwarded by the backend): its account is the one whose daily AI calls are counted.
+The token is the person's (forwarded by the backend): its account is the one whose daily AI calls are counted. With
+``QUICK__REQUIRE_TOKEN=false`` (integration testing, ADR 0011) a request without one is counted on
+``QUICK__DEFAULT_ACCOUNT_ID``; a request that sends one is still checked.
 """
 
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.security import HTTPAuthorizationCredentials
 
 from extraction.core import permissions as perm
-from extraction.core.security import Principal, require_permission
+from extraction.core.errors import PermissionDeniedError, UnauthenticatedError
+from extraction.core.permissions import Plan
+from extraction.core.security import TokenVerifier, bearer, provide_token_verifier
 from extraction.quick.api import mappers
 from extraction.quick.api.schemas import QuickExtractResponse
 from extraction.quick.application.quick_extract import QuickExtractService
@@ -44,6 +51,33 @@ class Admission:
             yield
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TokenPolicy:
+    """Whether a request must bring a token, and whose account a tokenless one is counted on."""
+
+    required: bool
+    default_account_id: UUID | None = None
+    default_plan: Plan = "CORPORATE"
+
+
+async def provide_caller(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    verifier: Annotated[TokenVerifier, Depends(provide_token_verifier)],
+) -> QuickCaller:
+    policy: TokenPolicy = request.app.state.quick_tokens
+    if credentials is None:
+        if policy.required or policy.default_account_id is None:
+            raise UnauthenticatedError
+        return QuickCaller(account_id=policy.default_account_id, plan=policy.default_plan)
+    principal = await verifier.verify(credentials.credentials)
+    if perm.DOCUMENT_WRITE not in principal.permissions:
+        raise PermissionDeniedError(perm.DOCUMENT_WRITE)
+    if principal.tenant_id is None:
+        raise NoAccountError
+    return QuickCaller(account_id=principal.tenant_id, plan=principal.plan)
+
+
 def provide_quick_extract_service(request: Request) -> QuickExtractService:
     service: QuickExtractService = request.app.state.quick_extract_service  # built once in create_app (DI-03)
     return service
@@ -54,7 +88,7 @@ def provide_admission(request: Request) -> Admission:
     return admission
 
 
-type Writer = Annotated[Principal, Depends(require_permission(perm.DOCUMENT_WRITE))]
+type Caller = Annotated[QuickCaller, Depends(provide_caller)]
 type QuickExtract = Annotated[QuickExtractService, Depends(provide_quick_extract_service)]
 type Admitted = Annotated[Admission, Depends(provide_admission)]
 
@@ -66,13 +100,13 @@ type Admitted = Annotated[Admission, Depends(provide_admission)]
     responses=_ERRORS,
 )
 async def extract(
-    principal: Writer,
+    caller: Caller,
     service: QuickExtract,
     admission: Admitted,
-    file: Annotated[UploadFile, File(description="One PDF, or the front picture (JPG or PNG)")],
+    file: Annotated[UploadFile, File(description="One PDF, or the front picture (JPG, PNG or WebP)")],
     back: Annotated[UploadFile | None, File(description="Optional: the back picture of the same document")] = None,
 ) -> QuickExtractResponse:
-    caller, front, rear = await _read(principal, service, file, back)
+    front, rear = await _read(service, file, back)
     async with admission.enter():
         result = await asyncio.to_thread(service.extract, caller, front, rear)  # OCR is CPU work (ASY-01)
     return mappers.to_response(result)
@@ -85,24 +119,20 @@ async def extract(
     responses=_ERRORS,
 )
 async def extract_generic(
-    principal: Writer,
+    caller: Caller,
     service: QuickExtract,
     admission: Admitted,
-    file: Annotated[UploadFile, File(description="One PDF, or the front picture (JPG or PNG)")],
+    file: Annotated[UploadFile, File(description="One PDF, or the front picture (JPG, PNG or WebP)")],
     back: Annotated[UploadFile | None, File(description="Optional: the back picture of the same document")] = None,
 ) -> QuickExtractResponse:
-    caller, front, rear = await _read(principal, service, file, back)
+    front, rear = await _read(service, file, back)
     async with admission.enter():
         result = await asyncio.to_thread(service.extract_with_ai, caller, front, rear)  # PDF pages render (ASY-01)
     return mappers.to_response(result)
 
 
-async def _read(
-    principal: Principal, service: QuickExtractService, file: UploadFile, back: UploadFile | None
-) -> tuple[QuickCaller, bytes, bytes | None]:
-    if principal.tenant_id is None:
-        raise NoAccountError
+async def _read(service: QuickExtractService, file: UploadFile, back: UploadFile | None) -> tuple[bytes, bytes | None]:
     limit = service.max_file_bytes + 1  # one byte over is enough to refuse it; nothing larger is held in memory
     front = await file.read(limit)
     rear = await back.read(limit) if back is not None else None
-    return QuickCaller(account_id=principal.tenant_id, plan=principal.plan), front, rear
+    return front, rear

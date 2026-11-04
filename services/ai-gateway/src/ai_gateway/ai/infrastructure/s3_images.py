@@ -1,4 +1,6 @@
-"""``ImageStorePort`` on MinIO (S3 API): callers send keys, never bytes (IDP-03 ch. 4.3).
+"""``ImageStorePort`` on MinIO (S3 API): the queued lane sends keys, not bytes (IDP-03 ch. 4.3). The synchronous
+lane sends the image in the request itself (``ImageRef.data``, ADR 0004): nothing is stored, and it gets the same size,
+decoding and bomb checks.
 
 Only the buckets in ``STORAGE__ALLOWED_BUCKETS`` are read. A file over the size limit, one Pillow can't open, or a
 decompression bomb is refused with ``AIG-422-INPUT-001``; a missing key too. Each page is resized so its long side is
@@ -66,7 +68,7 @@ class S3ImageStore:
         tidy: bool = False,
     ) -> Sequence[Image]:
         for ref in refs:
-            if ref.bucket not in self._allowed:
+            if ref.data is None and ref.bucket not in self._allowed:
                 raise InputInvalidError(f"Images are not read from the bucket '{ref.bucket}'.")
         side = max_side_px or self._max_side_px
         return await asyncio.to_thread(self._load, refs, stack, side, tidy)
@@ -90,6 +92,10 @@ class S3ImageStore:
         return upright.convert("RGB")
 
     def _read(self, ref: ImageRef) -> bytes:
+        if ref.data is not None:
+            if len(ref.data) > self._max_bytes:
+                raise InputInvalidError("A page image is larger than the gateway accepts.")
+            return ref.data
         try:
             head = self._client.head_object(Bucket=ref.bucket, Key=ref.key)
             if head["ContentLength"] > self._max_bytes:

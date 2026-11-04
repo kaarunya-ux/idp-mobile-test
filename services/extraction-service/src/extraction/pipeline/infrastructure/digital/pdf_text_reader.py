@@ -30,8 +30,9 @@ class _Word:
 
 
 class PdfiumTextReader:
-    def __init__(self, *, dpi: int) -> None:
+    def __init__(self, *, dpi: int, max_side_px: int = 10_000) -> None:
         self._scale = dpi / 72  # OcrPage sizes are in pixels at the rendering DPI, as the page images are
+        self._max_side_px = max_side_px  # and capped on the long side the same way
 
     def read_first_page(self, content: bytes) -> OcrPage | None:
         if not content.startswith(_PDF_MAGIC):
@@ -72,9 +73,10 @@ class PdfiumTextReader:
             )
             for w in words
         ]
+        scale = min(self._scale, self._max_side_px / max(width, height, 1.0))
         return OcrPage(
-            width=round(width * self._scale),
-            height=round(height * self._scale),
+            width=round(width * scale),
+            height=round(height * scale),
             words=assign_line_and_block_ids(pieces),
         )
 

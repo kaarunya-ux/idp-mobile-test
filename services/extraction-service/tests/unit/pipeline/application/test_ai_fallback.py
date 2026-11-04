@@ -428,3 +428,19 @@ def test_reads_the_whole_page_when_the_command_has_no_crop_folder() -> None:
     service(_disagreeing_engines(), Progress(), ai=ai).extract(command())
 
     assert (crop_ai.crops, page_ai.asked) == ([], [("PAN_CARD", ("pan_number",))])
+
+
+def test_reads_the_page_with_ocr_when_the_text_layer_does_not_show_which_document_it_is() -> None:
+    """A scan inside a PDF with only a header line as text: the header must not hide the card from OCR."""
+    engines = {"A": FakeEngine("A", PAN_LINES), "B": FakeEngine("B", PAN_LINES)}
+    header = FakeEngine("H", [(0.05, 0.02, "Downloaded from a made-up portal on 01/01/2026")])
+    text_layer = header.read_page(command().pages[0].clean, ("en",))
+    base = command()
+
+    result = service(engines, Progress()).extract(
+        ExtractDocumentCommand(pages=base.pages, qualities=base.qualities, digital_page=text_layer)
+    )
+
+    pan = fields_of(result)["pan_number"]
+    assert (engines["A"].page_reads, engines["B"].page_reads) == (1, 1)  # OCR read the card
+    assert (result["documentType"]["code"], pan["source"]) == ("PAN_CARD", "OCR_AGREE")

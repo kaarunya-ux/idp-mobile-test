@@ -25,11 +25,14 @@ _PIXEL_CAP_MARGIN = 0.99  # rounding the rendered size up must not push a page o
 class DocumentPageLoader:
     """Implements ``PageLoaderPort`` for PDFs and the common image formats."""
 
-    def __init__(self, *, max_file_bytes: int, max_pages: int, max_pixels: int, pdf_dpi: int) -> None:
+    def __init__(
+        self, *, max_file_bytes: int, max_pages: int, max_pixels: int, pdf_dpi: int, pdf_max_side_px: int = 10_000
+    ) -> None:
         self._max_file_bytes = max_file_bytes
         self._max_pages = max_pages
         self._max_pixels = max_pixels
         self._pdf_dpi = pdf_dpi
+        self._pdf_max_side_px = pdf_max_side_px
 
     def load_pages(self, content: bytes) -> tuple[PageImage, ...]:
         if not content or len(content) > self._max_file_bytes:
@@ -81,7 +84,8 @@ class DocumentPageLoader:
             width_pt, height_pt = page.get_size()
             scale = self._pdf_dpi / _POINTS_PER_INCH
             fitting = (self._max_pixels / max(width_pt * height_pt, 1.0)) ** 0.5 * _PIXEL_CAP_MARGIN
-            scale = min(scale, fitting)  # huge pages are scaled down
+            longest = self._pdf_max_side_px / max(width_pt, height_pt, 1.0)
+            scale = min(scale, fitting, longest)  # huge pages, and pages over the long-side cap, are scaled down
             array: NDArray[np.uint8] = page.render(scale=scale).to_numpy()
         finally:
             page.close()
