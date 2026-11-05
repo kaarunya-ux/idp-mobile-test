@@ -1,6 +1,7 @@
-"""The model-first page reader: the picture goes to storage, ai-gateway's page-read answers, the answer becomes the
-document model. Made-up page content only."""
+"""The model-first page reader: the picture goes inside ai-gateway's page-read call, its answer becomes the document
+model. Made-up page content only."""
 
+import base64
 import json
 from pathlib import Path
 from typing import Any
@@ -11,24 +12,11 @@ import pytest
 
 from conversion.conversion.domain.document_model import Alignment, Table, TextBlock, TextKind
 from conversion.conversion.domain.exceptions import AiLimitReachedError, AiUnavailableError, UnreadableImageError
-from conversion.conversion.domain.ports import StepContext, UploadedObject
-from conversion.conversion.domain.values import ObjectRef
+from conversion.conversion.domain.ports import StepContext
 from conversion.conversion.infrastructure.readers.model_reader import GatewayPageReader, to_page
 
 ACCOUNT = UUID("0192f0aa-0000-7000-8000-00000000a001")
 CONTEXT = StepContext(account_id=ACCOUNT, key_prefix=f"{ACCOUNT}/job-1/item-1")
-
-
-class Storage:
-    def __init__(self) -> None:
-        self.uploads: list[tuple[str, str, str]] = []
-
-    def upload(self, source: Path, ref: ObjectRef, content_type: str) -> UploadedObject:
-        self.uploads.append((ref.bucket, ref.key, content_type))
-        return UploadedObject(size=source.stat().st_size, sha256="0" * 64)
-
-    def download(self, ref: ObjectRef, destination: Path) -> None:
-        raise AssertionError("not used")
 
 
 class Tokens:
@@ -59,7 +47,7 @@ ANSWER: dict[str, Any] = {
 }
 
 
-def _reader(answer: httpx.Response, tokens: Tokens | None = None) -> tuple[GatewayPageReader, Storage, list]:
+def _reader(answer: httpx.Response, tokens: Tokens | None = None) -> tuple[GatewayPageReader, list]:
     sent: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -67,8 +55,7 @@ def _reader(answer: httpx.Response, tokens: Tokens | None = None) -> tuple[Gatew
         return answer
 
     client = httpx.Client(base_url="http://ai-gateway:8002", transport=httpx.MockTransport(handler))
-    storage = Storage()
-    return GatewayPageReader(client, tokens or Tokens(), storage, bucket="idp-derived"), storage, sent
+    return GatewayPageReader(client, tokens or Tokens()), sent
 
 
 def _picture(tmp_path: Path) -> Path:
@@ -77,16 +64,16 @@ def _picture(tmp_path: Path) -> Path:
     return picture
 
 
-def test_uploads_the_page_then_reads_it_through_the_gateway(tmp_path: Path) -> None:
-    reader, storage, sent = _reader(httpx.Response(200, json=ANSWER))
+def test_sends_the_page_picture_inside_the_call_and_reads_the_answer(tmp_path: Path) -> None:
+    reader, sent = _reader(httpx.Response(200, json=ANSWER))
+    picture = _picture(tmp_path)
 
-    page = reader.read_page(_picture(tmp_path), 1, CONTEXT)
+    page = reader.read_page(picture, 1, CONTEXT)
 
-    assert storage.uploads == [("idp-derived", f"{ACCOUNT}/job-1/item-1/model-pages/page-0001.png", "image/png")]
     body = json.loads(sent[0].content)
     assert sent[0].url.path == "/internal/v1/ai/page-read"
     assert sent[0].headers["Authorization"] == "Bearer service-token"
-    assert body == {"accountId": str(ACCOUNT), "page": {"bucket": "idp-derived", "key": storage.uploads[0][1]}}
+    assert body == {"accountId": str(ACCOUNT), "page": {"data": base64.b64encode(picture.read_bytes()).decode()}}
     assert len(page.blocks) == 5
 
 
@@ -130,7 +117,7 @@ def test_leaves_out_picture_text_empty_blocks_and_empty_tables() -> None:
     ],
 )
 def test_turns_gateway_refusals_into_conversion_errors(tmp_path: Path, response: httpx.Response, error: type) -> None:
-    reader, _, _ = _reader(response)
+    reader, _ = _reader(response)
 
     with pytest.raises(error):
         reader.read_page(_picture(tmp_path), 1, CONTEXT)
@@ -138,7 +125,7 @@ def test_turns_gateway_refusals_into_conversion_errors(tmp_path: Path, response:
 
 def test_drops_the_token_when_the_gateway_refuses_it(tmp_path: Path) -> None:
     tokens = Tokens()
-    reader, _, _ = _reader(httpx.Response(401), tokens)
+    reader, _ = _reader(httpx.Response(401), tokens)
 
     with pytest.raises(AiUnavailableError):
         reader.read_page(_picture(tmp_path), 1, CONTEXT)
@@ -150,7 +137,7 @@ def test_reports_ai_unavailable_when_the_gateway_cannot_be_reached(tmp_path: Pat
         raise httpx.ConnectError("refused")
 
     client = httpx.Client(base_url="http://ai-gateway:8002", transport=httpx.MockTransport(refuse))
-    reader = GatewayPageReader(client, Tokens(), Storage(), bucket="idp-derived")
+    reader = GatewayPageReader(client, Tokens())
 
     with pytest.raises(AiUnavailableError):
         reader.read_page(_picture(tmp_path), 1, CONTEXT)

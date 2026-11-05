@@ -104,6 +104,7 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `CRYPTO__PRIVATE_KEY` | — (none) | RSA private key, PEM | Decrypts edit-plan passwords Java encrypted with our public key. Without it, plans with passwords fail with `CNV-422-PLAN-001` |
 | `AI_GATEWAY__URL` | — (off) | `http://ai-gateway:8002` | The scanned routes (scan or photo to Word, Excel or CSV) read pages through ai-gateway's `page-read`. Unset: they answer `CNV-422-ROUTE-001` |
 | `AI_GATEWAY__TIMEOUT` / `__RENDER_DPI` / `__MAX_PAGES` | `240` s / `200` / `50` | | Per page; the DPI a scanned PDF page is drawn at; pages read per document |
+| `AI_GATEWAY__RENDER_MAX_SIDE_PX` / `__PAGE_CONCURRENCY` | `2048` / `4` | 512–8192 / 1–32 | A drawn page's long side is capped (ai-gateway shrinks pages to 2048 px anyway); pages read at the same time (the page model's parallel slots). The page picture goes inside the page-read call: the scanned routes use no storage for it |
 | `SERVICE_AUTH__TOKEN_URL` / `__CLIENT_SECRET` / `__CLIENT_ID` / `__AUDIENCE` | — / — / `conversion-service` / `ai-gateway` | | Keycloak client credentials for ai-gateway; needed with `AI_GATEWAY__URL` |
 | `PREVIEW__MAX_SIDE_PX` | `400` | 64–2000 | Longest side of a page thumbnail; an A4 page comes out 283 × 400 |
 | `PREVIEW__JPEG_QUALITY` | `75` | 30–95 | JPEG quality of thumbnails |

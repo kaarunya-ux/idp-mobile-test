@@ -1077,3 +1077,22 @@ cd ../local-stack && make build && make up && make check   # includes a photo to
 ```
 
 Result here: 475 unit tests pass, 92% coverage; one runs a scanned PDF to Word through the real Word writer.
+
+
+## Entry 12: Scanned pages read four at a time, with no storage (2026-11-05)
+
+**Goal:** a 3-page scanned PDF took 49 s to Word (121 s on a cold model) on the Qwen3.6-35B: pages were read one after
+another, about 15 s each (the model writes about 400 tokens a page at about 30 tokens a second).
+
+### What we did
+
+- `ModelFirstOcrConverter` reads `AI_GATEWAY__PAGE_CONCURRENCY` (4) pages at once in worker threads, in page order.
+- A scanned PDF page is drawn no larger than `AI_GATEWAY__RENDER_MAX_SIDE_PX` (2048): a scan saved as a 1700 x 2200 pt
+  page had been drawn at 4723 x 6112 px (29 MP), for ai-gateway to shrink to 2048 px.
+- `GatewayPageReader` sends the page picture inside the call (`{"data": ...}`, ai-gateway ADR 0004) instead of
+  uploading it to MinIO: no storage for the reading step, and no failure when the backend's MinIO is down.
+
+### Check it
+
+The 3-page scanned PDF to Word, the model warm: one page at a time 44.3 s, four at a time 25.2 s. Tests for the order,
+the concurrency and the long-side cap; the reader tests send the picture inline.

@@ -72,7 +72,7 @@ def build_converter_registry(settings: Settings, storage: ObjectStoragePort | No
     limits, office = settings.limits, settings.office
     return ConverterRegistry(
         [
-            *_scanned_reader(settings, storage),
+            *_scanned_reader(settings),
             PillowImageFormatConverter(max_pixels=limits.max_image_pixels),
             PdfiumPageRenderer(max_pages=limits.max_pages, max_side_px=limits.max_render_side_px),
             Img2PdfImageWrapper(max_pixels=limits.max_image_pixels),
@@ -91,21 +91,25 @@ def build_converter_registry(settings: Settings, storage: ObjectStoragePort | No
     )
 
 
-def _scanned_reader(settings: Settings, storage: ObjectStoragePort | None) -> list[ModelFirstOcrConverter]:
+def _scanned_reader(settings: Settings) -> list[ModelFirstOcrConverter]:
+    """The scanned routes' reader: ai-gateway and this service's login to it. No storage: each page picture goes
+    inside the page-read call."""
     gateway, auth = settings.ai_gateway, settings.service_auth
-    if gateway.url is None or auth is None or storage is None or settings.storage is None:
+    if gateway.url is None or auth is None:
         return []
     tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
     seconds = gateway.timeout.total_seconds()
     client = httpx.Client(
         base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
     )
-    reader = GatewayPageReader(client, tokens, storage, bucket=settings.storage.bucket_derived)
+    reader = GatewayPageReader(client, tokens)
     return [
         ModelFirstOcrConverter(
             reader,
             render_dpi=gateway.render_dpi,
+            render_max_side_px=gateway.render_max_side_px,
             max_pages=gateway.max_pages,
+            concurrency=gateway.page_concurrency,
             max_pixels=settings.limits.max_image_pixels,
         )
     ]

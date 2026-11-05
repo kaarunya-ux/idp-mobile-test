@@ -5,10 +5,14 @@ Each page is drawn as a picture (a scanned PDF at ``AI_GATEWAY__RENDER_DPI``; a 
 read by a ``PageReaderPort``: today the model-first reader through ai-gateway. The writers that follow (Word, Excel,
 CSV) are the ones the digital routes already use. Registered only when ai-gateway is configured; without it these
 routes keep answering ``CNV-422-ROUTE-001``.
+
+Pages are read ``concurrency`` at a time, in worker threads (the reader blocks on ai-gateway), and kept in page order.
+The model writes most of each page's time; the page model serves several pages at once.
 """
 
 import tempfile
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -24,8 +28,20 @@ _PDF_MAGIC = b"%PDF"
 
 
 class ModelFirstOcrConverter:
-    def __init__(self, reader: PageReaderPort, *, render_dpi: int, max_pages: int, max_pixels: int) -> None:
+    # every collaborator is a port or a number
+    def __init__(
+        self,
+        reader: PageReaderPort,
+        *,
+        render_dpi: int,
+        max_pages: int,
+        max_pixels: int,
+        render_max_side_px: int = 8192,
+        concurrency: int = 1,
+    ) -> None:
         self._reader = reader
+        self._render_max_side_px = render_max_side_px
+        self._concurrency = concurrency
         self._render_dpi = render_dpi
         self._max_pages = max_pages
         self._max_pixels = max_pixels
@@ -40,9 +56,13 @@ class ModelFirstOcrConverter:
             raise OcrNotAvailableError
         with tempfile.TemporaryDirectory(prefix="ocr-pages-") as scratch:
             pictures = list(self._pictures(request, Path(scratch)))
-            pages = tuple(
-                self._reader.read_page(picture, number, context) for number, picture in enumerate(pictures, 1)
-            )
+            with ThreadPoolExecutor(max_workers=max(1, min(self._concurrency, len(pictures)))) as pool:
+                pages = tuple(
+                    pool.map(
+                        lambda numbered: self._reader.read_page(numbered[1], numbered[0], context),
+                        enumerate(pictures, 1),
+                    )
+                )
         output = model_path(request.output_dir, request.inputs[0])
         write_model(DocumentModel(pages=pages), output)
         return StepResult(outputs=(output,), page_count=len(pages))
@@ -67,7 +87,9 @@ class ModelFirstOcrConverter:
             for index in range_.select(total) if range_ else range(total):
                 page = document[index]
                 try:
-                    image: Image.Image = page.render(scale=self._render_dpi / POINTS_PER_INCH).to_pil()
+                    longest = self._render_max_side_px / max(*page.get_size(), 1.0)  # in points
+                    scale = min(self._render_dpi / POINTS_PER_INCH, longest)
+                    image: Image.Image = page.render(scale=scale).to_pil()
                 finally:
                     page.close()
                 output = folder / f"{source.stem}-page-{index + 1:04d}.png"
@@ -80,6 +102,7 @@ class ModelFirstOcrConverter:
                 if image.width * image.height > self._max_pixels:
                     raise LimitExceededError("The image has more pixels than this service accepts.")
                 upright = ImageOps.exif_transpose(image).convert("RGB")
+                upright.thumbnail((self._render_max_side_px, self._render_max_side_px))
         except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
             raise UnreadableImageError from exc
         output = folder / f"{source.stem}.png"
