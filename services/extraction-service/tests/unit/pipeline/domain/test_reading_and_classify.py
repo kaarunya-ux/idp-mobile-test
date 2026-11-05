@@ -4,6 +4,7 @@ from extraction.pipeline.domain.classify import classify_page
 from extraction.pipeline.domain.reading import field_box, read_field, shift_for
 from extraction.pipeline.domain.standard_templates import AADHAAR_CARD, PAN_CARD, STANDARD_TEMPLATES
 from idp_ocr_engines.model import Box, OcrWord
+from support.hindi_fields import ADDRESS_HI
 
 TODAY = date(2026, 10, 21)
 
@@ -119,7 +120,7 @@ def test_the_address_leaves_out_text_already_read_as_another_field() -> None:
 
 def test_the_english_address_leaves_out_hindi_pieces_and_the_hindi_address_leaves_out_english_ones() -> None:
     english = next(f for f in AADHAAR_CARD.fields if f.key == "address")
-    hindi = next(f for f in AADHAAR_CARD.fields if f.key == "address_hi")
+    hindi = ADDRESS_HI
     words = [
         word("पत्ता:", 0.0, 0.1, 0),  # the Hindi caption
         word("Address:", 0.5, 0.1, 0),
@@ -187,7 +188,7 @@ def test_a_name_above_the_dob_line_ignores_text_in_another_card_on_the_same_rows
 
 
 def test_a_short_caption_is_not_taken_for_sideways_text_but_a_tall_narrow_piece_is() -> None:
-    address = next(f for f in AADHAAR_CARD.fields if f.key == "address_hi")
+    address = ADDRESS_HI
     caption = OcrWord(
         text="पता:", box=Box(x=0.52, y=0.2, width=0.02, height=0.03), confidence=0.9, line_id=0, block_id=0
     )

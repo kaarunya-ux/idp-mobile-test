@@ -10,6 +10,7 @@ import pytest
 
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.application.services.extract_document import AiAssist, AiCrops, ExtractDocumentService
+from extraction.pipeline.domain.custom_template import CustomField, custom_template
 from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.exceptions import AiUnavailableError
 from extraction.pipeline.domain.jobs import ObjectRef
@@ -428,3 +429,45 @@ def test_reads_the_whole_page_when_the_command_has_no_crop_folder() -> None:
     service(_disagreeing_engines(), Progress(), ai=ai).extract(command())
 
     assert (crop_ai.crops, page_ai.asked) == ([], [("PAN_CARD", ("pan_number",))])
+
+
+def test_reads_the_page_with_ocr_when_the_text_layer_does_not_show_which_document_it_is() -> None:
+    """A scan inside a PDF with only a header line as text: the header must not hide the card from OCR."""
+    engines = {"A": FakeEngine("A", PAN_LINES), "B": FakeEngine("B", PAN_LINES)}
+    header = FakeEngine("H", [(0.05, 0.02, "Downloaded from a made-up portal on 01/01/2026")])
+    text_layer = header.read_page(command().pages[0].clean, ("en",))
+    base = command()
+
+    result = service(engines, Progress()).extract(
+        ExtractDocumentCommand(pages=base.pages, qualities=base.qualities, digital_page=text_layer)
+    )
+
+    pan = fields_of(result)["pan_number"]
+    assert (engines["A"].page_reads, engines["B"].page_reads) == (1, 1)  # OCR read the card
+    assert (result["documentType"]["code"], pan["source"]) == ("PAN_CARD", "OCR_AGREE")
+
+
+def test_asks_the_ai_for_every_unsettled_custom_key_with_its_label_even_past_the_usual_limit() -> None:
+    keys = [CustomField(key=f"key_{n}", label=f"Missing label {n}") for n in range(12)]  # none printed on the card
+    template = custom_template([CustomField(key="pan", label="Permanent Account Number Card"), *keys])
+    ai = FakeAi({"key_0": "made up"})
+    engines = {"A": FakeEngine("A", PAN_LINES), "B": FakeEngine("B", PAN_LINES)}
+    base = command()
+
+    result = ExtractDocumentService(
+        engines=engines,
+        templates=[template],
+        thresholds=Thresholds(name_similarity=0.95, review_confidence=0.85),
+        clock=FixedClock(),
+        pipeline_version="0.1.0",
+        progress=Progress(),
+        ai=AiAssist(reader=ai, confidence=0.9, max_fields=10),
+    ).extract(
+        ExtractDocumentCommand(pages=base.pages, qualities=base.qualities, ai_context=CONTEXT, template_forced=True)
+    )
+
+    fields = fields_of(result)
+    assert (fields["pan"]["value"], fields["pan"]["source"]) == ("ABCPE1234F", "OCR_AGREE")
+    assert ai.asked == [("CUSTOM", tuple(k.key for k in keys))]  # 12 unsettled, over max_fields: still asked
+    assert ai.contexts[0].labels["key_3"] == "Missing label 3"
+    assert (fields["key_0"]["value"], fields["key_0"]["source"]) == ("made up", "AI")

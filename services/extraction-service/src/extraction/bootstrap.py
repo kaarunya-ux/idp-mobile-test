@@ -41,6 +41,8 @@ from extraction.pipeline.infrastructure.ai.gateway_reader import (
     GatewayFieldReader,
     GatewayPageAnalyser,
 )
+from extraction.pipeline.infrastructure.ai.inline_images import BUCKET as INLINE_BUCKET
+from extraction.pipeline.infrastructure.ai.inline_images import InlineImages
 from extraction.pipeline.infrastructure.ai.vision_reader import VisionModelFieldReader
 from extraction.pipeline.infrastructure.digital.office_to_pdf import LibreOfficePdfConverter
 from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
@@ -60,7 +62,7 @@ from extraction.quick.application.quick_extract import QuickExtractService
 from extraction.quick.domain.models import UploadLimits
 from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
 from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner
-from extraction.quick.infrastructure.workspace import S3Workspace
+from extraction.quick.infrastructure.workspace import MemoryWorkspace
 from extraction.template.domain.definition_json import parse_definition
 from idp_ocr_engines import ModelRegistry, RuntimeLimits
 from idp_ocr_engines.engines.ppocr import PpOcrEngine, PpOcrModels
@@ -70,8 +72,10 @@ if TYPE_CHECKING:  # boto3-stubs is a dev dependency: type hints only, not in th
     from mypy_boto3_s3 import S3Client
 
 STALE_MARGIN = timedelta(minutes=2)  # a RUNNING item untouched this long past the task's hard limit is orphaned
-# Slot A reads English with PP-OCRv6; slot B reads English and Hindi with PP-OCRv5 (Sumukh's benchmark choice).
-# Slot C is empty while Indra is parked (extraction-service ADR 0002).
+# Slot A reads English with PP-OCRv6; slot B English and Hindi with PP-OCRv5 (Sumukh's benchmark choice). The product
+# extracts English only, but B keeps its Devanagari model: Aadhaar lines mix the scripts ("जन्म तिथि/DOB: ..."), and
+# English-only B lost the date of birth and two more fields on a bilingual card (build log, entry 15). Slot C is empty
+# while Indra is parked (ADR 0002).
 _ENGINE_LANGUAGES = {"A": ("en",), "B": ("en", "hi")}
 
 
@@ -86,7 +90,12 @@ class PipelineServices:
     """``PipelineFactory``: the engines and models, loaded once; services built per run."""
 
     def __init__(
-        self, settings: Settings, clock: Clock, catalog: SqlTemplateCatalog, pages: PageImageStorePort | None = None
+        self,
+        settings: Settings,
+        clock: Clock,
+        catalog: SqlTemplateCatalog,
+        pages: PageImageStorePort | None = None,
+        inline: InlineImages | None = None,
     ) -> None:
         self._catalog = catalog
         registry = ModelRegistry.from_file(Path(settings.ocr.models_file))
@@ -98,6 +107,8 @@ class PipelineServices:
             max_pages=settings.limits.max_pages,
             max_pixels=settings.limits.max_image_pixels,
             pdf_dpi=settings.limits.pdf_dpi,
+            pdf_max_side_px=settings.limits.pdf_max_side_px,
+            pdf_picture_min_fraction=settings.limits.pdf_picture_min_fraction,
         )
         quality = settings.quality
         self._assessor = OpenCvQualityAssessor(
@@ -119,11 +130,14 @@ class PipelineServices:
             glare_max=quality.glare_max,
             min_short_side_px=quality.min_short_side_px,
             require_document_edges=quality.require_document_edges,
-            lighting_rejects=quality.lighting_rejects,
+            rejects=quality.rejects,
         )
-        self._gateway = build_gateway(settings)
+        self._gateway = build_gateway(settings, inline)
         self._ai = build_ai_assist(settings, self._gateway, pages)
-        self._digital = PdfiumTextReader(dpi=settings.limits.pdf_dpi)
+        pdf = settings.limits
+        self._digital = PdfiumTextReader(
+            dpi=pdf.pdf_dpi, max_side_px=pdf.pdf_max_side_px, picture_min_fraction=pdf.pdf_picture_min_fraction
+        )
 
     @property
     def loader(self) -> DocumentPageLoader:
@@ -190,8 +204,9 @@ def _engines(settings: Settings, registry: ModelRegistry, limits: RuntimeLimits)
     }
 
 
-def build_gateway(settings: Settings) -> AiGatewayClient | None:
-    """The ai-gateway client, or None when ``AI_GATEWAY__URL`` is unset."""
+def build_gateway(settings: Settings, inline: InlineImages | None = None) -> AiGatewayClient | None:
+    """The ai-gateway client, or None when ``AI_GATEWAY__URL`` is unset. With ``inline`` (the synchronous lane),
+    images held in memory go inside the request."""
     gateway = settings.ai_gateway
     if gateway.url is None:
         return None
@@ -201,7 +216,7 @@ def build_gateway(settings: Settings) -> AiGatewayClient | None:
     client = httpx.Client(
         base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
     )
-    return AiGatewayClient(client, tokens)
+    return AiGatewayClient(client, tokens, inline)
 
 
 def build_ai_assist(
@@ -314,24 +329,24 @@ def build_worker_services(settings: Settings, sessions: SessionFactory) -> Worke
 
 def build_quick_extract(settings: Settings, sessions: SessionFactory) -> QuickExtractService:
     """The synchronous extract (ADR 0009), for the ``extraction-sync`` process: the pipeline with its OCR engines
-    (loaded here, once), storage for the call's pages and crops, and ai-gateway for the crops and the generic read."""
-    storage = settings.require_storage()
+    (loaded here, once), and ai-gateway for the crops and the generic read. No storage (ADR 0012): the request's pages
+    and crops are held in memory and sent inside the gateway calls."""
     gateway = settings.ai_gateway
     if gateway.url is None:
         raise MissingSettingsError("extraction-sync needs AI_GATEWAY__URL")
     auth = _required_service_auth(settings)
-    objects = S3ObjectStorage(build_s3_client(storage), max_input_size=int(storage.max_input_size))
-    pipeline = PipelineServices(settings, SystemClock(), SqlTemplateCatalog(sessions), pages=objects)
+    inline = InlineImages()
+    pipeline = PipelineServices(settings, SystemClock(), SqlTemplateCatalog(sessions), pages=inline, inline=inline)
     tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
     seconds = settings.quick.timeout.total_seconds()
     client = httpx.Client(base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=2.0))
     quick = settings.quick
     return QuickExtractService(
-        workspace=S3Workspace(build_s3_client(storage), bucket=storage.bucket_derived),
+        workspace=MemoryWorkspace(inline),
         pipeline=PipelineDocumentRunner(
-            pipeline, pipeline.loader, objects, bucket=storage.bucket_derived, max_pages=quick.max_pages
+            pipeline, pipeline.loader, inline, bucket=INLINE_BUCKET, max_pages=quick.max_pages
         ),
-        reader=GatewayDocumentReader(client, tokens),
+        reader=GatewayDocumentReader(client, tokens, inline),
         limits=UploadLimits(max_file_bytes=int(quick.max_file_size), max_total_bytes=int(quick.max_total_size)),
     )
 

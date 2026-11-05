@@ -5,8 +5,10 @@ The thresholds come from settings, never from literals (ML-07).
 
 Brightness and glare are about the light a photo was taken in. A page rendered from a PDF (or an Office file turned
 into one) had no light: its white paper reads as glare and overexposure, so those checks are skipped for it, and only
-sharpness and resolution are judged. ``lighting_rejects`` off notes a photo's lighting in the result (the scores are
-kept) instead of refusing it.
+sharpness and resolution are judged.
+
+``rejects`` off (the service's default, ADR 0011) turns the gate into a measurement: the scores are kept in the
+result, and nothing is refused. Photos are checked where they are taken, in the apps.
 """
 
 from dataclasses import dataclass
@@ -34,7 +36,7 @@ class QualityThresholds:
     glare_max: float
     min_short_side_px: int
     require_document_edges: bool
-    lighting_rejects: bool = True  # a photo too dark, too bright or with glare is refused (QUALITY__LIGHTING_REJECTS)
+    rejects: bool = True  # a page that fails a check is refused; off: measured and recorded only (QUALITY__REJECTS)
 
 
 class QualityIssue(StrEnum):
@@ -54,7 +56,7 @@ def list_quality_issues(
     """Every check the page fails, in code order; an empty result means the page passes. ``photographed`` is False
     for a page rendered from a PDF: no lighting checks then."""
     issues: list[QualityIssue] = []
-    lighting = photographed and thresholds.lighting_rejects
+    lighting = photographed
     if scores.blur < thresholds.blur_min:
         issues.append(QualityIssue.BLURRED)
     if lighting and scores.brightness < thresholds.brightness_min:

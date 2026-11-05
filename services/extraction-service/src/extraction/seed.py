@@ -1,7 +1,9 @@
 """Store the standard templates and document types: ``python -m extraction.seed`` (after ``alembic upgrade head``).
 
-Safe to run again: anything already stored is left alone, so a template a platform admin changed is never reset.
-Each standard template keeps a fixed id (derived from its name), so results and environments agree on it.
+Safe to run again: what is stored is kept. A standard template the service ships a newer version of (its ``version``
+in ``standard_templates``) is published as that version and the old one retired, but only while every version stored
+was the seed's own: a template a platform admin changed is never touched. Each standard template keeps a fixed id
+(derived from its name), so results and environments agree on it.
 """
 
 import uuid
@@ -15,6 +17,7 @@ from extraction.core.db import SessionFactory, create_db_engine, create_session_
 from extraction.core.ids import new_id
 from extraction.core.logging import configure_logging
 from extraction.pipeline.domain.standard_templates import STANDARD_TEMPLATES
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.template.domain.definition_json import to_json
 from extraction.template.infrastructure.orm import DocumentTypeOrm, TemplateOrm, TemplateVersionOrm
 
@@ -56,7 +59,9 @@ def seed(sessions: SessionFactory) -> int:
                 added += 1
         for template in STANDARD_TEMPLATES:
             template_id = standard_template_id(template.template_id)
-            if session.get(TemplateOrm, template_id) is not None:
+            stored = session.get(TemplateOrm, template_id)
+            if stored is not None:
+                added += _upgrade(stored, template, now)
                 continue
             row = TemplateOrm(
                 id=template_id,
@@ -64,7 +69,7 @@ def seed(sessions: SessionFactory) -> int:
                 document_type_code=template.document_type,
                 name=_DOCUMENT_TYPES.get(template.document_type, (template.template_id, ""))[0],
                 description=None,
-                current_version=1,
+                current_version=template.version,
                 status="ACTIVE",
                 created_by=_SEEDER,
                 version=1,
@@ -74,7 +79,7 @@ def seed(sessions: SessionFactory) -> int:
             row.versions.append(
                 TemplateVersionOrm(
                     id=new_id(),
-                    number=1,
+                    number=template.version,
                     state="PUBLISHED",
                     definition=to_json(template),
                     created_at=now,
@@ -86,6 +91,35 @@ def seed(sessions: SessionFactory) -> int:
             session.add(row)
             added += 1
     return added
+
+
+def _upgrade(stored: TemplateOrm, template: TemplateDefinition, now: datetime) -> int:
+    """Publish the shipped version over the stored one when it is newer and nobody but the seed wrote any version.
+    Returns 1 when a version was added."""
+    current = stored.current_version
+    if current is None or template.version <= current or any(v.published_by != _SEEDER for v in stored.versions):
+        return 0
+    for version in stored.versions:
+        if version.state == "PUBLISHED":
+            version.state = "RETIRED"
+    number = max(v.number for v in stored.versions) + 1
+    stored.versions.append(
+        TemplateVersionOrm(
+            id=new_id(),
+            number=number,
+            state="PUBLISHED",
+            definition=to_json(template),
+            created_at=now,
+            published_at=now,
+            published_by=_SEEDER,
+            publish_reason=f"Standard template version {template.version} shipped with the service",
+        )
+    )
+    stored.current_version = number
+    stored.version += 1
+    stored.updated_at = now
+    log.info("standard_template_upgraded", template=template.template_id, version=number)
+    return 1
 
 
 def main() -> None:

@@ -114,3 +114,16 @@ async def test_answers_503_when_storage_is_unreachable() -> None:
 
     with pytest.raises(DependencyUnavailableError):
         await _store(s3).load([ImageRef(bucket="idp-derived", key="x")], stack=False)
+
+
+async def test_reads_an_image_sent_in_the_request_without_touching_storage() -> None:
+    s3 = FakeS3({}, error=EndpointConnectionError(endpoint_url="http://minio"))  # storage down: it isn't needed
+
+    images = await _store(s3).load([ImageRef(data=_png(2560, 1600))], stack=False)
+
+    assert _size(images[0].data) == (1280, 800)
+
+
+async def test_refuses_an_image_sent_in_the_request_when_it_is_too_large() -> None:
+    with pytest.raises(InputInvalidError):
+        await _store(FakeS3({}), max_bytes=5).load([ImageRef(data=_png(10, 10))], stack=False)

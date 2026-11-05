@@ -6,10 +6,13 @@ from uuid import UUID
 
 import pytest
 
+from extraction.pipeline.domain.custom_template import CUSTOM_SCOPE, CustomField
 from extraction.pipeline.domain.exceptions import ImageBlurredError
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.application.quick_extract import QuickExtractService
 from extraction.quick.domain.exceptions import (
     BusyError,
+    FieldsInvalidError,
     FileTooLargeError,
     FileTypeUnsupportedError,
     FileUnreadableError,
@@ -26,6 +29,7 @@ from extraction.quick.domain.models import (
 )
 
 PDF, JPEG, PNG = b"%PDF-1.7 made up", b"\xff\xd8\xff\xe0 made up", b"\x89PNG\r\n\x1a\n made up"
+WEBP = b"RIFF\x10\x00\x00\x00WEBPVP8 made up"
 LIMITS = UploadLimits(max_file_bytes=100, max_total_bytes=150)
 CALLER = QuickCaller(account_id=UUID("0192f0aa-0000-7000-8000-000000000001"), plan="PERSONAL")
 BY_OCR = QuickResult(document_type="pan_card", document_confidence=0.97, fields=[], read_by=ReadBy.OCR)
@@ -33,13 +37,24 @@ BY_AI = QuickResult(document_type="invoice", document_confidence=0.8, fields=[],
 PAGES = [StagedFile(bucket="idp-derived", key=f"acct/quick/1/page-{n}.png") for n in range(3)]
 
 
-@pytest.mark.parametrize(("content", "kind"), [(PDF, FileKind.PDF), (JPEG, FileKind.JPEG), (PNG, FileKind.PNG)])
+@pytest.mark.parametrize(
+    ("content", "kind"), [(PDF, FileKind.PDF), (JPEG, FileKind.JPEG), (PNG, FileKind.PNG), (WEBP, FileKind.WEBP)]
+)
 def test_reads_the_kind_from_the_content(content: bytes, kind: FileKind) -> None:
     assert kind_of(content) is kind
 
 
 def test_accepts_a_front_and_back_picture() -> None:
     assert check_uploads(JPEG, PNG, LIMITS) == [FileKind.JPEG, FileKind.PNG]
+
+
+def test_accepts_a_webp_picture() -> None:
+    assert check_uploads(WEBP, None, LIMITS) == [FileKind.WEBP]
+
+
+def test_refuses_another_riff_file_such_as_a_wav() -> None:
+    with pytest.raises(FileTypeUnsupportedError):
+        check_uploads(b"RIFF\x10\x00\x00\x00WAVEfmt made up", None, LIMITS)
 
 
 def test_accepts_a_pdf_alone() -> None:
@@ -80,9 +95,13 @@ class FakePipeline:
     def __init__(self, result: QuickResult | None, error: Exception | None = None) -> None:
         self.result, self.error = result, error
         self.runs: list[int] = []
+        self.templates: list[TemplateDefinition | None] = []
 
-    def run(self, caller: QuickCaller, contents: Sequence[bytes], folder: str) -> PipelineOutcome:
+    def run(
+        self, caller: QuickCaller, contents: Sequence[bytes], folder: str, template: TemplateDefinition | None = None
+    ) -> PipelineOutcome:
         self.runs.append(len(contents))
+        self.templates.append(template)
         if self.error is not None:
             raise self.error
         return PipelineOutcome(result=self.result, pages=PAGES)
@@ -161,3 +180,30 @@ def test_discards_the_workspace_when_the_generic_read_fails() -> None:
     with pytest.raises(BusyError):
         _service(FakePipeline(None), FakeReader(BusyError()), workspace).extract_with_ai(CALLER, JPEG, None)
     assert workspace.discarded == workspace.opened
+
+
+def test_reads_a_custom_templates_keys_with_a_template_built_from_them() -> None:
+    pipeline, workspace = FakePipeline(BY_OCR), FakeWorkspace()
+    keys = [CustomField(key="card_number", label="Card No"), CustomField(key="holder", label="Name")]
+
+    assert _service(pipeline, FakeReader(), workspace).extract_custom(CALLER, JPEG, None, keys) is BY_OCR
+    template = pipeline.templates[0]
+    assert template is not None
+    assert (template.scope, [f.key for f in template.fields]) == (CUSTOM_SCOPE, ["card_number", "holder"])
+    assert workspace.discarded == workspace.opened
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        [],
+        [CustomField(key="a", label="A"), CustomField(key="a", label="Again")],  # the same key twice
+        [CustomField(key=f"k{n}", label="L") for n in range(51)],
+    ],
+)
+def test_refuses_custom_keys_that_are_none_repeated_or_too_many(keys: list[CustomField]) -> None:
+    workspace = FakeWorkspace()
+
+    with pytest.raises(FieldsInvalidError):
+        _service(FakePipeline(BY_OCR), FakeReader(), workspace).extract_custom(CALLER, JPEG, None, keys)
+    assert workspace.opened == []

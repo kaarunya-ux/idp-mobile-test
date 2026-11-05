@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from itertools import groupby
 
@@ -18,6 +18,7 @@ _SIDEWAYS_RATIO = 1.5  # a piece this many times taller than wide, in pixels, is
 _COLUMN_GAP = 0.04  # page fraction of empty space that separates two columns on one row
 _LINE_TOLERANCE = 0.6  # pieces whose centres are this many text heights apart or less share a line
 _CAPTION_MARGIN = 0.03  # page fraction a block may reach left of its caption
+_BELOW_MIN = 0.5  # a line "below a label" starts at least this many label heights under the label's top
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -74,6 +75,8 @@ def read_field(
     width over height in pixels, used to tell sideways text from a short caption.
     """
     inside = [w for w in words if _inside(w.box, box) and not any(_inside(w.box, hidden) for hidden in skip)]
+    if definition.value_after is not None:
+        return _after_label(definition, inside, today=today)
     if definition.starts_at is not None:
         upright = [w for w in inside if not (_is_sideways(w.box, page_aspect) or _is_fragment(w, page_aspect))]
         inside = _from_caption(definition.starts_at, upright)
@@ -140,6 +143,45 @@ def _from_caption(caption: str, words: list[OcrWord]) -> list[OcrWord]:
         return words
     left = found.box.x - _CAPTION_MARGIN
     return [word for word in words if _centre(word.box)[0] >= left and _centre(word.box)[1] >= found.box.y]
+
+
+def _after_label(definition: FieldDefinition, words: list[OcrWord], *, today: date) -> Reading | None:
+    """The value after the field's label: the rest of the label's piece and the pieces right of it on its line, or
+    else the nearest line below the label and not left of it. None when the label is not on the page."""
+    label = definition.value_after or ""
+    found = next(((w, m) for w in words if (m := re.search(label, w.text)) is not None), None)
+    if found is None:
+        return None
+    piece, match = found
+    rest = piece.text[match.end() :].strip(" :;-=")
+    _, label_y = _centre(piece.box)
+    line_height = piece.box.height
+    on_line = (w for w in words if w is not piece and abs(_centre(w.box)[1] - label_y) <= line_height / 2)
+    same_line = [replace(piece, text=rest)] if rest else []
+    same_line += sorted((w for w in on_line if w.box.x >= piece.box.x), key=lambda w: w.box.x)
+    lower = piece.box.y + line_height * _BELOW_MIN
+    left = piece.box.x - _CAPTION_MARGIN
+    next_line = _nearest_line([w for w in words if w.box.y >= lower and _centre(w.box)[0] >= left])
+    for group in (same_line, next_line):
+        if not group:
+            continue
+        reading = _candidate(definition, group)
+        if reading is None:
+            continue
+        normalized = normalize_value(reading.text, definition.normalize, pattern=definition.rule.pattern)
+        if apply_rule(definition.rule, normalized, today=today).passed:
+            return reading
+    first = same_line or next_line
+    return _candidate(definition, first) if first else None
+
+
+def _nearest_line(words: list[OcrWord]) -> list[OcrWord]:
+    """The top line among ``words``, left to right."""
+    if not words:
+        return []
+    top = min(words, key=lambda w: w.box.y)
+    _, top_y = _centre(top.box)
+    return sorted((w for w in words if abs(_centre(w.box)[1] - top_y) <= top.box.height / 2), key=lambda w: w.box.x)
 
 
 def _lines_above(lines: list[list[OcrWord]], anchor: str, count: int) -> list[list[OcrWord]]:

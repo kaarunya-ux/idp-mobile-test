@@ -1,7 +1,5 @@
 """When a page is too poor to read, and which error says so (IDP-03 ch. 2.6 stage 2, ch. 2.12)."""
 
-from dataclasses import replace
-
 import pytest
 
 from extraction.core.error_codes import ErrorCode
@@ -114,8 +112,5 @@ def test_still_refuses_a_blurred_pdf_page() -> None:
     assert list_quality_issues(_scores(blur=10.0), THRESHOLDS, photographed=False) == (QualityIssue.BLURRED,)
 
 
-def test_notes_a_photos_lighting_instead_of_refusing_it_when_the_setting_says_so() -> None:
-    noting = replace(THRESHOLDS, lighting_rejects=False)
-
-    assert list_quality_issues(_scores(glare=0.5, brightness=0.95), noting) == ()
-    assert list_quality_issues(_scores(glare=0.5), THRESHOLDS) == (QualityIssue.GLARE,)  # the default refuses
+def test_still_lists_a_photos_lighting_issues_so_they_can_be_recorded() -> None:
+    assert list_quality_issues(_scores(glare=0.5), THRESHOLDS) == (QualityIssue.GLARE,)

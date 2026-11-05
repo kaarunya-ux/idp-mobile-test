@@ -5,14 +5,16 @@ process. The gateway's codes become this service's: busy and the daily cap are t
 whether sending the document the queued way would help. Only codes and statuses are logged, never document content.
 """
 
+import base64
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
 
 from extraction.core.errors import DomainError
 from extraction.core.service_auth import ServiceTokenError, ServiceTokenProvider
+from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.quick.domain.exceptions import (
     AiLimitReachedError,
     AiUnavailableError,
@@ -20,6 +22,9 @@ from extraction.quick.domain.exceptions import (
     FileUnreadableError,
 )
 from extraction.quick.domain.models import ExtractedField, QuickCaller, QuickResult, ReadBy, StagedFile, Table
+
+if TYPE_CHECKING:  # the type only: the store imports Pillow, which the slim API image has not
+    from extraction.pipeline.infrastructure.ai.inline_images import InlineImages
 
 log = structlog.get_logger(__name__)
 
@@ -30,16 +35,17 @@ _INPUT = "AIG-422-INPUT-001"
 
 
 class GatewayDocumentReader:
-    def __init__(self, client: httpx.Client, tokens: ServiceTokenProvider) -> None:
+    def __init__(self, client: httpx.Client, tokens: ServiceTokenProvider, images: "InlineImages") -> None:
         self._client = client  # base URL and timeout are set by bootstrap
         self._tokens = tokens
+        self._images = images  # the request's pages, sent inside the call (ADR 0012)
 
     def read(self, caller: QuickCaller, pages: Sequence[StagedFile]) -> QuickResult:
         body = {
             "accountId": str(caller.account_id),
             "priority": "INTERACTIVE",
             "plan": caller.plan,
-            "pages": [{"bucket": p.bucket, "key": p.key} for p in pages],
+            "pages": [self._image(p) for p in pages],
         }
         try:
             headers = {"Authorization": f"Bearer {self._tokens.token()}"}
@@ -54,6 +60,12 @@ class GatewayDocumentReader:
         except (ValueError, KeyError, TypeError, AttributeError) as exc:  # not the documented shape
             raise AiUnavailableError from exc
 
+    def _image(self, page: StagedFile) -> dict[str, str]:
+        data = self._images.get(ObjectRef(bucket=page.bucket, key=page.key))
+        if data is None:
+            return {"bucket": page.bucket, "key": page.key}
+        return {"data": base64.b64encode(data).decode()}
+
     def _failure(self, response: httpx.Response) -> DomainError:
         code = _code(response)
         log.warning("ai_gateway_error", path=GENERIC_READ, status=response.status_code, code=code)
@@ -64,7 +76,7 @@ class GatewayDocumentReader:
         if code == _CAP:
             return AiLimitReachedError()
         if code == _INPUT:
-            return FileUnreadableError("The file could not be read as a document. Send a clear PDF, JPG or PNG.")
+            return FileUnreadableError("The file could not be read as a document. Send a clear PDF, JPG, PNG or WebP.")
         return AiUnavailableError()
 
 

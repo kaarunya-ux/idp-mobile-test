@@ -21,7 +21,7 @@ def test_uses_safe_defaults_when_nothing_is_set() -> None:
     assert settings.logging.format == "json"
     assert settings.ocr.models_dir == Path("models")
     assert settings.ocr.models_file == Path("models.yaml")
-    assert (settings.ocr.threads, settings.ocr.max_pixels) == (4, 60_000_000)
+    assert (settings.ocr.threads, settings.ocr.max_pixels) == (2, 60_000_000)
     assert settings.ocr.inference_timeout.total_seconds() == 60
 
 

@@ -1,5 +1,6 @@
 """Between the API bodies and the application's types; the bodies never go further than this (CLAUDE.md)."""
 
+import base64
 from typing import Any
 
 from ai_gateway.ai.api.schemas import (
@@ -43,7 +44,9 @@ def caller_of(body: CallerBody, service: ServicePrincipal) -> Caller:
 
 
 def image_ref(body: ImageRefBody) -> ImageRef:
-    return ImageRef(bucket=body.bucket, key=body.key)
+    if body.data is not None:
+        return ImageRef(data=base64.b64decode(body.data))
+    return ImageRef(bucket=body.bucket or "", key=body.key or "")
 
 
 def field_spec(body: FieldBody) -> FieldSpec:

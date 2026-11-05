@@ -91,6 +91,9 @@ class FieldDefinition:
     ``starts_at`` is a regular expression for the caption that opens the value (``Address:``): when it is found, only
     words below it and not left of it are read, which keeps the address apart from text in other columns or cards.
     ``language`` is the ISO 639-1 code an engine must read to read this field; other engines skip it.
+    ``value_after`` is a regular expression for the field's printed label, for a field defined only by its label (a
+    custom template's key): the value is the text after the label on its line, or else the line just below it, and
+    nothing is read when the label is not on the page (no guessing from the rest of the page).
     """
 
     key: str
@@ -108,12 +111,13 @@ class FieldDefinition:
     excludes: tuple[str, ...] = ()
     keep: str | None = None
     starts_at: str | None = None
+    value_after: str | None = None
     language: str = "en"
     accept: Accept = field(default_factory=Accept)
     mask: Mask | None = None
 
     def __post_init__(self) -> None:
-        for pattern in (self.labels, self.extract, self.above, self.keep, self.starts_at):
+        for pattern in (self.labels, self.extract, self.above, self.keep, self.starts_at, self.value_after):
             if pattern is not None:
                 re.compile(pattern)
 

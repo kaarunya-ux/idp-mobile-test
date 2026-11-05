@@ -5,11 +5,15 @@ import threading
 from collections.abc import Sequence
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from extraction.core.config import Settings
+from extraction.core.errors import UnauthenticatedError
 from extraction.core.permissions import DOCUMENT_WRITE
-from extraction.core.security import Principal, current_principal
+from extraction.core.security import Principal
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.application.quick_extract import QuickExtractService
 from extraction.quick.domain.exceptions import BusyError
 from extraction.quick.domain.models import (
@@ -26,10 +30,12 @@ from extraction.sync_main import create_sync_app
 from support.template_fakes import Clock
 
 ACCOUNT = UUID("0192f0aa-0000-7000-8000-000000000001")
+TEST_ACCOUNT = UUID("0192f0aa-0000-7000-8000-00000000a001")
 USER = Principal(
     actor_id="u1", tenant_id=ACCOUNT, permissions=frozenset({DOCUMENT_WRITE}), kind="user", plan="PERSONAL"
 )
 JPEG = b"\xff\xd8\xff\xe0 made up"
+GOOD_TOKEN = "good"  # noqa: S105  # a stand-in token the fake verifier accepts, not a secret
 RESULT = QuickResult(
     document_type="aadhaar",
     document_confidence=0.94,
@@ -57,12 +63,17 @@ class _Pipeline:
     def __init__(self, gate: threading.Event | None = None) -> None:
         self.gate = gate
         self.callers: list[QuickCaller] = []
+        self.templates: list[TemplateDefinition | None] = []
 
-    def run(self, caller: QuickCaller, contents: Sequence[bytes], folder: str) -> PipelineOutcome:
+    def run(
+        self, caller: QuickCaller, contents: Sequence[bytes], folder: str, template: TemplateDefinition | None = None
+    ) -> PipelineOutcome:
         self.callers.append(caller)
+        self.templates.append(template)
         if self.gate is not None:
             self.gate.wait(timeout=5)
-        return PipelineOutcome(result=None, pages=[StagedFile(bucket="idp-derived", key="acct/quick/1/page-0.png")])
+        found = RESULT if template is not None else None  # a named (custom) template always gives a result
+        return PipelineOutcome(result=found, pages=[StagedFile(bucket="idp-derived", key="acct/quick/1/page-0.png")])
 
     def stage(self, contents: Sequence[bytes], folder: str) -> Sequence[StagedFile]:
         self.staged = len(contents)
@@ -79,6 +90,18 @@ class _Reader:
         return RESULT
 
 
+class _Verifier:
+    """Accepts ``GOOD_TOKEN`` as ``principal``; anything else is not signed in."""
+
+    def __init__(self, principal: Principal | None) -> None:
+        self.principal = principal
+
+    async def verify(self, token: str) -> Principal:
+        if token != GOOD_TOKEN or self.principal is None:
+            raise UnauthenticatedError
+        return self.principal
+
+
 def _client(
     principal: Principal | None,
     *,
@@ -86,6 +109,7 @@ def _client(
     reader: _Reader | None = None,
     max_file: int = 1000,
     max_concurrent: int = 2,
+    tokenless: bool = False,
 ) -> TestClient:
     service = QuickExtractService(
         workspace=_Workspace(),
@@ -93,11 +117,12 @@ def _client(
         reader=reader or _Reader(),
         limits=UploadLimits(max_file_bytes=max_file, max_total_bytes=1500),
     )
-    settings = Settings(_env_file=None, quick={"max_concurrent": max_concurrent})
-    app = create_sync_app(Clock(), settings, service)
-    if principal is not None:
-        app.dependency_overrides[current_principal] = lambda: principal
-    return TestClient(app)
+    quick = {"max_concurrent": max_concurrent} | (
+        {"require_token": False, "default_account_id": str(TEST_ACCOUNT)} if tokenless else {}
+    )
+    app = create_sync_app(Clock(), Settings(_env_file=None, quick=quick), service)
+    app.state.token_verifier = _Verifier(principal)
+    return TestClient(app, headers={"Authorization": f"Bearer {GOOD_TOKEN}"} if principal is not None else {})
 
 
 def test_returns_the_type_and_every_field_in_camel_case_when_a_front_and_back_are_sent() -> None:
@@ -199,3 +224,72 @@ def test_checks_the_files_on_the_generic_route_too() -> None:
     response = _client(USER).post("/api/v1/extract/generic", files={"file": ("f.gif", b"GIF89a made up")})
 
     assert (response.status_code, response.json()["code"]) == (415, "EXT-415-FILE-001")
+
+
+def test_counts_a_tokenless_request_on_the_test_account_when_tokens_are_not_required() -> None:
+    pipeline = _Pipeline()
+
+    response = _client(None, pipeline=pipeline, tokenless=True).post("/api/v1/extract", files={"file": ("f.jpg", JPEG)})
+
+    assert response.status_code == 200
+    assert pipeline.callers == [QuickCaller(account_id=TEST_ACCOUNT, plan="CORPORATE")]
+
+
+def test_still_checks_a_token_that_is_sent_when_tokens_are_not_required() -> None:
+    client = _client(None, tokenless=True)
+
+    response = client.post(
+        "/api/v1/extract", files={"file": ("f.jpg", JPEG)}, headers={"Authorization": "Bearer forged"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_refuses_a_token_without_the_document_write_permission() -> None:
+    reader_only = USER._replace(permissions=frozenset({"template:read"}))
+
+    response = _client(reader_only).post("/api/v1/extract", files={"file": ("f.jpg", JPEG)})
+
+    assert (response.status_code, response.json()["code"]) == (403, "EXT-403-AUTH-001")
+
+
+def test_refuses_to_start_without_a_test_account_when_tokens_are_not_required() -> None:
+    with pytest.raises(ValidationError, match="DEFAULT_ACCOUNT_ID"):
+        Settings(_env_file=None, quick={"require_token": False})
+
+
+def test_reads_only_the_keys_sent_on_the_custom_route() -> None:
+    pipeline = _Pipeline()
+    fields = '[{"key": "card_number", "label": "Card No"}, {"key": "expiry", "label": "Expires", "type": "date"}]'
+
+    response = _client(USER, pipeline=pipeline).post(
+        "/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields}
+    )
+
+    assert response.status_code == 200
+    template = pipeline.templates[0]
+    assert template is not None
+    assert [(f.key, f.label, f.type.value) for f in template.fields] == [
+        ("card_number", "Card No", "TEXT"),
+        ("expiry", "Expires", "DATE"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        "not json",
+        '{"key": "a", "label": "A"}',  # not a list
+        '[{"key": "Card Number", "label": "Card No"}]',  # not lower snake_case
+        '[{"key": "a", "label": "A", "type": "money"}]',
+        '[{"key": "a", "label": ""}]',
+    ],
+)
+def test_answers_400_on_the_custom_route_when_the_fields_are_not_valid(fields: str) -> None:
+    response = _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields})
+
+    assert (response.status_code, response.json()["code"]) == (400, "EXT-400-VALIDATION-001")
+
+
+def test_answers_400_on_the_custom_route_without_fields() -> None:
+    assert _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}).status_code == 400

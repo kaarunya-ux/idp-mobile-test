@@ -11,8 +11,10 @@ from extraction.pipeline.domain.models import PreparationSteps, PreparedPage
 from extraction.pipeline.domain.quality import QualityScores
 from extraction.pipeline.domain.stages import Stage
 from extraction.pipeline.domain.standard_templates import STANDARD_TEMPLATES
+from extraction.pipeline.domain.template import TemplateDefinition
 from idp_ocr_engines.errors import OcrEngineError
 from idp_ocr_engines.model import Box, OcrPage, OcrRegion, OcrWord, PageImage
+from support.hindi_fields import AADHAAR_WITH_HINDI
 
 PAN_LINES = [
     (0.05, 0.12, "INCOME TAX DEPARTMENT"),
@@ -106,13 +108,16 @@ def command() -> ExtractDocumentCommand:
 
 
 def service(
-    engines: dict[str, FakeEngine], progress: Progress, languages: dict[str, tuple[str, ...]] | None = None
+    engines: dict[str, FakeEngine],
+    progress: Progress,
+    languages: dict[str, tuple[str, ...]] | None = None,
+    templates: Sequence[TemplateDefinition] = STANDARD_TEMPLATES,
 ) -> ExtractDocumentService:
     ticks = iter([0.0, 1.5])
     return ExtractDocumentService(
         engines=engines,
         languages=languages,
-        templates=STANDARD_TEMPLATES,
+        templates=templates,
         thresholds=Thresholds(name_similarity=0.95, review_confidence=0.85),
         clock=FixedClock(),
         pipeline_version="0.1.0",
@@ -238,7 +243,9 @@ def test_a_hindi_field_is_read_by_b_and_settled_by_c_because_a_cannot_read_hindi
     ]
     engine_c = FakeEngine("ocr-c", lines)
     engines = {"A": FakeEngine("ocr-a", lines), "B": FakeEngine("ocr-b", lines), "C": engine_c}
-    result = service(engines, Progress(), {"B": ("en", "hi"), "C": ("en", "hi")}).extract(command())
+    result = service(engines, Progress(), {"B": ("en", "hi"), "C": ("en", "hi")}, [AADHAAR_WITH_HINDI]).extract(
+        command()
+    )
     fields = fields_of(result)
     name_hi = fields["name_hi"]
     assert name_hi["readings"]["A"] is None  # type: ignore[index]
@@ -259,5 +266,5 @@ def test_a_field_in_a_language_c_does_not_read_is_not_sent_to_c() -> None:
     ]
     engine_c = FakeEngine("ocr-c", lines)
     engines = {"A": FakeEngine("ocr-a", lines), "B": FakeEngine("ocr-b", lines), "C": engine_c}
-    result = service(engines, Progress(), {"B": ("en", "hi")}).extract(command())  # C reads English only
+    result = service(engines, Progress(), {"B": ("en", "hi")}, [AADHAAR_WITH_HINDI]).extract(command())  # C: English
     assert fields_of(result)["name_hi"]["status"] == "NEEDS_REVIEW"

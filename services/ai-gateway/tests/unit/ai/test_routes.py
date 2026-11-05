@@ -1,5 +1,6 @@
 """The internal API end to end on fake ports: token, body checks, both field-read forms, and problem details."""
 
+import base64
 import json
 from collections.abc import Iterator
 
@@ -268,3 +269,25 @@ def test_answers_400_when_generic_read_has_more_than_two_pages(client: TestClien
     body = {"accountId": str(ACCOUNT), "pages": [PAGE, PAGE, PAGE]}
 
     assert client.post("/internal/v1/ai/generic-read", json=body).status_code == 400
+
+
+def test_reads_fields_from_an_image_sent_in_the_request(client: TestClient, model: FakeModel) -> None:
+    model.answers.append(PAN_ANSWER)
+    body = {
+        "accountId": str(ACCOUNT),
+        "documentType": "PAN_CARD",
+        "pages": [{"data": base64.b64encode(b"jpeg bytes").decode()}],
+        "fields": [{"key": "pan_number"}],
+    }
+
+    assert client.post("/internal/v1/ai/field-read", json=body).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "image",
+    [{"bucket": "idp-derived", "key": "k", "data": "AAAA"}, {"data": "not base64!"}, {"bucket": "idp-derived"}, {}],
+)
+def test_answers_400_when_an_image_is_not_exactly_one_of_stored_or_sent(client: TestClient, image: dict) -> None:
+    body = {"accountId": str(ACCOUNT), "page": image, "candidates": ["PAN_CARD"]}
+
+    assert client.post("/internal/v1/ai/classify", json=body).status_code == 400

@@ -355,3 +355,126 @@ lighting instead of refusing it; the local stack sets false.
 ### Check it
 
 The backend's PDF through the real quality gate: refused before (glare 0.68), prepared now. Unit tests for both.
+
+## Entry 10: A PDF's text layer is used only when it shows which document it is (2026-11-03)
+
+**Goal:** the backend's Aadhaar PDF (a scanned card on A4, plus a one-line text header) took 34 s and every field came
+from the AI. Its text layer held 10 words (over the 20-character "digital PDF" mark), so OCR was skipped; those words
+named no template, so the AI classified the page and read all four fields from crops.
+
+### What we did
+
+`ExtractDocumentService._read`: the text layer replaces OCR only when its keywords match a template (or the request
+named the template); otherwise both OCR engines read the page. A real e-PAN or e-Aadhaar keeps its exact text.
+
+### Check it
+
+A unit test with a header-only text layer. The same PDF locally: read by OCR, classified Aadhaar by keywords, number,
+name, date of birth and gender settled by OCR (no AI), in 7.8 s; before, an AI classify and four AI crops.
+
+## Entry 11: Extraction only, at speed (2026-11-04)
+
+**Goal:** a good card photo answered in 1 to 2 seconds, with nothing but extraction in the way. Decisions: ADR 0011.
+
+### What we did
+
+- `QUALITY__REJECTS` (default false) replaces `QUALITY__LIGHTING_REJECTS`: the gate measures and records, and refuses
+  nothing. Two good 860 px card photos had been refused as "low resolution" (the gate wanted 900 px).
+- `QUICK__REQUIRE_TOKEN` / `QUICK__DEFAULT_ACCOUNT_ID` / `QUICK__DEFAULT_PLAN`: the local stack lets requests without a
+  token into extraction-sync on the test account; a sent token is still checked.
+- `OCR__THREADS` default 2 (was 4): the two engines read at once and fought over 8 cores.
+
+### Check it
+
+The two good test photos (PAN and Aadhaar, made available by the lead), through the pipeline, no AI: with 4 threads
+1.96 to 2.68 s; the engines alone 2.2 s together with 4 threads, 1.2 s with 2. PAN: 4 of 4 fields by OCR. Aadhaar:
+5 by OCR; the address was read by engine A only (B read nothing), so it still goes to the AI.
+
+## Entry 12: No storage on the synchronous lane (2026-11-04)
+
+**Goal:** the synchronous lane is HTTP in, OCR, the AI only if needed, HTTP out. It had been storing every request's
+pages in the backend's MinIO, and failed with 500 when that machine didn't answer. Decisions: ADR 0012 (and
+ai-gateway ADR 0004).
+
+### What we did
+
+`InlineImages` holds a request's pages and crops in memory; `AiGatewayClient.image()` sends them inside the call as
+`{"data": ...}`; `MemoryWorkspace` drops them when the request ends; `build_quick_extract` needs no storage. WebP is
+accepted on the synchronous routes.
+
+### Check it
+
+The two good test photos through the whole synchronous lane, with no storage configured: PAN 1.15 to 1.33 s, all four
+fields by OCR; Aadhaar 1.42 to 1.82 s, six by OCR (the address, read by one engine only, goes to the AI).
+
+## Entry 13: PDF pages capped at 2000 px (2026-11-04)
+
+**Goal:** the same card took 1.3 s as a photo and 6 to 7 s as a PDF. Rendered at 300 DPI, the PDF page was 2688 px
+wide (4.5 MP, nine times the photo): OCR took 3 s and left a field unsure, so the AI was asked.
+
+### What we did
+
+`LIMITS__PDF_MAX_SIDE_PX` (default 2000) caps a rendered page's long side, in the page loader and the text-layer reader.
+
+### Check it
+
+The PAN photo saved as a PDF: 2.8 s, all four fields by OCR (before: 3.3 s and one AI call). A test for the cap. Still
+open: a card on an A4 page is not cut out of it, so OCR finds none of its fields there.
+
+## Entry 14: A photo saved as a PDF is read from the photo (2026-11-04)
+
+**Goal:** the backend's Aadhaar PDF took 11 s: one picture (768 x 972 px) covering 80% of a letter page was rendered as
+the whole page at 300 DPI (2550 x 3301 px, eleven times the pixels, with margins), so OCR was slow and missed fields.
+
+### What we did
+
+`pdf_pictures.picture_of`: a page whose largest image covers `LIMITS__PDF_PICTURE_MIN_FRACTION` (0.3) of it, placed
+upright, is a picture page. The page loader takes that picture's own pixels; the text-layer reader skips the page.
+
+### Check it
+
+A made-up card as a picture PDF: 1.65 s and the same fields as the photo itself (1.76 s). The backend's PDF: OCR on
+768 x 972 px in 3.1 s (before about 8 s), six of eight fields by OCR, the address among them; the two Hindi fields still
+go to the AI. Three tests (picture page, small image rendered as before, no text layer on a picture page).
+
+## Entry 15: English only (2026-11-04)
+
+**Goal:** the product extracts English only for now.
+
+### What we did
+
+- The standard Aadhaar template is version 2, without `name_hi` and `address_hi` (PAN and DL had no Hindi fields). The
+  field-language mechanism stays for organisations' own templates; its tests use Hindi fields of their own
+  (`tests/support/hindi_fields.py`).
+- `seed` publishes a newer shipped version of a standard template and retires the old one, but only while every stored
+  version is the seed's own (an admin's change is never overwritten); a fresh database stores the shipped version
+  number. Two integration tests.
+- Engine B keeps reading Devanagari, though no Hindi is extracted: Aadhaar lines mix the scripts, and English-only B,
+  tried on the backend's bilingual PDF, lost the date of birth and read gender and PIN code too faintly (3 of 6 fields
+  by OCR, against 6 of 6 with it).
+
+### Check it
+
+PAN photo 1.16 s, all four fields by OCR. Aadhaar photo 1.44 s, five of six (engine B reads no address on it, so the
+address goes to the AI). The backend's Aadhaar PDF 3.3 s, six of six by OCR, no AI call (it took 11 s with the Hindi
+fields).
+
+## Entry 16: Custom templates, keys in the request (2026-11-04)
+
+**Goal:** users' own templates (a green card, say): the backend sends the keys with each request, we read exactly
+those, OCR first, and store nothing. Decisions: ADR 0013 (option B; no shared database, DB-01).
+
+### What we did
+
+- `FieldDefinition.value_after`: a field defined by its label only; the value is the text after the label on its
+  line, or the line below; nothing when the label isn't on the page. A label must open its piece of text.
+- `pipeline/domain/custom_template.py`: keys (`key`, `label`, `type` text/date/number) to a one-request template;
+  dates may lie ahead (an expiry date). The AI's ten-field limit doesn't apply to a custom template.
+- `POST /api/v1/extract/custom` on extraction-sync (`fields`: a JSON list, 1 to 50 keys, checked: 400 otherwise). The
+  stack check has a thirteenth check for it.
+
+### Check it
+
+A made-up PAN card with four custom keys, every label printed: 1.68 s, all four by OCR. With a fifth key whose label
+isn't printed: 5.4 s, the four by OCR and the fifth by the AI. Two flaws found and fixed on the way: a label matched at
+the end of a title ("Department" in "INCOME TAX DEPARTMENT"), and an apostrophe stopped "Father's Name" matching.

@@ -11,6 +11,7 @@ from extraction.core.clock import Clock
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.domain.classify import Classification, classify_page
 from extraction.pipeline.domain.crops import crop_page, padded
+from extraction.pipeline.domain.custom_template import CUSTOM_SCOPE
 from extraction.pipeline.domain.decisions import (
     FieldDecision,
     FieldSource,
@@ -69,6 +70,11 @@ class AiAssist:
     classify_min_confidence: float = 0.8  # an AI classification below this leaves the document unknown
     crops: AiCrops | None = None
 
+    def _limit(self, template: TemplateDefinition) -> int:
+        """How many unsettled fields still go to the AI. A custom template's keys are found by their labels only, and a
+        key whose label isn't printed is normal there, not a sign of a bad photo: all of them may go."""
+        return len(template.fields) if template.scope == CUSTOM_SCOPE else self.max_fields
+
     def classify(
         self, templates: Sequence[TemplateDefinition], context: AiCallContext
     ) -> tuple[Classification | None, tuple[str, str] | None]:
@@ -102,7 +108,7 @@ class AiAssist:
         (gateway busy, model down, cap used) leaves the fields as OCR left them, and isn't counted as an AI call.
         """
         unresolved = sum(_is_unresolved(d) for d in decisions)
-        if not unresolved or unresolved > self.max_fields:  # too many: the photo is the problem, not a field
+        if not unresolved or unresolved > self._limit(template):  # too many: the photo is the problem, not a field
             return decisions, None
         wanted = [d.key for d in decisions if _is_unresolved(d) or d.status is FieldStatus.EMPTY]
         definitions = {d.key: d for d in template.fields}
@@ -138,7 +144,7 @@ class AiAssist:
         """
         crops, folder = self.crops, context.crop_folder
         unsure = [d for d in decisions if d.status is FieldStatus.NEEDS_REVIEW]
-        if crops is None or folder is None or not unsure or len(unsure) > self.max_fields:
+        if crops is None or folder is None or not unsure or len(unsure) > self._limit(template):
             return decisions, []
         definitions = {d.key: d for d in template.fields}
 
@@ -210,9 +216,7 @@ class ExtractDocumentService:
         """The result JSON (IDP-00 ch. 7.8). Raises ``OcrEngineError`` only if no engine could read the page."""
         started = self._monotonic()
         page = command.pages[0]
-        digital = command.digital_page is not None
-        # A digital PDF's text layer is exact: it is read instead of OCR (IDP-03 ch. 2.6 stage 5), as both readings
-        pages = {_DIGITAL: command.digital_page} if command.digital_page is not None else self._read_pages(page.clean)
+        pages, digital = self._read(command, page.clean)
         self._progress.report(Stage.READ, _DONE)
         first = pages[sorted(pages)[0]]
         classification, models = self._classify(command, first.text, page.clean)
@@ -252,6 +256,20 @@ class ExtractDocumentService:
             return found, []
         found, answered = self._ai.classify(self._templates, command.ai_context)
         return found, [answered] if answered else []
+
+    def _read(self, command: ExtractDocumentCommand, image: PageImage) -> tuple[dict[str, OcrPage], bool]:
+        """A digital PDF's text layer is exact: it is read instead of OCR (IDP-03 ch. 2.6 stage 5), as both readings,
+        but only when it shows which document this is (a template's keywords, or the template named in the request).
+        A scan inside a PDF can carry a few words of text, such as a header or a stamp, while the document itself is
+        an image: that layer would hide the page from OCR and leave every field to the AI. Then OCR reads the page."""
+        digital = command.digital_page
+        if digital is not None and (
+            command.template_forced
+            or classify_page(self._templates, page_text=digital.text, width=digital.width, height=digital.height)
+            is not None
+        ):
+            return {_DIGITAL: digital}, True
+        return self._read_pages(image), False
 
     def _ai_step(
         self,

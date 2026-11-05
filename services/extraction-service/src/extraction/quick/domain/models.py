@@ -12,6 +12,7 @@ class FileKind(StrEnum):
     PDF = "pdf"
     JPEG = "jpeg"
     PNG = "png"
+    WEBP = "webp"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -21,6 +21,13 @@ class FileTypeUnsupportedError(DomainError):
     title: ClassVar[str] = "File type not supported"
 
 
+class FieldsInvalidError(DomainError):
+    """A custom template's keys are missing or malformed (POST /api/v1/extract/custom)."""
+
+    code: ClassVar[ErrorCode] = ErrorCode.REQUEST_INVALID
+    title: ClassVar[str] = "Fields not valid"
+
+
 class NoAccountError(DomainError):
     """A token without an account (platform staff, a user still onboarding): no allowance to count the call on."""
 

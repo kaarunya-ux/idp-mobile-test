@@ -1,5 +1,7 @@
 """The prepare use case with scripted ports: stage order, progress, and stopping at the first bad page."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -145,3 +147,19 @@ def test_refuses_a_photo_with_the_same_glare() -> None:
         _service(FakeLoader(1), FakeAssessor([glare]), FakePreparer(), RecordingProgress()).prepare(
             PrepareDocumentCommand(content=b"\xff\xd8\xff made up photo")
         )
+
+
+def test_prepares_a_blurred_page_and_keeps_its_scores_when_the_gate_only_measures() -> None:
+    preparer = FakePreparer()
+    service = PrepareDocumentService(
+        loader=FakeLoader(1),
+        assessor=FakeAssessor([BLURRED]),
+        preparer=preparer,
+        thresholds=replace(THRESHOLDS, rejects=False),
+        progress=RecordingProgress(),
+    )
+
+    result = service.prepare(PrepareDocumentCommand(content=b"\xff\xd8\xff made up photo"))
+
+    assert preparer.prepared == [0]
+    assert result.qualities[0].blur == BLURRED.blur

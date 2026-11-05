@@ -56,8 +56,12 @@ class Caller:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ImageRef:
-    bucket: str
-    key: str
+    """A page image: in storage (``bucket`` and ``key``), or sent in the request (``data``, the synchronous lane,
+    which keeps nothing in storage: ADR 0004)."""
+
+    bucket: str = ""
+    key: str = ""
+    data: bytes | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -1,6 +1,8 @@
 """The synchronous extract's response body (ADR 0009). ``*Response`` stays in ``api`` (OBJ-01); JSON is camelCase,
 as in the Java services (MSV-05)."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
@@ -31,3 +33,13 @@ class QuickExtractResponse(_Body):
     read_by: str = Field(description="OCR, OCR_AND_AI (the AI read the unsure fields' crops) or AI (unknown document)")
     model: str | None = Field(description="the AI model that read it, if any (provenance)")
     prompt_version: str | None
+
+
+class CustomFieldBody(BaseModel):
+    """One key of a custom template, as the backend sends it in ``fields`` (ADR 0013)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$", description="lower snake_case, e.g. 'card_number'")
+    label: str = Field(min_length=1, max_length=120, description="as printed on the document, e.g. 'Card No'")
+    type: Literal["text", "date", "number"] = "text"

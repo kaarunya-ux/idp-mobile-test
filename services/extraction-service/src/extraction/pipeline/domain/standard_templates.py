@@ -107,19 +107,12 @@ _DEVANAGARI = r"\u0900-\u097F"
 # A piece with English letters and no Devanagari: keeps the English column and drops the Hindi one beside it.
 # A lone number is left out because it may belong to the Hindi column.
 _LATIN_ONLY = rf"^[^{_DEVANAGARI}]*[A-Za-z][^{_DEVANAGARI}]*$"
-_HINDI_NAME_RULE = RuleSpec(id="name-hindi", kind=RuleKind.REGEX, pattern=rf"[{_DEVANAGARI}][{_DEVANAGARI} ]{{1,78}}")
-# Only Devanagari words and a lone PIN code are kept, so the English column beside the Hindi one is left out.
-_DEVANAGARI_OR_PIN = rf"[{_DEVANAGARI}]|^\W*[1-9][0-9]{{5}}\W*$"
-# From the Hindi "address" caption to the PIN code that ends it.
-_HINDI_ADDRESS = r"(?:\u092a\u0924\u094d\u0924\u093e|\u092a\u0924\u093e)\W*(.{10,300}?[1-9][0-9]{5})(?![0-9])"
-_HINDI_ADDRESS_RULE = RuleSpec(
-    id="address-hindi", kind=RuleKind.REGEX, pattern=rf"[{_DEVANAGARI}0-9][{_DEVANAGARI}0-9 ,.:;/()'\-]{{9,300}}"
-)
 _NAME_ACCEPT_ADDRESS = Accept(mode=AcceptMode.SIMILARITY)
 
+# Version 2: English only (the Hindi name and address are not extracted: the product reads English for now)
 AADHAAR_CARD = TemplateDefinition(
     template_id="standard-aadhaar-card",
-    version=1,
+    version=2,
     scope="STANDARD",
     document_type="AADHAAR_CARD",
     aspect_ratio=1.586,
@@ -148,20 +141,6 @@ AADHAAR_CARD = TemplateDefinition(
             above=_DOB_LINE,
             rule=_NAME_RULE,
             normalize=_NAME_NORMALIZE,
-            accept=_NAME_ACCEPT,
-        ),
-        FieldDefinition(
-            key="name_hi",
-            label="Name (Hindi)",
-            type=FieldType.NAME,
-            box=_WHOLE_PAGE,
-            above=_DOB_LINE,
-            max_lines_above=2,
-            keep=rf"[{_DEVANAGARI}]",
-            language="hi",
-            required=False,
-            rule=_HINDI_NAME_RULE,
-            normalize=(Normalizer.COLLAPSE_SPACES,),
             accept=_NAME_ACCEPT,
         ),
         FieldDefinition(
@@ -208,21 +187,6 @@ AADHAAR_CARD = TemplateDefinition(
             rule=RuleSpec(id="address-text", kind=RuleKind.REGEX, pattern=r"[A-Z0-9][A-Z0-9 ,.:;/()'\-]{14,300}"),
             normalize=(Normalizer.UPPER, Normalizer.COLLAPSE_SPACES),
             accept=Accept(mode=AcceptMode.SIMILARITY),
-        ),
-        FieldDefinition(
-            key="address_hi",
-            label="Address (Hindi)",
-            type=FieldType.ADDRESS,
-            box=_WHOLE_PAGE,
-            language="hi",
-            required=False,
-            keep=_DEVANAGARI_OR_PIN,
-            starts_at=r"^\W*(?:\u092a\u0924\u094d\u0924\u093e|\u092a\u0924\u093e)",
-            extract=_HINDI_ADDRESS,
-            excludes=("name_hi",),
-            rule=_HINDI_ADDRESS_RULE,
-            normalize=(Normalizer.COLLAPSE_SPACES,),
-            accept=_NAME_ACCEPT_ADDRESS,
         ),
     ),
 )

@@ -9,6 +9,7 @@ from PIL import Image
 
 from extraction.core.error_codes import ErrorCode
 from extraction.pipeline.domain.exceptions import FileRejectedError, TooManyPagesError
+from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
 from extraction.pipeline.infrastructure.quality.page_loader import DocumentPageLoader
 from idp_ocr_engines.engines.arrays import to_rgb_array
 
@@ -128,3 +129,57 @@ def test_reads_pixels_that_are_not_all_one_value_when_the_image_has_detail() -> 
     page = LOADER.load_pages(_encoded(Image.fromarray(noise), "PNG"))[0]
 
     assert np.array_equal(to_rgb_array(page), noise)
+
+
+def test_caps_a_rendered_pdf_pages_long_side() -> None:
+    loader = DocumentPageLoader(
+        max_file_bytes=5_000_000, max_pages=3, max_pixels=20_000_000, pdf_dpi=300, pdf_max_side_px=2000
+    )
+
+    a4 = loader.load_pages(_pdf(1))[0]
+    card = loader.load_pages(_pdf(1, size=(645, 404)))[0]  # a card image saved as a PDF at 96 DPI
+
+    assert max(a4.width, a4.height) == pytest.approx(2000, abs=2)
+    assert max(card.width, card.height) == pytest.approx(2000, abs=2)
+
+
+def _picture_pdf(*, width_pt: float, height_pt: float, size_px: tuple[int, int] = (300, 200)) -> bytes:
+    """A letter page with one JPEG placed on it (a photo saved as a PDF): made-up grey pixels."""
+    jpeg = io.BytesIO()
+    Image.new("RGB", size_px, (120, 130, 140)).save(jpeg, format="JPEG")
+    document = pdfium.PdfDocument.new()
+    page = document.new_page(612, 792)
+    picture = pdfium.PdfImage.new(document)
+    picture.load_jpeg(io.BytesIO(jpeg.getvalue()), inline=True)
+    picture.set_matrix(pdfium.PdfMatrix().scale(width_pt, height_pt).translate(36, 400))
+    page.insert_obj(picture)
+    page.gen_content()
+    out = io.BytesIO()
+    document.save(out)
+    return out.getvalue()
+
+
+def test_reads_a_picture_page_from_the_picture_itself_at_its_own_pixels() -> None:
+    loader = DocumentPageLoader(
+        max_file_bytes=5_000_000, max_pages=3, max_pixels=20_000_000, pdf_dpi=300, pdf_picture_min_fraction=0.3
+    )
+
+    page = loader.load_pages(_picture_pdf(width_pt=540, height_pt=360))[0]
+
+    assert (page.width, page.height) == (300, 200)  # the picture, not a 2550 x 3300 render of the page
+
+
+def test_renders_the_page_when_its_largest_image_is_small_like_an_e_documents_photo() -> None:
+    loader = DocumentPageLoader(
+        max_file_bytes=5_000_000, max_pages=3, max_pixels=20_000_000, pdf_dpi=300, pdf_picture_min_fraction=0.3
+    )
+
+    page = loader.load_pages(_picture_pdf(width_pt=100, height_pt=120))[0]
+
+    assert (page.width, page.height) == pytest.approx((2550, 3300), abs=2)
+
+
+def test_reads_no_text_layer_on_a_picture_page() -> None:
+    reader = PdfiumTextReader(dpi=300, picture_min_fraction=0.3)
+
+    assert reader.read_first_page(_picture_pdf(width_pt=540, height_pt=360)) is None

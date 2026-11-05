@@ -6,6 +6,7 @@ All synchronous: the use case runs in a worker thread of the sync process, never
 from collections.abc import Sequence
 from typing import Protocol
 
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.domain.models import PipelineOutcome, QuickCaller, QuickResult, StagedFile
 
 
@@ -25,7 +26,16 @@ class DocumentPipelinePort(Protocol):
     """The extraction pipeline on the uploaded files: quality gate, two OCR engines, the template's fields, and the AI
     on the crops of the fields the engines left unsure. Raises the pipeline's file and quality errors."""
 
-    def run(self, caller: QuickCaller, contents: Sequence[bytes], folder: str) -> PipelineOutcome: ...
+    def run(
+        self,
+        caller: QuickCaller,
+        contents: Sequence[bytes],
+        folder: str,
+        template: TemplateDefinition | None = None,
+    ) -> PipelineOutcome:
+        """With ``template`` (a custom template), the document is read with it, without classifying; else with the
+        account's templates, the one that matches."""
+        ...
 
     def stage(self, contents: Sequence[bytes], folder: str) -> Sequence[StagedFile]:
         """The files as page images (PDF pages rendered, photos upright), no OCR and no quality gate: the first two
