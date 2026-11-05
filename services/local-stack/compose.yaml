@@ -162,6 +162,10 @@ services:
       MODEL__SMART_MODEL: ${MODEL_NAME:-smart}
       MODEL__AUTO_MODEL: ${MODEL_NAME:-auto}
       MODEL__SEND_SCHEMA: ${MODEL_SEND_SCHEMA:-true}
+      # Conversion's page reading on its own (larger) model server; empty: the main model (ai-gateway ADR 0005)
+      MODEL__PAGE__BASE_URL: ${PAGE_MODEL_URL:-}
+      MODEL__PAGE__MODEL: ${PAGE_MODEL_NAME:-page}
+      MODEL__PAGE__SEND_SCHEMA: ${PAGE_MODEL_SEND_SCHEMA:-true}
       # Integration testing runs every call on one test account: the real daily limits (10, 30, 5000) run out in hours
       CAPS__GUEST: ${CAPS_GUEST:-100000}
       CAPS__PERSONAL: ${CAPS_PERSONAL:-100000}

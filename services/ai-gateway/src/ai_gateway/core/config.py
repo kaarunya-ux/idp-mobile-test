@@ -7,7 +7,7 @@ from datetime import timedelta
 from functools import lru_cache
 from typing import Literal, Self
 
-from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr, model_validator
+from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,21 @@ class ModelTimeouts(BaseModel):
     connect: timedelta = Field(timedelta(seconds=2), ge=timedelta(milliseconds=100), le=timedelta(seconds=30))
 
 
+class PageServerSettings(BaseModel):
+    """A separate model server for page-read, conversion's whole pages (ADR 0005): a larger model reads layout and
+    tables better than the card model. Unset, page-read goes to the main server's vision model."""
+
+    base_url: HttpUrl | None = None  # e.g. http://10.0.3.154:8080/v1
+    model: str = Field("page", min_length=1, max_length=128)  # the name that server knows
+    api_key: SecretStr | None = None
+    send_schema: bool = True  # llama-server enforces it; false for mlx_vlm.server
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _empty_is_unset(cls, value: object) -> object:
+        return None if value == "" else value  # compose passes an empty variable as ""
+
+
 class ModelSettings(BaseModel):
     """The local model server (OpenAI-style ``/v1``; IDP-03 ch. 4.1)."""
 
@@ -43,6 +58,7 @@ class ModelSettings(BaseModel):
     min_image_side_px: int = Field(768, ge=0, le=2048)  # smaller card pictures are enlarged (the web app's MIN_EDGE)
     max_image_bytes: ByteSize = ByteSize(20 * 1024 * 1024)  # larger page images are refused (AIG-422-INPUT-001)
     send_schema: bool = True  # false for mlx_vlm.server, whose schema enforcement corrupts the first value
+    page: PageServerSettings = Field(default_factory=PageServerSettings)
     thinking: bool | None = False  # hybrid models' reasoning when the prompt doesn't say; None sends nothing
 
 

@@ -176,3 +176,19 @@ checks as a stored image (ADR 0004). For extraction's synchronous lane, which ke
 Without schema enforcement (mlx_vlm.server), Qwen3.5-4B left out each block's `kind`, so every page-read answer was
 refused and conversion's scanned routes failed (`CNV-503-AI-001`). A block without a kind is now a table when it has
 rows or a header, else a paragraph. Against the Mac mini's model, the made-up card: 9 blocks in 14 s.
+
+## Entry 8: page-read on its own model server (2026-11-05)
+
+**Goal:** conversion's page reading on the Qwen3.6-35B (llama-server on the second Mac mini), extraction staying on
+the 4B. Decisions: ADR 0005.
+
+### What we did
+
+`ModelRole.PAGE` for page-read; `MODEL__PAGE__*` settings; `RoutedModel` sends a role with a server of its own there
+(its own HTTP client and circuit breaker), the rest to the main server. The local stack's `make use-mac-model` sets
+both (`PAGE_MODEL_URL`, default `http://10.0.3.154:8080/v1`).
+
+### Check it
+
+Five tests (routing by role, page-read on the page role, an empty address is unset, the wiring with and without a page
+server). Against the 35B, the made-up card through page-read: 9 blocks in 26.9 s, the schema enforced by llama-server.

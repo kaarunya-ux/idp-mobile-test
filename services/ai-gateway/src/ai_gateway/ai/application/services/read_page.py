@@ -32,7 +32,7 @@ class ReadPageService:
         prompt = self._prompts.get(PROMPT)
         images = await self._images.load([page], stack=False, max_side_px=self._max_side_px)
         request = ModelRequest(
-            role=prompt.model or ModelRole.VL,
+            role=ModelRole.PAGE,  # its own model when one is set up (MODEL__PAGE__BASE_URL)
             system=prompt.system,
             text=QUESTION,
             images=images,

@@ -33,3 +33,7 @@ def test_raises_when_storage_is_required_but_not_set() -> None:
 def test_refuses_to_reserve_every_model_slot_for_the_synchronous_path() -> None:
     with pytest.raises(ValueError, match="INTERACTIVE_RESERVED_SLOTS"):
         Settings(model={"vl_max_concurrent": 2}, queue={"interactive_reserved_slots": 2})
+
+
+def test_takes_an_empty_page_server_address_as_none() -> None:
+    assert Settings(model={"page": {"base_url": ""}}).model.page.base_url is None

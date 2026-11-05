@@ -42,11 +42,17 @@ logs:  ## every service, newest lines; one service: make logs s=extraction-worke
 # restarts; `make up` or `make use-mock-model` puts the mock back. mlx_vlm.server breaks enforced schemas: none is sent.
 MAC_MODEL_URL ?= http://10.0.3.99:8082/v1
 MAC_MODEL_NAME ?= models/Qwen3.5-4B-MLX-4bit
+# Conversion's page reading: the Qwen3.6-35B on the other Mac mini (llama-server). PAGE_MODEL_URL= (empty) sends it
+# to the 4B too. Its address has changed before: check it with curl <address>/models
+PAGE_MODEL_URL ?= http://10.0.3.154:8080/v1
+PAGE_MODEL_NAME ?= qwen3.6-35b-a3b
 
 use-mac-model:  ## AI answers from the Mac mini's real model (until the next `make up`)
 	MODEL_BASE_URL=$(MAC_MODEL_URL) MODEL_NAME=$(MAC_MODEL_NAME) MODEL_SEND_SCHEMA=false \
+		PAGE_MODEL_URL=$(PAGE_MODEL_URL) PAGE_MODEL_NAME=$(PAGE_MODEL_NAME) \
 		docker compose up -d --no-build --no-deps --force-recreate ai-gateway
 	@echo "ai-gateway now uses $(MAC_MODEL_NAME) at $(MAC_MODEL_URL)"
+	@echo "and, for conversion's page reading, $(if $(PAGE_MODEL_URL),$(PAGE_MODEL_NAME) at $(PAGE_MODEL_URL),the same model)"
 
 use-mock-model:  ## back to the mock model's made-up answers
 	docker compose up -d --no-build --no-deps --force-recreate ai-gateway

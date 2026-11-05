@@ -10,7 +10,7 @@ import respx
 from ai_gateway.ai.domain.exceptions import ModelUnavailableError
 from ai_gateway.ai.domain.models import Image, ModelRequest, ModelRole
 from ai_gateway.ai.infrastructure.breaker import BreakerState, CircuitBreaker
-from ai_gateway.ai.infrastructure.model_client import OpenAiModelClient
+from ai_gateway.ai.infrastructure.model_client import OpenAiModelClient, RoutedModel
 
 BASE = "http://model.test/v1/"
 REQUEST = ModelRequest(
@@ -116,3 +116,23 @@ async def test_switches_thinking_off_in_both_servers_forms_unless_the_prompt_say
     default, prompt_says = (json.loads(call.request.content) for call in route.calls)
     assert (default["chat_template_kwargs"], default["enable_thinking"]) == ({"enable_thinking": False}, False)
     assert (prompt_says["chat_template_kwargs"], prompt_says["enable_thinking"]) == ({"enable_thinking": True}, True)
+
+
+@respx.mock
+async def test_sends_the_page_role_to_its_own_server_and_every_other_role_to_the_main_one() -> None:
+    main_route = respx.post(f"{BASE}chat/completions").mock(return_value=httpx.Response(200, json=REPLY))
+    page_route = respx.post("http://page.test/v1/chat/completions").mock(return_value=httpx.Response(200, json=REPLY))
+    breaker = CircuitBreaker(failures=5, window_s=30, reset_after_s=30)
+    main = OpenAiModelClient(httpx.AsyncClient(base_url=BASE), models={ModelRole.VL: "vl"}, breaker=breaker)
+    page = OpenAiModelClient(
+        httpx.AsyncClient(base_url="http://page.test/v1/"),
+        models={ModelRole.PAGE: "qwen3.6-35b-a3b"},
+        breaker=CircuitBreaker(failures=5, window_s=30, reset_after_s=30),
+    )
+    routed = RoutedModel(main, {ModelRole.PAGE: page})
+
+    await routed.complete(REQUEST, timeout_s=10)
+    await routed.complete(replace(REQUEST, role=ModelRole.PAGE), timeout_s=10)
+
+    assert (main_route.call_count, page_route.call_count) == (1, 1)
+    assert json.loads(page_route.calls[0].request.content)["model"] == "qwen3.6-35b-a3b"
