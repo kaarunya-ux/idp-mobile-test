@@ -6,6 +6,7 @@ Every environment variable is listed in README.md (CFG-05). Nested groups use a 
 
 from datetime import timedelta
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr
@@ -121,6 +122,21 @@ class AiGatewaySettings(BaseModel):
     # pages read at the same time: the page model's parallel slots (llama-server -np 4). One at a time, a 3-page scan
     # took 47 s on the 35B; all three at once, 26 s
     page_concurrency: int = Field(4, ge=1, le=32)
+    # how a page is read (ADR 0001): "model", the page model writes the page's text and its layout (page-read);
+    # "ocr_layout", OCR reads the text on this machine and the page model only says how the lines are laid out
+    # (page-layout), by their numbers. "model" until the two are compared on real scans
+    page_reader: Literal["model", "ocr_layout"] = "model"
+
+
+class OcrSettings(BaseModel):
+    """The OCR models for ``AI_GATEWAY__PAGE_READER=ocr_layout`` (ML-01, ML-06): extraction's PP-OCRv6 small, on the
+    CPU. Loaded on a worker's first scanned page, not at startup, so the other workers never hold them."""
+
+    models_dir: Path = Path("models")
+    models_file: Path = Path("models.yaml")
+    # pages are read four at a time (AI_GATEWAY__PAGE_CONCURRENCY), so more threads per page only fight over the
+    # cores; 2 is extraction's measured setting
+    threads: int = Field(2, ge=1, le=64)
 
 
 class ServiceAuthSettings(BaseModel):
@@ -152,6 +168,7 @@ class Settings(BaseSettings):
     crypto: CryptoSettings = Field(default_factory=CryptoSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
     service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
     # No defaults: credentials never live in code (CFG-03). Only the processes that use a group require it, so the
     # health server and unit tests run without them; ``require_*`` stops a worker at startup instead.

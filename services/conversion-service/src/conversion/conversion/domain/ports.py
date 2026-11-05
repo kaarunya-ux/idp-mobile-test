@@ -66,8 +66,8 @@ class ConverterPort(Protocol):
 class PageReaderPort(Protocol):
     """Reads one page picture (a scanned page, or a photo) into the document model's blocks, for the scanned routes.
 
-    The model-first reader asks ai-gateway's ``page-read`` (Sumukh's approach). An OCR reader can sit behind the same
-    port later, and the route then picks one; neither knows about the other.
+    The model-first reader asks ai-gateway's ``page-read`` (Sumukh's approach); the OCR-first reader reads the text
+    with OCR and asks ``page-layout`` how it is laid out (ADR 0001). ``AI_GATEWAY__PAGE_READER`` picks one.
     """
 
     def read_page(self, image: Path, number: int, context: StepContext) -> Page:

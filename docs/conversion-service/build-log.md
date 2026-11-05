@@ -1096,3 +1096,57 @@ another, about 15 s each (the model writes about 400 tokens a page at about 30 t
 
 The 3-page scanned PDF to Word, the model warm: one page at a time 44.3 s, four at a time 25.2 s. Tests for the order,
 the concurrency and the long-side cap; the reader tests send the picture inline.
+
+## Entry 13: OCR-first reading of scanned pages, behind a switch (2026-11-05)
+
+**Goal:** a scanned page in seconds, with text no model wrote. OCR reads the page here; ai-gateway's page-layout says
+how the lines are laid out. Decisions: ADR 0001 (`services/conversion-service/docs/adr/`).
+
+### What we did
+
+- `src/idp_ocr_engines`: extraction's OCR library, copied unchanged; `models.yaml` with its PP-OCRv6 small detector
+  and recogniser (same checksums). `numpy`, `onnxruntime`, `opencv-python-headless` in the `workers` extra; import
+  contracts keep the library free of service code and the health server free of all of it.
+- `domain/page_layout.py`: the page from OCR's numbered lines and the model's blocks; lines the model left out stay,
+  where they sit; without the model, OCR's blocks as paragraphs.
+- `OcrLayoutPageReader`: OCR (models loaded on the first page), then page-layout; ai-gateway unavailable or over the
+  cap: OCR's paragraphs; OCR unable to run: the model-first reader.
+- `AI_GATEWAY__PAGE_READER = model | ocr_layout` (default `model`), `OCR__MODELS_DIR`, `OCR__MODELS_FILE`,
+  `OCR__THREADS`. Worker image: `libglib2.0-0` and `models.yaml`. Local stack: the OCR worker mounts the models
+  folder; `CONVERSION_PAGE_READER=ocr_layout` turns it on.
+- `GatewayPageReader`'s call to ai-gateway is now a function both readers use (same error mapping).
+
+### Check it
+
+13 new tests (the page rebuild, the reader's fallbacks, the wiring without loading models). The 3-page scan with the
+old ai-gateway (page-layout answered 404, so the fallback ran): 5.5 s, 210 words (model-first: 25.2 s, 212 words), the
+three tables flattened to paragraphs. With page-layout on the 35B: 26.8 s warm (104 s cold), the same structure as
+model-first (3 tables of the same shapes, 12 paragraphs against 11, 210 words against 212).
+
+Where a page's time goes (the 35B, its prompt cache off): reading the picture about 23 s, writing the layout 9 to 14 s
+(270 to 410 tokens at 30 a second). Without the picture, the 35B answered the same layout on all three pages, in 12 to
+18 s a page instead of 36 to 42 s. A 1024 px picture made it loop until its token limit.
+
+## Entry 14: Digital PDF to Word, paragraphs, browser tables and lists read properly (2026-11-05)
+
+**Goal:** an 8-page report printed from a browser (`docs/python-services-integration-readiness.pdf`) converted in
+1.3 s with every word, but as 378 paragraphs (312 cut mid-sentence) and no tables. No OCR and no AI: rules only.
+
+### What we did
+
+- Text set a few points off its line (inline code, 3.1 pt lower) stays in its line (`_SAME_LINE_PT`, 4); it had cut
+  every sentence with code in two.
+- Tables drawn with only a rule under each row (`pdf_ruled_tables`): each rule is one segment per cell, so the
+  joints are the column edges; two or more rules with the same joints make a table; the header and the last row reach
+  as far as the text runs on. A rule drawn twice counts once.
+- A small drawn dot or square just left of a line is a bullet; a list item's level is where its marker starts, among
+  the page's list indents (numbered headings left out).
+- Running headers and footers (same text, numbers aside, in the top or bottom 5% of half the pages or more) left out.
+- A word broken at a hyphen across lines is joined without a space.
+
+### Check it
+
+7 new tests (the ruled table with a doubled rule, one rule alone stays text, lowered text, drawn bullets with
+levels, running header and footer, the hyphen). The report: 1.5 s, 83 paragraphs and 15 tables, list levels as
+printed, every word of the PDF except the running header and footer. Not handled yet: a table that continues on the
+next page comes out as two tables, the header repeated.

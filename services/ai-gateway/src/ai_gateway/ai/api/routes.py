@@ -19,6 +19,8 @@ from ai_gateway.ai.api.schemas import (
     GenericReadResponse,
     PageAnalysisRequest,
     PageAnalysisResponse,
+    PageLayoutRequest,
+    PageLayoutResponse,
     PageReadRequest,
     PageReadResponse,
     TemplateSuggestRequest,
@@ -28,6 +30,7 @@ from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_layout import ReadLayoutService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.domain.models import FieldReadQuery
@@ -55,6 +58,7 @@ type Analyser = Annotated[AnalysePageService, _service("analyse", AnalysePageSer
 type Suggester = Annotated[SuggestTemplateService, _service("suggest", SuggestTemplateService)]
 type PageReader = Annotated[ReadPageService, _service("read_page", ReadPageService)]
 type DocumentReader = Annotated[ReadDocumentService, _service("read_document", ReadDocumentService)]
+type LayoutReader = Annotated[ReadLayoutService, _service("read_layout", ReadLayoutService)]
 
 
 @router.post(
@@ -124,3 +128,15 @@ async def page_read(body: PageReadRequest, principal: Service, service: PageRead
 async def generic_read(body: GenericReadRequest, principal: Service, service: DocumentReader) -> GenericReadResponse:
     pages = [mappers.image_ref(p) for p in body.pages]
     return mappers.to_generic_read_response(await service.read(mappers.caller_of(body, principal), pages))
+
+
+@router.post(
+    "/page-layout",
+    summary="A page's structure over OCR's numbered lines",
+    response_model=PageLayoutResponse,
+    responses=_ERRORS,
+)
+async def page_layout(body: PageLayoutRequest, principal: Service, service: LayoutReader) -> PageLayoutResponse:
+    lines = [(line.n, line.text, line.box) for line in body.lines]
+    answer = await service.read(mappers.caller_of(body, principal), mappers.image_ref(body.page), lines)
+    return mappers.to_page_layout_response(answer)

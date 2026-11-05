@@ -294,7 +294,12 @@ services:
     restart: unless-stopped
     build: {<<: *conversion-build, target: worker}
     command: ["celery", "-A", "conversion.worker", "worker", "-Q", "ocr", "-c", "4", "--prefetch-multiplier", "1", "-n", "ocr@%h"]
-    environment: *conversion-env
+    environment:
+      <<: *conversion-env
+      # How a scanned page is read (conversion ADR 0001): "model" (page-read) or "ocr_layout" (OCR here, page-layout)
+      AI_GATEWAY__PAGE_READER: ${CONVERSION_PAGE_READER:-model}
+      OCR__MODELS_DIR: /models
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]  # extraction's PP-OCRv6 small, for ocr_layout
     depends_on:
       <<: *conversion-ready
       ai-gateway: {condition: service_healthy}

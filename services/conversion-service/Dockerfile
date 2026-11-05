@@ -44,11 +44,14 @@ CMD ["faststream", "run", "conversion.consumers:create_app", "--factory"]
 
 FROM runtime AS worker
 # LibreOffice for Office -> PDF; Noto fonts so Devanagari and other scripts never render as boxes (IDP-03 ch. 3.4).
+# libglib2.0-0 for OpenCV, which the OCR engine uses (AI_GATEWAY__PAGE_READER=ocr_layout, ADR 0001).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-core fonts-noto-extra \
+        libglib2.0-0 libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-core fonts-noto-extra \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build-workers /app /app
+# The OCR models are not in the image: they are mounted at OCR__MODELS_DIR. models.yaml pins their checksums (ML-01).
+COPY models.yaml ./
 # LibreOffice writes its profile under HOME; the app user's home is writable, the image isn't.
 ENV HOME=/home/app
 USER 10001

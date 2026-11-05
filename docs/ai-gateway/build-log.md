@@ -192,3 +192,24 @@ both (`PAGE_MODEL_URL`, default `http://10.0.3.154:8080/v1`).
 
 Five tests (routing by role, page-read on the page role, an empty address is unset, the wiring with and without a page
 server). Against the 35B, the made-up card through page-read: 9 blocks in 26.9 s, the schema enforced by llama-server.
+
+## Entry 9: page-layout, a page's structure by OCR line numbers (2026-11-05)
+
+**Goal:** conversion reads a scanned page's text with OCR and asks the page model only how the lines are laid out, so
+the model writes a few line numbers instead of the whole page. Decisions: ADR 0006.
+
+### What we did
+
+`Task.PAGE_LAYOUT` on the `page` role; `PageLayoutAnswer` (text blocks and tables of line numbers);
+`prompts/page-layout.v1.md`; `ReadLayoutService`, which sends the lines as a data block and refuses a number it wasn't
+sent; `POST /internal/v1/ai/page-layout`; `MODEL__TIMEOUTS__PAGE_LAYOUT` (120 s). No existing route changes.
+
+### Check it
+
+Five tests (blocks by line number on the page model, an unknown number repaired then refused, a missing kind, the
+route, repeated line numbers refused with 400). 123 unit tests pass; the Redis integration tests need Docker.
+
+First run against the 35B: every page-layout call answered 503. llama-server refused the answer schema ("failed to
+parse grammar"): it can't build a grammar from a list of more than 1000 items, and a block's `lines` allowed 2000. A
+block now takes at most 1000 lines (a page still sends up to 2000), and a test checks every answer schema for lists
+over 1000.

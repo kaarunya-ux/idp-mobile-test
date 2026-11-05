@@ -59,6 +59,49 @@ class PdfBuilder:
                 self.text(left + 4, cell_top + 5, value)
         return self
 
+    def rule(self, x0: float, x1: float, top: float) -> Self:
+        """A thin filled bar, as a browser draws a table row's bottom border."""
+        self._pages[-1] += b"%.1f %.1f %.1f 0.7 re f\n" % (x0, PAGE_HEIGHT - top - 0.7, x1 - x0)
+        return self
+
+    def dot(self, x: float, top: float, size: float = 3.0) -> Self:
+        """A small filled circle (four curves), as a browser draws a bullet."""
+        r, k = size / 2, size / 2 * 0.55
+        cx, cy = x + r, PAGE_HEIGHT - top - r
+        self._pages[-1] += (
+            b"%.2f %.2f m %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c "
+            b"%.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c f\n"
+            % (
+                cx + r,
+                cy,
+                cx + r,
+                cy + k,
+                cx + k,
+                cy + r,
+                cx,
+                cy + r,
+                cx - k,
+                cy + r,
+                cx - r,
+                cy + k,
+                cx - r,
+                cy,
+                cx - r,
+                cy - k,
+                cx - k,
+                cy - r,
+                cx,
+                cy - r,
+                cx + k,
+                cy - r,
+                cx + r,
+                cy - k,
+                cx + r,
+                cy,
+            )
+        )
+        return self
+
     def page(self) -> Self:
         self._pages.append(b"")
         return self
@@ -126,6 +169,107 @@ def test_reads_bullets_and_numbers_as_list_items_with_their_depth(tmp_path: Path
         (TextKind.LIST_ITEM, 1, "First point"),  # the bullet glyph goes: Word draws its own
         (TextKind.LIST_ITEM, 2, "Nested point"),
         (TextKind.LIST_ITEM, 1, "2. Numbered point"),  # numbers stay: they carry meaning
+    ]
+
+
+BODY = "Body text to set the body size, long enough to count the most of all the text on the page."
+
+
+def test_reads_a_table_drawn_with_only_a_rule_under_each_row(tmp_path: Path, make_request: MakeRequest) -> None:
+    columns = (72.0, 200.0, 400.0)
+    pdf = PdfBuilder().text(72, 60, BODY)
+    for top, cells in (
+        (100, ("Service", "Port")),
+        (120, ("conversion-", "8001")),
+        (134, ("service", "")),
+        (154, ("ai-gateway", "8002")),
+    ):
+        for left, cell in zip(columns, cells, strict=False):
+            if cell:
+                pdf.text(left + 4, top, cell)
+    for top in (115.0, 115.0, 149.0):  # the header's rule drawn twice, as on a table's next page
+        pdf.rule(72, 200, top).rule(200, 400, top)
+    pdf.text(72, 200, "A paragraph after the table.")
+
+    model = _read(pdf, tmp_path, make_request)
+
+    (table,) = model.pages[0].tables
+    assert table == Table(
+        rows=(("Service", "Port"), ("conversion-service", "8001"), ("ai-gateway", "8002")), header_rows=1
+    )
+    assert [b.text for b in _texts(model)] == [BODY, "A paragraph after the table."]
+
+
+def test_reads_text_as_text_when_only_one_rule_is_segmented(tmp_path: Path, make_request: MakeRequest) -> None:
+    pdf = (
+        PdfBuilder()
+        .text(72, 60, BODY)
+        .text(76, 100, "Name")
+        .text(204, 100, "Date")
+        .rule(72, 200, 115)
+        .rule(200, 400, 115)
+    )
+
+    model = _read(pdf, tmp_path, make_request)
+
+    assert model.pages[0].tables == []
+
+
+def test_keeps_text_set_a_few_points_lower_in_its_sentence(tmp_path: Path, make_request: MakeRequest) -> None:
+    pdf = (
+        PdfBuilder()
+        .text(72, 100, "Run the checks with")
+        .text(175, 103.1, "make check")  # inline code: a browser sets it 3.1 pt lower
+        .text(240, 100, "before you push,")
+        .text(72, 114, "then open the pull request.")
+    )
+
+    assert [b.text for b in _texts(_read(pdf, tmp_path, make_request))] == [
+        "Run the checks with make check before you push, then open the pull request."
+    ]
+
+
+def test_reads_lines_after_drawn_dots_as_list_items_at_their_markers_level(
+    tmp_path: Path, make_request: MakeRequest
+) -> None:
+    pdf = (
+        PdfBuilder()
+        .text(72, 60, BODY)
+        .dot(90, 104)
+        .text(101, 100, "First point")  # the text starts after the dot: the dot is where the item starts
+        .dot(118, 118)
+        .text(129, 114, "Nested point")
+        .text(90, 128, "2. Numbered point")
+    )
+
+    items = [(b.kind, b.level, b.text) for b in _texts(_read(pdf, tmp_path, make_request))][1:]
+
+    assert items == [
+        (TextKind.LIST_ITEM, 1, "First point"),
+        (TextKind.LIST_ITEM, 2, "Nested point"),
+        (TextKind.LIST_ITEM, 1, "2. Numbered point"),
+    ]
+
+
+def test_leaves_out_a_header_and_footer_repeated_on_every_page(tmp_path: Path, make_request: MakeRequest) -> None:
+    pdf = PdfBuilder()
+    for number in (1, 2):
+        if number > 1:
+            pdf.page()
+        pdf.text(30, 12, "report.md 2026-01-01", size=7).text(72, 100, f"Page text {number}.").text(
+            560, 770, f"{number} / 2", size=7
+        )
+
+    model = _read(pdf, tmp_path, make_request)
+
+    assert [[b.text for b in _texts(model, page)] for page in (0, 1)] == [["Page text 1."], ["Page text 2."]]
+
+
+def test_joins_a_word_broken_at_a_hyphen_across_lines(tmp_path: Path, make_request: MakeRequest) -> None:
+    pdf = PdfBuilder().text(72, 100, "The files go to the conversion-").text(72, 114, "service for reading.")
+
+    assert [b.text for b in _texts(_read(pdf, tmp_path, make_request))] == [
+        "The files go to the conversion-service for reading."
     ]
 
 

@@ -11,6 +11,7 @@ from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_layout import ReadLayoutService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.infrastructure.prompt_files import PromptFiles
@@ -49,6 +50,7 @@ def _client(model: FakeModel, caps: FakeCaps | None = None, *, available: bool =
                 suggest=SuggestTemplateService(runner=shared, images=images, prompts=prompts),
                 read_page=ReadPageService(runner=shared, images=images, prompts=prompts, max_side_px=2048),
                 read_document=ReadDocumentService(runner=shared, images=images, prompts=prompts),
+                read_layout=ReadLayoutService(runner=shared, images=images, prompts=prompts, max_side_px=2048),
             )
         )
 
@@ -291,3 +293,31 @@ def test_answers_400_when_an_image_is_not_exactly_one_of_stored_or_sent(client: 
     body = {"accountId": str(ACCOUNT), "page": image, "candidates": ["PAN_CARD"]}
 
     assert client.post("/internal/v1/ai/classify", json=body).status_code == 400
+
+
+def test_returns_a_pages_structure_by_line_number(client: TestClient, model: FakeModel) -> None:
+    layout = {
+        "blocks": [
+            {"kind": "heading", "lines": [0], "align": "center", "size": "large", "bold": True},
+            {"kind": "table", "has_header": True, "rows": [[[1], [2]], [[3], []]]},
+        ]
+    }
+    model.answers.append(json.dumps(layout))
+    lines = [
+        {"n": n, "text": t, "box": [0.1, 0.1 * (n + 1), 0.3, 0.04]} for n, t in enumerate(["TITLE", "A", "B", "1"])
+    ]
+    body = {"accountId": str(ACCOUNT), "page": {"data": base64.b64encode(b"jpeg").decode()}, "lines": lines}
+
+    response = client.post("/internal/v1/ai/page-layout", json=body)
+
+    assert response.status_code == 200
+    heading, table = response.json()["blocks"]
+    assert (heading["kind"], heading["lines"], heading["align"]) == ("heading", [0], "center")
+    assert (table["kind"], table["hasHeader"], table["rows"]) == ("table", True, [[[1], [2]], [[3], []]])
+
+
+def test_answers_400_when_page_layout_lines_repeat_a_number(client: TestClient) -> None:
+    lines = [{"n": 0, "text": "A", "box": [0, 0, 0.1, 0.1]}, {"n": 0, "text": "B", "box": [0, 0.2, 0.1, 0.1]}]
+    body = {"accountId": str(ACCOUNT), "page": {"data": base64.b64encode(b"jpeg").decode()}, "lines": lines}
+
+    assert client.post("/internal/v1/ai/page-layout", json=body).status_code == 400
