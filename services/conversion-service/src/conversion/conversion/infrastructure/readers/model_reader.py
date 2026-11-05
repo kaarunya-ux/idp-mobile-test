@@ -2,11 +2,12 @@
 talks to the model server).
 
 The model-first reading is Sumukh's (``services/conversions``, PR #20): the model looks at the page picture and
-writes its blocks (headings, paragraphs, lists, tables) with how each looks (centred, large, bold). This module only
-moves the picture to storage, asks the gateway, and turns its answer into the document model; the prompt and the
-answer's schema live in ai-gateway (``prompts/page-read.v1.md``).
+writes its blocks (headings, paragraphs, lists, tables) with how each looks (centred, large, bold). This module sends
+the picture inside the call (``{"data": ...}``: nothing is stored, ai-gateway ADR 0004), and turns the answer into the
+document model; the prompt and the answer's schema live in ai-gateway (``prompts/page-read.v1.md``).
 """
 
+import base64
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -16,32 +17,25 @@ import structlog
 
 from conversion.conversion.domain.document_model import Alignment, Block, Page, Table, TextBlock, TextKind
 from conversion.conversion.domain.exceptions import AiLimitReachedError, AiUnavailableError, UnreadableImageError
-from conversion.conversion.domain.ports import ObjectStoragePort, StepContext
-from conversion.conversion.domain.values import ObjectRef
+from conversion.conversion.domain.ports import StepContext
 from conversion.core.service_auth import ServiceTokenError, ServiceTokenProvider
 
 log = structlog.get_logger(__name__)
 
 PAGE_READ = "/internal/v1/ai/page-read"
-_CONTENT_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 _ALIGNMENT = {"left": Alignment.LEFT, "center": Alignment.CENTER, "right": Alignment.RIGHT}
 _TEXT_KINDS = {"heading": TextKind.HEADING, "paragraph": TextKind.PARAGRAPH, "caption": TextKind.CAPTION}
 _BULLET = ("•", "-", "–", "*", "·")  # noqa: RUF001 - the en dash is a bullet the model copies from the page
 
 
 class GatewayPageReader:
-    def __init__(
-        self, client: httpx.Client, tokens: ServiceTokenProvider, storage: ObjectStoragePort, *, bucket: str
-    ) -> None:
+    def __init__(self, client: httpx.Client, tokens: ServiceTokenProvider) -> None:
         self._client = client  # base URL and timeouts are set by bootstrap
         self._tokens = tokens
-        self._storage = storage
-        self._bucket = bucket
 
     def read_page(self, image: Path, number: int, context: StepContext) -> Page:
-        ref = ObjectRef(bucket=self._bucket, key=f"{context.key_prefix}/model-pages/page-{number:04d}{image.suffix}")
-        self._storage.upload(image, ref, _CONTENT_TYPES.get(image.suffix.lower(), "image/png"))
-        answer = self._post({"accountId": str(context.account_id), "page": {"bucket": ref.bucket, "key": ref.key}})
+        picture = base64.b64encode(image.read_bytes()).decode()
+        answer = self._post({"accountId": str(context.account_id), "page": {"data": picture}})
         try:
             return to_page(answer["blocks"])
         except (KeyError, TypeError) as exc:

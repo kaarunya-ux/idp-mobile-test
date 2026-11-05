@@ -113,7 +113,14 @@ class AiGatewaySettings(BaseModel):
     url: HttpUrl | None = None  # e.g. http://ai-gateway:8002
     timeout: timedelta = Field(timedelta(seconds=240), ge=timedelta(seconds=5), le=timedelta(minutes=15))
     render_dpi: int = Field(200, ge=72, le=400)  # a scanned PDF page is drawn at this DPI for the model
+    # ... and no larger than this on its long side: ai-gateway shrinks every page to 2048 px (its
+    # MODEL__PAGE_READ_MAX_SIDE_PX) before the model sees it, so a bigger picture is only work and bytes. A scan saved
+    # as a 1700 x 2200 pt page was drawn at 4723 x 6112 px
+    render_max_side_px: int = Field(2048, ge=512, le=8192)
     max_pages: int = Field(50, ge=1, le=500)  # one model call per page: more pages go to review, not to the model
+    # pages read at the same time: the page model's parallel slots (llama-server -np 4). One at a time, a 3-page scan
+    # took 47 s on the 35B; all three at once, 26 s
+    page_concurrency: int = Field(4, ge=1, le=32)
 
 
 class ServiceAuthSettings(BaseModel):

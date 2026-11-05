@@ -213,18 +213,15 @@ def test_converts_a_scanned_pdf_to_word_through_the_page_reader_with_the_jobs_co
     assert result.route.converters[0] is Converter.OCR_TO_MODEL
 
 
-def test_registers_the_scanned_reader_only_when_the_gateway_and_storage_are_configured() -> None:
+def test_registers_the_scanned_reader_only_when_the_gateway_and_its_login_are_configured() -> None:
     plain = build_converter_registry(Settings(_env_file=None))
     configured = Settings.model_validate(
         {
             "ai_gateway": {"url": "http://ai-gateway:8002"},
             "service_auth": {"token_url": "http://keycloak:8080/realms/idp/token", "client_secret": "test-secret"},
-            "storage": {"endpoint": "http://minio:9000", "access_key": "k", "secret_key": "s"},
         }
     )
 
     with pytest.raises(ConverterNotRegisteredError):
         plain.get(Converter.OCR_TO_MODEL)
-    with pytest.raises(ConverterNotRegisteredError):  # no storage handed in: still off
-        build_converter_registry(configured).get(Converter.OCR_TO_MODEL)
-    assert build_converter_registry(configured, storage=object()).get(Converter.OCR_TO_MODEL)
+    assert build_converter_registry(configured).get(Converter.OCR_TO_MODEL)  # no storage needed: pages go inline

@@ -1,6 +1,8 @@
 """The scanned routes' reading step: every page of a scan, or a photo, goes to the page reader; the model file
 holds what it read. A fake reader stands in for ai-gateway."""
 
+import threading
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -100,3 +102,47 @@ def test_refuses_a_file_that_is_not_an_image(tmp_path: Path) -> None:
 def test_needs_the_jobs_context(tmp_path: Path) -> None:
     with pytest.raises(OcrNotAvailableError):
         _converter(Reader()).convert(_request(tmp_path, _scan(tmp_path, 1), context=None))
+
+
+class SlowReader(Reader):
+    """Takes a while per page and records how many pages were being read at the same moment."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lock = threading.Lock()
+        self.now = 0
+        self.most = 0
+
+    def read_page(self, image: Path, number: int, context: StepContext) -> Page:
+        with self.lock:
+            self.now += 1
+            self.most = max(self.most, self.now)
+        time.sleep(0.05)
+        with self.lock:
+            self.now -= 1
+        return super().read_page(image, number, context)
+
+
+def test_reads_several_pages_at_once_and_keeps_them_in_page_order(tmp_path: Path) -> None:
+    reader = SlowReader()
+    converter = ModelFirstOcrConverter(reader, render_dpi=72, max_pages=50, max_pixels=50_000_000, concurrency=3)
+
+    result = converter.convert(_request(tmp_path, _scan(tmp_path, 5)))
+
+    assert reader.most == 3
+    assert [page.blocks[0].text for page in read_model(result.outputs[0]).pages] == [f"page {n}" for n in range(1, 6)]
+
+
+def test_draws_a_huge_scanned_page_no_larger_than_the_long_side_limit(tmp_path: Path) -> None:
+    document = pdfium.PdfDocument.new()
+    document.new_page(1700, 2200)  # a scan saved as a 1700 x 2200 pt page
+    path = tmp_path / "scan.pdf"
+    document.save(str(path))
+    reader = Reader()
+    converter = ModelFirstOcrConverter(
+        reader, render_dpi=200, max_pages=50, max_pixels=50_000_000, render_max_side_px=2048
+    )
+
+    converter.convert(_request(tmp_path, path))
+
+    assert max(reader.read[0][2]) == pytest.approx(2048, abs=1)  # not 6112
