@@ -170,3 +170,9 @@ classify needs a different question for this model: the type in its own words, m
 
 `ImageRefBody` takes `{bucket, key}` or `{data}` (base64), exactly one; the image store reads `data` with the same
 checks as a stored image (ADR 0004). For extraction's synchronous lane, which keeps nothing in storage.
+
+## Entry 7: page-read on the Mac mini's model (2026-11-04)
+
+Without schema enforcement (mlx_vlm.server), Qwen3.5-4B left out each block's `kind`, so every page-read answer was
+refused and conversion's scanned routes failed (`CNV-503-AI-001`). A block without a kind is now a table when it has
+rows or a header, else a paragraph. Against the Mac mini's model, the made-up card: 9 blocks in 14 s.

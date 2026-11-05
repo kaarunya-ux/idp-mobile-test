@@ -13,6 +13,7 @@ from extraction.core.config import Settings
 from extraction.core.errors import UnauthenticatedError
 from extraction.core.permissions import DOCUMENT_WRITE
 from extraction.core.security import Principal
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.application.quick_extract import QuickExtractService
 from extraction.quick.domain.exceptions import BusyError
 from extraction.quick.domain.models import (
@@ -62,12 +63,17 @@ class _Pipeline:
     def __init__(self, gate: threading.Event | None = None) -> None:
         self.gate = gate
         self.callers: list[QuickCaller] = []
+        self.templates: list[TemplateDefinition | None] = []
 
-    def run(self, caller: QuickCaller, contents: Sequence[bytes], folder: str) -> PipelineOutcome:
+    def run(
+        self, caller: QuickCaller, contents: Sequence[bytes], folder: str, template: TemplateDefinition | None = None
+    ) -> PipelineOutcome:
         self.callers.append(caller)
+        self.templates.append(template)
         if self.gate is not None:
             self.gate.wait(timeout=5)
-        return PipelineOutcome(result=None, pages=[StagedFile(bucket="idp-derived", key="acct/quick/1/page-0.png")])
+        found = RESULT if template is not None else None  # a named (custom) template always gives a result
+        return PipelineOutcome(result=found, pages=[StagedFile(bucket="idp-derived", key="acct/quick/1/page-0.png")])
 
     def stage(self, contents: Sequence[bytes], folder: str) -> Sequence[StagedFile]:
         self.staged = len(contents)
@@ -250,3 +256,40 @@ def test_refuses_a_token_without_the_document_write_permission() -> None:
 def test_refuses_to_start_without_a_test_account_when_tokens_are_not_required() -> None:
     with pytest.raises(ValidationError, match="DEFAULT_ACCOUNT_ID"):
         Settings(_env_file=None, quick={"require_token": False})
+
+
+def test_reads_only_the_keys_sent_on_the_custom_route() -> None:
+    pipeline = _Pipeline()
+    fields = '[{"key": "card_number", "label": "Card No"}, {"key": "expiry", "label": "Expires", "type": "date"}]'
+
+    response = _client(USER, pipeline=pipeline).post(
+        "/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields}
+    )
+
+    assert response.status_code == 200
+    template = pipeline.templates[0]
+    assert template is not None
+    assert [(f.key, f.label, f.type.value) for f in template.fields] == [
+        ("card_number", "Card No", "TEXT"),
+        ("expiry", "Expires", "DATE"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        "not json",
+        '{"key": "a", "label": "A"}',  # not a list
+        '[{"key": "Card Number", "label": "Card No"}]',  # not lower snake_case
+        '[{"key": "a", "label": "A", "type": "money"}]',
+        '[{"key": "a", "label": ""}]',
+    ],
+)
+def test_answers_400_on_the_custom_route_when_the_fields_are_not_valid(fields: str) -> None:
+    response = _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields})
+
+    assert (response.status_code, response.json()["code"]) == (400, "EXT-400-VALIDATION-001")
+
+
+def test_answers_400_on_the_custom_route_without_fields() -> None:
+    assert _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}).status_code == 400

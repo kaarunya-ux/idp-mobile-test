@@ -11,6 +11,7 @@ from extraction.core.clock import Clock
 from extraction.pipeline.application.commands import ExtractDocumentCommand
 from extraction.pipeline.domain.classify import Classification, classify_page
 from extraction.pipeline.domain.crops import crop_page, padded
+from extraction.pipeline.domain.custom_template import CUSTOM_SCOPE
 from extraction.pipeline.domain.decisions import (
     FieldDecision,
     FieldSource,
@@ -69,6 +70,11 @@ class AiAssist:
     classify_min_confidence: float = 0.8  # an AI classification below this leaves the document unknown
     crops: AiCrops | None = None
 
+    def _limit(self, template: TemplateDefinition) -> int:
+        """How many unsettled fields still go to the AI. A custom template's keys are found by their labels only, and a
+        key whose label isn't printed is normal there, not a sign of a bad photo: all of them may go."""
+        return len(template.fields) if template.scope == CUSTOM_SCOPE else self.max_fields
+
     def classify(
         self, templates: Sequence[TemplateDefinition], context: AiCallContext
     ) -> tuple[Classification | None, tuple[str, str] | None]:
@@ -102,7 +108,7 @@ class AiAssist:
         (gateway busy, model down, cap used) leaves the fields as OCR left them, and isn't counted as an AI call.
         """
         unresolved = sum(_is_unresolved(d) for d in decisions)
-        if not unresolved or unresolved > self.max_fields:  # too many: the photo is the problem, not a field
+        if not unresolved or unresolved > self._limit(template):  # too many: the photo is the problem, not a field
             return decisions, None
         wanted = [d.key for d in decisions if _is_unresolved(d) or d.status is FieldStatus.EMPTY]
         definitions = {d.key: d for d in template.fields}
@@ -138,7 +144,7 @@ class AiAssist:
         """
         crops, folder = self.crops, context.crop_folder
         unsure = [d for d in decisions if d.status is FieldStatus.NEEDS_REVIEW]
-        if crops is None or folder is None or not unsure or len(unsure) > self.max_fields:
+        if crops is None or folder is None or not unsure or len(unsure) > self._limit(template):
             return decisions, []
         definitions = {d.key: d for d in template.fields}
 

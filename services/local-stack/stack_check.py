@@ -10,7 +10,8 @@
    ``page-read`` (the mock model answers in this stack).
 6. One synchronous extract: the card goes to extraction-sync's ``POST /api/v1/extract`` with the user's token, the
    way the backend calls it, and the type and fields come back on the same request (OCR first, the AI for what OCR
-   leaves unsure); and once more through ``POST /api/v1/extract/generic``, straight to the model (no OCR).
+   leaves unsure); once more through ``POST /api/v1/extract/generic``, straight to the model (no OCR); and through
+   ``POST /api/v1/extract/custom`` with keys of a made-up custom template.
 
 It plays the Java side the way ``conversion-service/scripts/send_job.py`` does. Exit code 0 only if every step passed.
 """
@@ -89,7 +90,7 @@ def check_api() -> str | None:
     return token
 
 
-def check_quick_extract(token: str | None, route: str = "/api/v1/extract") -> None:
+def check_quick_extract(token: str | None, route: str = "/api/v1/extract", fields: str | None = None) -> None:
     name = f"synchronous extract (POST {route})"
     if token is None:
         step(name, False, "no user token")
@@ -100,6 +101,7 @@ def check_quick_extract(token: str | None, route: str = "/api/v1/extract") -> No
             f"http://extraction-sync:8003{route}",
             headers={"Authorization": f"Bearer {token}"},
             files={"file": ("card.png", card_image(), "image/png")},
+            data={"fields": fields} if fields else None,
             timeout=60,
         )
     except httpx.HTTPError as exc:
@@ -267,6 +269,8 @@ if __name__ == "__main__":
     user_token = check_api()
     check_quick_extract(user_token)
     check_quick_extract(user_token, "/api/v1/extract/generic")
+    keys = '[{"key": "holder", "label": "Name"}, {"key": "birth", "label": "Date of Birth", "type": "date"}]'
+    check_quick_extract(user_token, "/api/v1/extract/custom", keys)
     guarded("extraction end to end", check_extraction)
     guarded("conversion end to end", check_conversion)
     guarded("scanned conversion end to end (model through ai-gateway)", check_scanned_conversion)

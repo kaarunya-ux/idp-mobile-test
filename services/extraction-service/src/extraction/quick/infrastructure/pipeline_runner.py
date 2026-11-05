@@ -20,6 +20,7 @@ from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.domain.models import PreparedPage
 from extraction.pipeline.domain.ports import AiCallContext, PageImageStorePort, PageLoaderPort
 from extraction.pipeline.domain.stages import Stage
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.domain.files import kind_of
 from extraction.quick.domain.models import (
     ExtractedField,
@@ -58,7 +59,13 @@ class PipelineDocumentRunner:
         self._bucket = bucket
         self._max_pages = max_pages
 
-    def run(self, caller: QuickCaller, contents: Sequence[bytes], folder: str) -> PipelineOutcome:
+    def run(
+        self,
+        caller: QuickCaller,
+        contents: Sequence[bytes],
+        folder: str,
+        template: TemplateDefinition | None = None,
+    ) -> PipelineOutcome:
         self._refuse_long_pdfs(contents)
         progress = _NoProgress()
         prepare = self._pipeline.prepare_service(progress)
@@ -78,8 +85,11 @@ class PipelineDocumentRunner:
             qualities=tuple(quality for result in prepared for quality in result.qualities),
             digital_page=self._pipeline.digital_reader.read_first_page(contents[0]),
             ai_context=context,
+            template_forced=template is not None,
         )
-        templates = self._pipeline.catalog.templates_for(caller.account_id, None)
+        templates = (
+            [template] if template is not None else self._pipeline.catalog.templates_for(caller.account_id, None)
+        )
         result = self._pipeline.extract_service(progress, templates).extract(command)
         return PipelineOutcome(
             result=quick_result(result), pages=[StagedFile(bucket=r.bucket, key=r.key) for r in stored]

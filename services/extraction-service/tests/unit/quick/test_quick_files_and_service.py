@@ -6,10 +6,13 @@ from uuid import UUID
 
 import pytest
 
+from extraction.pipeline.domain.custom_template import CUSTOM_SCOPE, CustomField
 from extraction.pipeline.domain.exceptions import ImageBlurredError
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.application.quick_extract import QuickExtractService
 from extraction.quick.domain.exceptions import (
     BusyError,
+    FieldsInvalidError,
     FileTooLargeError,
     FileTypeUnsupportedError,
     FileUnreadableError,
@@ -92,9 +95,13 @@ class FakePipeline:
     def __init__(self, result: QuickResult | None, error: Exception | None = None) -> None:
         self.result, self.error = result, error
         self.runs: list[int] = []
+        self.templates: list[TemplateDefinition | None] = []
 
-    def run(self, caller: QuickCaller, contents: Sequence[bytes], folder: str) -> PipelineOutcome:
+    def run(
+        self, caller: QuickCaller, contents: Sequence[bytes], folder: str, template: TemplateDefinition | None = None
+    ) -> PipelineOutcome:
         self.runs.append(len(contents))
+        self.templates.append(template)
         if self.error is not None:
             raise self.error
         return PipelineOutcome(result=self.result, pages=PAGES)
@@ -173,3 +180,30 @@ def test_discards_the_workspace_when_the_generic_read_fails() -> None:
     with pytest.raises(BusyError):
         _service(FakePipeline(None), FakeReader(BusyError()), workspace).extract_with_ai(CALLER, JPEG, None)
     assert workspace.discarded == workspace.opened
+
+
+def test_reads_a_custom_templates_keys_with_a_template_built_from_them() -> None:
+    pipeline, workspace = FakePipeline(BY_OCR), FakeWorkspace()
+    keys = [CustomField(key="card_number", label="Card No"), CustomField(key="holder", label="Name")]
+
+    assert _service(pipeline, FakeReader(), workspace).extract_custom(CALLER, JPEG, None, keys) is BY_OCR
+    template = pipeline.templates[0]
+    assert template is not None
+    assert (template.scope, [f.key for f in template.fields]) == (CUSTOM_SCOPE, ["card_number", "holder"])
+    assert workspace.discarded == workspace.opened
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        [],
+        [CustomField(key="a", label="A"), CustomField(key="a", label="Again")],  # the same key twice
+        [CustomField(key=f"k{n}", label="L") for n in range(51)],
+    ],
+)
+def test_refuses_custom_keys_that_are_none_repeated_or_too_many(keys: list[CustomField]) -> None:
+    workspace = FakeWorkspace()
+
+    with pytest.raises(FieldsInvalidError):
+        _service(FakePipeline(BY_OCR), FakeReader(), workspace).extract_custom(CALLER, JPEG, None, keys)
+    assert workspace.opened == []

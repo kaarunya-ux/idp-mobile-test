@@ -7,6 +7,8 @@
 # What runs here is chosen in .env with COMPOSE_PROFILES: "infra" = RabbitMQ, MinIO and Keycloak all here (mode B);
 # or any of "rabbitmq", "minio", "keycloak" one by one, with the backend's instances for the rest; see README.md.
 name: idp-python
+# Long-running services restart by themselves (restart: unless-stopped): intake and relay exit when the backend's
+# RabbitMQ drops the connection, and nothing brought them back. The one-time jobs keep restart: "no".
 
 x-extraction-build: &extraction-build
   context: ../extraction-service
@@ -58,6 +60,7 @@ services:
   # --- Our own infrastructure (always) ------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: idp
       POSTGRES_PASSWORD: idp-local
@@ -72,6 +75,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
@@ -81,6 +85,7 @@ services:
   # The local RabbitMQ also carries our Celery tasks when the IDP messages use the backend's broker.
   rabbitmq:
     profiles: [infra, rabbitmq]
+    restart: unless-stopped
     image: rabbitmq:4.1-management-alpine
     ports: ["5672:5672", "15672:15672"]  # 15672: management UI, guest/guest
     environment:
@@ -92,6 +97,7 @@ services:
 
   minio:
     profiles: [infra, minio]
+    restart: unless-stopped
     image: bitnamilegacy/minio:2025.4.22
     environment:
       MINIO_ROOT_USER: local-access-key
@@ -105,6 +111,7 @@ services:
 
   keycloak:
     profiles: [infra, keycloak]
+    restart: unless-stopped
     image: quay.io/keycloak/keycloak:26.0.7
     command: ["start-dev", "--import-realm"]
     environment:
@@ -138,12 +145,14 @@ services:
   # --- ai-gateway -------------------------------------------------------------------------------------------
   mock-model:
     image: idp-local/ai-gateway:mock-model
+    restart: unless-stopped
     build: {<<: *gateway-build, target: mock-model}
     environment:
       MOCK_MODEL__LATENCY_MS: ${MOCK_MODEL_LATENCY_MS:-300}
 
   ai-gateway:
     image: idp-local/ai-gateway:api
+    restart: unless-stopped
     build: {<<: *gateway-build, target: api}
     environment:
       <<: *common-env
@@ -153,6 +162,10 @@ services:
       MODEL__SMART_MODEL: ${MODEL_NAME:-smart}
       MODEL__AUTO_MODEL: ${MODEL_NAME:-auto}
       MODEL__SEND_SCHEMA: ${MODEL_SEND_SCHEMA:-true}
+      # Integration testing runs every call on one test account: the real daily limits (10, 30, 5000) run out in hours
+      CAPS__GUEST: ${CAPS_GUEST:-100000}
+      CAPS__PERSONAL: ${CAPS_PERSONAL:-100000}
+      CAPS__CORPORATE: ${CAPS_CORPORATE:-100000}
       REDIS__URL: redis://redis:6379/0
       AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
     ports: ["127.0.0.1:8002:8002"]  # internal service: only this machine, for debugging
@@ -177,6 +190,7 @@ services:
 
   extraction-api:
     image: idp-local/extraction-service:api
+    restart: unless-stopped
     build: {<<: *extraction-build, target: api}
     environment: *extraction-env
     ports: ["8000:8000"]
@@ -189,6 +203,7 @@ services:
 
   extraction-intake:
     image: idp-local/extraction-service:service
+    restart: unless-stopped
     build: {<<: *extraction-build, target: service}
     environment: *extraction-env
     depends_on: &extraction-ready
@@ -197,6 +212,7 @@ services:
 
   extraction-relay:
     image: idp-local/extraction-service:service
+    restart: unless-stopped
     build: {<<: *extraction-build, target: service}
     command: ["python", "-m", "extraction.outbox_relay"]
     environment: *extraction-env
@@ -204,6 +220,7 @@ services:
 
   extraction-worker:
     image: idp-local/extraction-service:worker
+    restart: unless-stopped
     build: {<<: *extraction-build, target: worker}
     command: ["celery", "-A", "extraction.worker", "worker", "-Q", "pipeline", "-c", "2", "--prefetch-multiplier", "1", "-n", "pipeline@%h"]
     environment: *extraction-env
@@ -212,6 +229,7 @@ services:
 
   extraction-worker-ai:
     image: idp-local/extraction-service:worker
+    restart: unless-stopped
     build: {<<: *extraction-build, target: worker}
     command: ["celery", "-A", "extraction.worker", "worker", "-Q", "ai", "-c", "4", "--prefetch-multiplier", "1", "-n", "ai@%h"]
     environment: *extraction-env
@@ -221,6 +239,7 @@ services:
   # The synchronous extract (ADR 0009): POST /api/v1/extract, OCR first, the AI for the unsure fields' crops
   extraction-sync:
     image: idp-local/extraction-service:worker
+    restart: unless-stopped
     build: {<<: *extraction-build, target: worker}
     command: ["uvicorn", "--factory", "extraction.sync_main:create_sync_app", "--host", "0.0.0.0", "--port", "8003"]
     environment: *extraction-env
@@ -243,6 +262,7 @@ services:
 
   conversion-intake:
     image: idp-local/conversion-service:service
+    restart: unless-stopped
     build: {<<: *conversion-build, target: service}
     environment: *conversion-env
     depends_on: &conversion-ready
@@ -251,6 +271,7 @@ services:
 
   conversion-relay:
     image: idp-local/conversion-service:service
+    restart: unless-stopped
     build: {<<: *conversion-build, target: service}
     command: ["python", "-m", "conversion.outbox_relay"]
     environment: *conversion-env
@@ -258,6 +279,7 @@ services:
 
   conversion-worker:
     image: idp-local/conversion-service:worker
+    restart: unless-stopped
     build: {<<: *conversion-build, target: worker}
     environment: *conversion-env
     depends_on: *conversion-ready
@@ -265,6 +287,7 @@ services:
   # The "ocr" pool: the scanned routes, which wait on ai-gateway (IDP-03 ch. 3.2: its own pool)
   conversion-worker-ocr:
     image: idp-local/conversion-service:worker
+    restart: unless-stopped
     build: {<<: *conversion-build, target: worker}
     command: ["celery", "-A", "conversion.worker", "worker", "-Q", "ocr", "-c", "4", "--prefetch-multiplier", "1", "-n", "ocr@%h"]
     environment: *conversion-env
@@ -274,6 +297,7 @@ services:
 
   conversion-health:
     image: idp-local/conversion-service:health
+    restart: unless-stopped
     build: {<<: *conversion-build, target: health}
     environment: *conversion-env
     ports: ["8001:8001"]

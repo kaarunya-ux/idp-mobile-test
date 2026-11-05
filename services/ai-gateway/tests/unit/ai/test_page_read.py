@@ -94,3 +94,23 @@ async def test_sends_the_thinking_switch_only_when_the_prompt_sets_it() -> None:
     first, second = (json.loads(call.request.content) for call in route.calls)
     assert first["chat_template_kwargs"] == {"enable_thinking": False}
     assert "chat_template_kwargs" not in second  # this client has no default (MODEL__THINKING unset)
+
+
+async def test_reads_blocks_without_a_kind_as_paragraphs_or_tables_when_the_host_enforces_no_schema() -> None:
+    answer = {
+        "analysis": {"n_blocks": 2, "table_column_counts": [2]},
+        "blocks": [
+            {"text": "A made-up paragraph"},
+            {"has_header": True, "n_data_rows": 1, "n_cols": 2, "header": ["A", "B"], "rows": [["1", "2"]]},
+        ],
+    }
+    service = ReadPageService(
+        runner=runner(FakeModel(json.dumps(answer))), images=FakeImages(), prompts=PromptFiles.load(), max_side_px=2048
+    )
+
+    read = await service.read(caller(), PAGE)
+
+    paragraph, table = read.value.blocks
+    assert isinstance(paragraph, PageTextBlock)
+    assert paragraph.kind == "paragraph"
+    assert isinstance(table, PageTableBlock)

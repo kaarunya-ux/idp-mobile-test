@@ -45,11 +45,11 @@ MAC_MODEL_NAME ?= models/Qwen3.5-4B-MLX-4bit
 
 use-mac-model:  ## AI answers from the Mac mini's real model (until the next `make up`)
 	MODEL_BASE_URL=$(MAC_MODEL_URL) MODEL_NAME=$(MAC_MODEL_NAME) MODEL_SEND_SCHEMA=false \
-		docker compose up -d --no-build --no-deps ai-gateway
+		docker compose up -d --no-build --no-deps --force-recreate ai-gateway
 	@echo "ai-gateway now uses $(MAC_MODEL_NAME) at $(MAC_MODEL_URL)"
 
 use-mock-model:  ## back to the mock model's made-up answers
-	docker compose up -d --no-build --no-deps ai-gateway
+	docker compose up -d --no-build --no-deps --force-recreate ai-gateway
 	@echo "ai-gateway now uses the mock model"
 
 down:  ## stop, keep the data

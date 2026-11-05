@@ -458,3 +458,23 @@ go to the AI. Three tests (picture page, small image rendered as before, no text
 PAN photo 1.16 s, all four fields by OCR. Aadhaar photo 1.44 s, five of six (engine B reads no address on it, so the
 address goes to the AI). The backend's Aadhaar PDF 3.3 s, six of six by OCR, no AI call (it took 11 s with the Hindi
 fields).
+
+## Entry 16: Custom templates, keys in the request (2026-11-04)
+
+**Goal:** users' own templates (a green card, say): the backend sends the keys with each request, we read exactly
+those, OCR first, and store nothing. Decisions: ADR 0013 (option B; no shared database, DB-01).
+
+### What we did
+
+- `FieldDefinition.value_after`: a field defined by its label only; the value is the text after the label on its
+  line, or the line below; nothing when the label isn't on the page. A label must open its piece of text.
+- `pipeline/domain/custom_template.py`: keys (`key`, `label`, `type` text/date/number) to a one-request template;
+  dates may lie ahead (an expiry date). The AI's ten-field limit doesn't apply to a custom template.
+- `POST /api/v1/extract/custom` on extraction-sync (`fields`: a JSON list, 1 to 50 keys, checked: 400 otherwise). The
+  stack check has a thirteenth check for it.
+
+### Check it
+
+A made-up PAN card with four custom keys, every label printed: 1.68 s, all four by OCR. With a fifth key whose label
+isn't printed: 5.4 s, the four by OCR and the fifth by the AI. Two flaws found and fixed on the way: a label matched at
+the end of a title ("Department" in "INCOME TAX DEPARTMENT"), and an apostrophe stopped "Father's Name" matching.

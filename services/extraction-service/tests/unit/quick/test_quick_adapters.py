@@ -11,6 +11,7 @@ import httpx
 import pytest
 from PIL import Image
 
+from extraction.pipeline.domain.custom_template import CustomField, custom_template
 from extraction.pipeline.domain.exceptions import TooManyPagesError
 from extraction.pipeline.domain.jobs import ObjectRef
 from extraction.pipeline.infrastructure.ai.inline_images import BUCKET, InlineImages
@@ -300,3 +301,14 @@ def test_refuses_a_long_pdf_on_the_generic_route_too() -> None:
 
     with pytest.raises(TooManyPagesError):
         runner.stage([_pdf(3)], "acct/quick/1")
+
+
+def test_reads_with_the_custom_template_alone_without_classifying() -> None:
+    pipeline = _Recording()
+    runner = PipelineDocumentRunner(pipeline, FakeLoader(), FakePages(), bucket="idp-derived", max_pages=2)  # type: ignore[arg-type]  # a stand-in pipeline
+    template = custom_template([CustomField(key="card_number", label="Card No")])
+
+    runner.run(CALLER, [b"\xff\xd8\xff made up"], "acct/quick/1", template)
+
+    assert pipeline.templates == [template]
+    assert pipeline.command.template_forced is True

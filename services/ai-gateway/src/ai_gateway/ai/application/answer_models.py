@@ -146,6 +146,21 @@ class PageReadAnswer(_Answer):
     analysis: PageAnalysis  # first: the field order is the order the model writes them (see the prompt)
     blocks: list[Annotated[PageTextBlock | PageTableBlock, Field(discriminator="kind")]] = Field(max_length=_MAX_BLOCKS)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _kind_when_missing(cls, data: Any) -> Any:
+        """A block without its ``kind`` is a table when it has rows or a header, else a paragraph. A host that
+        enforces the schema always writes it; without enforcement (mlx_vlm.server) a small model leaves it out."""
+        if not isinstance(data, dict) or not isinstance(data.get("blocks"), list):
+            return data
+        blocks = [
+            {**block, "kind": "table" if "rows" in block or "header" in block else "paragraph"}
+            if isinstance(block, dict) and "kind" not in block
+            else block
+            for block in data["blocks"]
+        ]
+        return {**data, "blocks": blocks}
+
 
 # --- generic-read: any document, every field it shows (extraction's synchronous path, ADR 0003) ------------------
 
