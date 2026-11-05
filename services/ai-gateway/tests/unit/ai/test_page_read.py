@@ -114,3 +114,12 @@ async def test_reads_blocks_without_a_kind_as_paragraphs_or_tables_when_the_host
     assert isinstance(paragraph, PageTextBlock)
     assert paragraph.kind == "paragraph"
     assert isinstance(table, PageTableBlock)
+
+
+async def test_reads_a_page_with_the_page_model() -> None:
+    model = FakeModel(json.dumps(ANSWER))
+    service = ReadPageService(runner=runner(model), images=FakeImages(), prompts=PromptFiles.load(), max_side_px=2048)
+
+    await service.read(caller(), PAGE)
+
+    assert model.requests[0].role is ModelRole.PAGE

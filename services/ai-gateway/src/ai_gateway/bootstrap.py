@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 import boto3
 import httpx
 from botocore.config import Config
+from pydantic import SecretStr
 from redis.asyncio import Redis
 
 from ai_gateway.ai.application.runner import ModelCallRunner
@@ -20,9 +21,10 @@ from ai_gateway.ai.application.services.read_fields import ReadFieldsService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.domain.models import ModelRole, Plan, Task
+from ai_gateway.ai.domain.ports import ModelPort
 from ai_gateway.ai.infrastructure.breaker import CircuitBreaker
 from ai_gateway.ai.infrastructure.metrics import PrometheusMetrics
-from ai_gateway.ai.infrastructure.model_client import OpenAiModelClient
+from ai_gateway.ai.infrastructure.model_client import OpenAiModelClient, RoutedModel
 from ai_gateway.ai.infrastructure.prompt_files import PromptFiles
 from ai_gateway.ai.infrastructure.redis_caps import RedisCaps
 from ai_gateway.ai.infrastructure.redis_slots import RedisSlots
@@ -53,10 +55,12 @@ class Container:
     ai: "AiServices | Unavailable"
     http: httpx.AsyncClient | None = None
     redis: Redis | None = None
+    page_http: httpx.AsyncClient | None = None  # the page model's own server, when it has one (ADR 0005)
 
     async def close(self) -> None:
-        if self.http is not None:
-            await self.http.aclose()
+        for client in (self.http, self.page_http):
+            if client is not None:
+                await client.aclose()
         if self.redis is not None:
             await self.redis.aclose()
 
@@ -72,25 +76,11 @@ def build(settings: Settings, clock: Clock) -> Container:
     if settings.redis is None or settings.storage is None:
         return Container(ai=Unavailable())
     model = settings.model
-    headers = {"Authorization": f"Bearer {model.api_key.get_secret_value()}"} if model.api_key else {}
-    http = httpx.AsyncClient(
-        base_url=str(model.base_url).rstrip("/") + "/",
-        headers=headers,
-        timeout=httpx.Timeout(60, connect=model.timeouts.connect.total_seconds()),
-        limits=httpx.Limits(max_connections=model.vl_max_concurrent * 4),
-    )
+    model_port, http, page_http = _model_servers(settings)
     redis = create_redis(settings.redis)
-    breaker = CircuitBreaker(
-        failures=settings.breaker.failures,
-        window_s=settings.breaker.window.total_seconds(),
-        reset_after_s=settings.breaker.reset_after.total_seconds(),
-    )
-    models = {ModelRole.VL: model.vl_model, ModelRole.SMART: model.smart_model, ModelRole.AUTO: model.auto_model}
     prompts = PromptFiles.load()
     runner = ModelCallRunner(
-        model=OpenAiModelClient(
-            http, models=models, breaker=breaker, send_schema=model.send_schema, thinking=model.thinking
-        ),
+        model=model_port,
         slots=RedisSlots(
             redis,
             capacity=model.vl_max_concurrent,
@@ -130,7 +120,54 @@ def build(settings: Settings, clock: Clock) -> Container:
         ),
         read_document=ReadDocumentService(runner=runner, images=images, prompts=prompts),
     )
-    return Container(ai=services, http=http, redis=redis)
+    return Container(ai=services, http=http, redis=redis, page_http=page_http)
+
+
+def _model_servers(settings: Settings) -> tuple[ModelPort, httpx.AsyncClient, httpx.AsyncClient | None]:
+    """The model server, and the page model's own server when ``MODEL__PAGE__BASE_URL`` is set (ADR 0005). Without
+    one, the page role is the main server's vision model."""
+    model = settings.model
+    http = _http(str(model.base_url), model.api_key, settings)
+    names = {
+        ModelRole.VL: model.vl_model,
+        ModelRole.SMART: model.smart_model,
+        ModelRole.AUTO: model.auto_model,
+        ModelRole.PAGE: model.vl_model,
+    }
+    main = OpenAiModelClient(
+        http, models=names, breaker=_breaker(settings), send_schema=model.send_schema, thinking=model.thinking
+    )
+    page = model.page
+    if page.base_url is None:
+        return main, http, None
+    page_http = _http(str(page.base_url), page.api_key, settings)
+    page_model = OpenAiModelClient(
+        page_http,
+        models={ModelRole.PAGE: page.model},
+        breaker=_breaker(settings),
+        send_schema=page.send_schema,
+        thinking=model.thinking,
+    )
+    return RoutedModel(main, {ModelRole.PAGE: page_model}), http, page_http
+
+
+def _http(base_url: str, api_key: SecretStr | None, settings: Settings) -> httpx.AsyncClient:
+    model = settings.model
+    return httpx.AsyncClient(
+        base_url=base_url.rstrip("/") + "/",
+        headers={"Authorization": f"Bearer {api_key.get_secret_value()}"} if api_key else {},
+        timeout=httpx.Timeout(60, connect=model.timeouts.connect.total_seconds()),
+        limits=httpx.Limits(max_connections=model.vl_max_concurrent * 4),
+    )
+
+
+def _breaker(settings: Settings) -> CircuitBreaker:
+    """One per server: a failing page model doesn't stop field reading on the card model, nor the other way round."""
+    return CircuitBreaker(
+        failures=settings.breaker.failures,
+        window_s=settings.breaker.window.total_seconds(),
+        reset_after_s=settings.breaker.reset_after.total_seconds(),
+    )
 
 
 def _limits(settings: Settings) -> dict[Plan, int]:

@@ -112,7 +112,9 @@ sudo ufw allow 5672,15672,9000,9001,8080,8000,8001,8003/tcp
 ## Real AI answers: the Mac mini's model
 
 `make use-mac-model` points ai-gateway at the Qwen3.5-4B model on the Mac mini (`http://10.0.3.99:8082/v1`, an
-mlx_vlm.server), restarting only ai-gateway; `make use-mock-model` (or the next `make up`) puts the mock back. The Mac
+mlx_vlm.server), and conversion's page reading at the Qwen3.6-35B on the other Mac mini
+(`PAGE_MODEL_URL`, default `http://10.0.3.154:8080/v1`, a llama-server; `make use-mac-model PAGE_MODEL_URL=` sends
+pages to the 4B too), restarting only ai-gateway; `make use-mock-model` (or the next `make up`) puts the mock back. The Mac
 mini's own web app keeps running beside it, and both share that one model, so they slow each other down when both are
 busy. To keep the real model across restarts, set `MODEL_BASE_URL`, `MODEL_NAME` and `MODEL_SEND_SCHEMA` in `.env`
 (see `.env.example`).

@@ -37,11 +37,16 @@ class Plan(StrEnum):
 
 
 class ModelRole(StrEnum):
-    """The model server's three models (IDP-03 ch. 4.1). The names they are sent as come from settings."""
+    """The model server's models (IDP-03 ch. 4.1). The names they are sent as come from settings.
+
+    PAGE reads whole pages for conversion-service's scanned routes; it can live on a server of its own (a larger
+    model, ADR 0005), and without one it is the vision model.
+    """
 
     VL = "vl"  # vision
     SMART = "smart"  # text only
     AUTO = "auto"  # open-ended questions
+    PAGE = "page"  # whole pages as blocks (page-read)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

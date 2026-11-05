@@ -81,6 +81,18 @@ class OpenAiModelClient:
         return body
 
 
+class RoutedModel:
+    """``ModelPort`` over several servers: a role with a server of its own goes there, every other role to the
+    default (the page role on the larger model, ADR 0005). Each server has its own circuit breaker."""
+
+    def __init__(self, default: OpenAiModelClient, by_role: Mapping[ModelRole, OpenAiModelClient]) -> None:
+        self._default = default
+        self._by_role = by_role
+
+    async def complete(self, request: ModelRequest, *, timeout_s: float) -> ModelReply:
+        return await self._by_role.get(request.role, self._default).complete(request, timeout_s=timeout_s)
+
+
 def _body(request: ModelRequest, model: str) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": request.text}]  # text first: the host caches it
     content += [
