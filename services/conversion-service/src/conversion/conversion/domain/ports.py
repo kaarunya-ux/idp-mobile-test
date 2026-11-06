@@ -102,6 +102,10 @@ class ObjectStoragePort(Protocol):
 
 
 class FileInspectorPort(Protocol):
+    def detect_format(self, path: Path) -> Format | None:
+        """The file's real format from its content, never its name (FIL-03); ``None`` when it is none we read."""
+        ...
+
     def is_scanned_pdf(self, path: Path) -> bool:
         """``True`` when the PDF has no text layer, so its text can only be read with OCR (IDP-03 ch. 3.4)."""
         ...

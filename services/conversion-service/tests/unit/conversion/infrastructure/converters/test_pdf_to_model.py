@@ -15,7 +15,7 @@ from pikepdf import Dictionary, Name
 
 from conversion.bootstrap import build_convert_file_service
 from conversion.conversion.application.commands import ConvertFileCommand
-from conversion.conversion.domain.document_model import Alignment, DocumentModel, Table, TextBlock, TextKind
+from conversion.conversion.domain.document_model import Alignment, DocumentModel, Picture, Table, TextBlock, TextKind
 from conversion.conversion.domain.exceptions import CorruptPdfError, LimitExceededError, PasswordRequiredError
 from conversion.conversion.domain.formats import Format, Representation
 from conversion.conversion.domain.options import ConversionOptions, PageRange
@@ -102,6 +102,11 @@ class PdfBuilder:
         )
         return self
 
+    def picture(self, x: float, top: float, width: float, height: float) -> Self:
+        """A small made-up image drawn at this size, as /Im0 in the page's resources."""
+        self._pages[-1] += b"q %.1f 0 0 %.1f %.1f %.1f cm /Im0 Do Q\n" % (width, height, x, PAGE_HEIGHT - top - height)
+        return self
+
     def page(self) -> Self:
         self._pages.append(b"")
         return self
@@ -111,7 +116,16 @@ class PdfBuilder:
         fonts = Dictionary(F1=_font("/Helvetica"), F2=_font("/Helvetica-Bold"))
         for content in self._pages:
             page = pdf.add_blank_page(page_size=(PAGE_WIDTH, PAGE_HEIGHT))
-            page.Resources = Dictionary(Font=fonts)
+            image = pdf.make_stream(
+                bytes([200, 40, 40]) * 4,
+                Type=Name.XObject,
+                Subtype=Name.Image,
+                Width=2,
+                Height=2,
+                BitsPerComponent=8,
+                ColorSpace=Name.DeviceRGB,
+            )
+            page.Resources = Dictionary(Font=fonts, XObject=Dictionary(Im0=image))
             page.Contents = pdf.make_stream(content)
         pdf.save(path)
         return path
@@ -271,6 +285,55 @@ def test_joins_a_word_broken_at_a_hyphen_across_lines(tmp_path: Path, make_reque
     assert [b.text for b in _texts(_read(pdf, tmp_path, make_request))] == [
         "The files go to the conversion-service for reading."
     ]
+
+
+def test_keeps_a_picture_where_it_sits_among_the_text_at_the_width_it_is_shown(
+    tmp_path: Path, make_request: MakeRequest
+) -> None:
+    pdf = PdfBuilder().text(72, 60, "Above the picture.").picture(72, 100, 200, 100).text(72, 260, "Below the picture.")
+
+    blocks = _read(pdf, tmp_path, make_request).pages[0].blocks
+
+    assert [type(block) for block in blocks] == [TextBlock, Picture, TextBlock]
+    picture = blocks[1]
+    assert isinstance(picture, Picture)
+    assert picture.width_pt == pytest.approx(200, abs=1)
+    assert picture.data.startswith(b"\xff\xd8\xff")
+
+
+@pytest.mark.parametrize(("width", "height"), [(10, 10), (PAGE_WIDTH, PAGE_HEIGHT)])
+def test_leaves_out_a_mark_too_small_to_be_a_picture_and_the_background_of_a_page(
+    tmp_path: Path, make_request: MakeRequest, width: float, height: float
+) -> None:
+    pdf = PdfBuilder().picture(0, 0, width, height).text(72, 300, "Some text on the page.")
+
+    blocks = _read(pdf, tmp_path, make_request).pages[0].blocks
+
+    assert [type(block) for block in blocks] == [TextBlock]
+
+
+def test_writes_a_pdfs_picture_into_the_word_file_on_the_full_route(tmp_path: Path) -> None:
+    source = PdfBuilder().text(72, 60, "A report with a picture.").picture(72, 100, 200, 100).save(tmp_path / "r.pdf")
+    output = tmp_path / "out"
+
+    result = build_convert_file_service(Settings(_env_file=None)).convert(
+        ConvertFileCommand(source=Format.PDF, target=Format.DOCX, inputs=(source,), output_dir=output)
+    )
+
+    assert len(docx.Document(str(result.outputs[0])).inline_shapes) == 1
+
+
+def test_keeps_body_text_left_aligned_when_wide_margins_put_it_in_the_middle_of_the_page(
+    tmp_path: Path, make_request: MakeRequest
+) -> None:
+    pdf = (  # about 70% of the page wide, and centred on it by the margins alone, as in Word's default layout
+        PdfBuilder()
+        .text(90, 100, "A made-up paragraph whose first line is long enough to wrap at the")
+        .text(90, 114, "right margin of a page with the wide margins that Word gives by default.")
+        .text(90, 150, "A second made-up paragraph, also starting at the left margin of the page.")
+    )
+
+    assert {block.alignment for block in _texts(_read(pdf, tmp_path, make_request))} == {Alignment.LEFT}
 
 
 def test_keeps_centred_and_right_aligned_lines(tmp_path: Path, make_request: MakeRequest) -> None:

@@ -304,6 +304,23 @@ services:
       <<: *conversion-ready
       ai-gateway: {condition: service_healthy}
 
+  # POST /api/v1/convert and /merge: files now, with the libraries only, no OCR and no AI (conversion ADR 0002)
+  conversion-sync:
+    image: idp-local/conversion-service:worker
+    restart: unless-stopped
+    build: {<<: *conversion-build, target: worker}
+    command: ["uvicorn", "--factory", "conversion.sync_main:create_sync_app", "--host", "0.0.0.0", "--port", "8004", "--timeout-graceful-shutdown", "30"]
+    environment:
+      LOGGING__FORMAT: console
+      LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: local
+      AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
+      SYNC__REQUIRE_TOKEN: ${SYNC_REQUIRE_TOKEN:-false}  # integration testing: a request without a token is let in
+    ports: ["8004:8004"]
+    healthcheck:
+      <<: *python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health/ready')"]
+
   conversion-health:
     image: idp-local/conversion-service:health
     restart: unless-stopped

@@ -4,6 +4,7 @@ Steps pass files, not objects: in step 4 the steps of one conversion may run in 
 model is stored as versioned JSON and validated by Pydantic when read back (OBJ-01: DTOs stay in this module).
 """
 
+import base64
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -14,6 +15,7 @@ from conversion.conversion.domain.document_model import (
     Block,
     DocumentModel,
     Page,
+    Picture,
     Table,
     TextBlock,
     TextKind,
@@ -41,9 +43,15 @@ class _TableDto(_Dto):
     header_rows: int
 
 
+class _PictureDto(_Dto):
+    type: Literal["picture"] = "picture"
+    data: str  # base64
+    width_pt: float
+
+
 class _PageDto(_Dto):
     name: str | None
-    blocks: list[Annotated[_TextBlockDto | _TableDto, Field(discriminator="type")]]
+    blocks: list[Annotated[_TextBlockDto | _TableDto | _PictureDto, Field(discriminator="type")]]
 
 
 class _DocumentModelDto(_Dto):
@@ -76,15 +84,19 @@ def read_model(path: Path) -> DocumentModel:
     )
 
 
-def _to_dto(block: Block) -> _TextBlockDto | _TableDto:
+def _to_dto(block: Block) -> _TextBlockDto | _TableDto | _PictureDto:
     if isinstance(block, Table):
         return _TableDto(rows=[list(row) for row in block.rows], header_rows=block.header_rows)
+    if isinstance(block, Picture):
+        return _PictureDto(data=base64.b64encode(block.data).decode(), width_pt=block.width_pt)
     return _TextBlockDto(
         text=block.text, kind=block.kind, level=block.level, alignment=block.alignment, bold=block.bold
     )
 
 
-def _to_block(dto: _TextBlockDto | _TableDto) -> Block:
+def _to_block(dto: _TextBlockDto | _TableDto | _PictureDto) -> Block:
     if isinstance(dto, _TableDto):
         return Table(rows=tuple(tuple(row) for row in dto.rows), header_rows=dto.header_rows)
+    if isinstance(dto, _PictureDto):
+        return Picture(data=base64.b64decode(dto.data), width_pt=dto.width_pt)
     return TextBlock(text=dto.text, kind=dto.kind, level=dto.level, alignment=dto.alignment, bold=dto.bold)

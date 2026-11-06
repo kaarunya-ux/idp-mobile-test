@@ -38,6 +38,9 @@ workers = [
     "numpy>=2.0",
     "onnxruntime>=1.19",
     "opencv-python-headless>=4.10",
+    # POST /api/v1/convert (ADR 0002), as in extraction-service: uploads and the person's token
+    "python-multipart>=0.0.9",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [dependency-groups]
@@ -152,7 +155,15 @@ forbidden_modules = [
 name = "Layers inside the conversion feature"
 type = "layers"
 containers = ["conversion.conversion"]
-layers = ["application", "domain"]
+layers = ["api", "application", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "The HTTP route knows the use case, not the adapters"
+type = "forbidden"
+source_modules = ["conversion.conversion.api"]
+forbidden_modules = [
+    "conversion.conversion.infrastructure", "conversion.bootstrap", "PIL", "pypdfium2", "pdfplumber", "httpx", "idp_ocr_engines",
+]
 
 [[tool.importlinter.contracts]]
 name = "Application depends on ports, not adapters"

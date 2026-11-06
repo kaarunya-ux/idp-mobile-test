@@ -19,6 +19,7 @@ from faststream.rabbit import RabbitBroker
 
 from conversion.conversion.application.services.accept_conversion import AcceptConversionService
 from conversion.conversion.application.services.convert_file import ConvertFileService
+from conversion.conversion.application.services.convert_now import ConvertNowService
 from conversion.conversion.application.services.edit_pdf import EditHandler
 from conversion.conversion.application.services.export_results import ExportHandler
 from conversion.conversion.application.services.process_conversion import OutputBuckets, ProcessConversionService
@@ -60,7 +61,7 @@ from conversion.conversion.infrastructure.secrets import RsaSecrets
 from conversion.conversion.infrastructure.storage import S3ObjectStorage
 from conversion.conversion.infrastructure.tasks import CeleryTaskQueue
 from conversion.core.clock import Clock, SystemClock
-from conversion.core.config import OcrSettings, Settings, StorageSettings
+from conversion.core.config import AiGatewaySettings, OcrSettings, Settings, StorageSettings
 from conversion.core.db import SessionFactory, create_db_engine, create_session_factory
 from conversion.core.outbox import OutboxRelay
 from conversion.core.service_auth import ServiceTokenProvider
@@ -84,7 +85,7 @@ def build_converter_registry(settings: Settings, storage: ObjectStoragePort | No
             PdfiumPageRenderer(max_pages=limits.max_pages, max_side_px=limits.max_render_side_px),
             Img2PdfImageWrapper(max_pixels=limits.max_image_pixels),
             PptxImageSlides(max_pixels=limits.max_image_pixels),
-            LibreOfficePdfConverter(binary=office.binary, timeout=office.timeout),
+            LibreOfficePdfConverter(binary=office.binary, timeout=office.timeout, keep_warm=office.keep_warm),
             OpenpyxlCsvConverter(),
             PythonDocxReader(),
             SheetReader(),
@@ -137,6 +138,24 @@ def _ocr_engine(ocr: OcrSettings) -> OcrEnginePort:
 
 def build_convert_file_service(settings: Settings, storage: ObjectStoragePort | None = None) -> ConvertFileService:
     return ConvertFileService(RoutePlanner(), build_converter_registry(settings, storage))
+
+
+def build_convert_now_service(settings: Settings) -> ConvertNowService:
+    """The synchronous route's use case (ADR 0002): the libraries only, so no ai-gateway even when it is configured;
+    no storage and no database."""
+    libraries_only = settings.model_copy(
+        update={
+            "ai_gateway": AiGatewaySettings(),
+            "service_auth": None,
+            "office": settings.office.model_copy(update={"keep_warm": True}),
+        }
+    )
+    return ConvertNowService(
+        RoutePlanner(),
+        build_convert_file_service(libraries_only),
+        PdfiumFileInspector(),
+        PikepdfMerger(max_pages=settings.limits.max_pages),
+    )
 
 
 def build_job_runner(settings: Settings, storage: ObjectStoragePort) -> JobRunner:

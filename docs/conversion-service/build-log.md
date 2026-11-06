@@ -1150,3 +1150,53 @@ Where a page's time goes (the 35B, its prompt cache off): reading the picture ab
 levels, running header and footer, the hyphen). The report: 1.5 s, 83 paragraphs and 15 tables, list levels as
 printed, every word of the PDF except the running header and footer. Not handled yet: a table that continues on the
 next page comes out as two tables, the header repeated.
+
+## Entry 15: POST /api/v1/convert, a file converted over HTTP with the libraries only (2026-11-06)
+
+**Goal:** the backend chooses per file: a small file over HTTP, the rest as a job. Decisions: ADR 0002.
+
+### What we did
+
+- `conversion-sync` (port 8004, the worker image), `conversion/api/routes.py`, `ConvertNowService`: `file`, `target` and
+  optional `options` in, the converted file out, one ZIP when a conversion makes several files.
+- The libraries only: a scan or photo to a document answers `CNV-422-SYNC-001`, and the process is built without
+  ai-gateway whatever the environment says. It first let scans through to the AI; the team lead corrected that.
+- Each conversion runs in a spawned worker process; one that dies is replaced. Limits answer `CNV-413-FILE-001` and
+  `CNV-429-BUSY-001`, both meaning "send it as a job".
+- `detect_format`: the type from the content. `DomainError` survives pickling. `core/security.py` and
+  `core/problem_details.py`, copied from extraction. The job's ZIP step moved to `packaging.py`, shared with the job.
+- Local stack: the service, and a step in `make check`.
+
+### Check it
+
+The 8-page digital PDF over real HTTP on this laptop (not yet in Docker): DOCX 1.7 s, XLSX 1.4 s, CSV 1.4 s, PPTX 1.1 s,
+PNG 1.0 s and JPEG 0.3 s (ZIPs of 8 images). The scanned PDF to DOCX, XLSX or CSV: refused in under 10 ms with
+AI settings on, no call to ai-gateway. 8 requests at once: 4 converted, 4 answered 429. No temp folder left.
+Known limits are in the ADR: no virus scan on this route, no timeout on PDF reading, and CSV holds only a PDF's first table.
+
+## Entry 16: Every library conversion over HTTP, several files, merge, and a warm LibreOffice (2026-11-06)
+
+**Goal:** finish all conversions on the HTTP lane before OCR + AI and RabbitMQ testing. Several files accepted; the
+backend decides how much to send.
+
+### What we did
+
+- All 36 library conversions run through `POST /api/v1/convert`; the 6 that read a photo answer `CNV-422-SYNC-001`.
+- Several `file` fields: images to a PDF or deck combine into one file, anything else comes back as one ZIP. New
+  `POST /api/v1/merge`, sharing `merging.py` with the `PDF_MERGE` job.
+- The 20 MB and 20 page limits are gone: wide ceilings only, as on the queued way.
+- A spare LibreOffice per worker process (`OFFICE__KEEP_WARM`, this process only): about 3 s to about 0.4 s.
+- The document model has pictures: PDF to Word and PowerPoint to Word kept none before. A PDF's are drawn at 150 DPI,
+  leaving out marks under 24 pt and a picture covering 90% of the page. Not on a rotated page yet.
+- Two bugs seen only by looking at the outputs: body text on a wide-margin page came out centred, and numbered list items
+  got a bullet as well as their number.
+
+### Check it
+
+Real HTTP on this laptop, made-up documents and the 8-page report, not in Docker yet: every conversion under 1.4 s
+(PDF to Word 1.35 s, Word to PDF 0.40 s, PowerPoint to PDF 0.35 s). Requests too quick for a spare take the ordinary run,
+about 1.5 s. Stopping the server left no spare and no temp folder.
+
+In Docker, the 36 conversions (median of 3, requests 1.2 s apart): PDF to Word 1.47 s, Word to PDF 0.23 s, PowerPoint to
+PDF 0.32 s, nothing over 1.5 s. The spares work there: 383 MB for the 4. The first run also showed about 6 zombie processes
+left per Office document, as uvicorn was PID 1 and reaps nothing, so the worker image now runs under `tini`.

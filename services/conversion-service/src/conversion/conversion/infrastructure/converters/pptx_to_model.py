@@ -2,14 +2,17 @@
 
 Ported from ``ppt_to_office.py`` (Karunya, Sumukh) without the AI step. Everything comes from what the deck
 stores: each slide becomes a page named after its title; text, tables and the data behind charts become blocks
-in reading order (top to bottom, then left to right). Pictures, SmartArt and speaker notes are not read yet.
+in reading order (top to bottom, then left to right), and so do pictures. SmartArt and speaker notes are not read yet.
 """
 
+import io
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
 
 import pptx
+import structlog
+from PIL import Image, UnidentifiedImageError
 from pptx.chart.chart import Chart
 from pptx.enum.shapes import PP_PLACEHOLDER
 from pptx.enum.text import PP_ALIGN
@@ -20,6 +23,7 @@ from pptx.shapes.autoshape import Shape
 from pptx.shapes.base import BaseShape
 from pptx.shapes.graphfrm import GraphicFrame
 from pptx.shapes.group import GroupShape
+from pptx.shapes.picture import Picture as SlidePicture
 from pptx.slide import Slide
 from pptx.table import Table as SlideTable
 from pptx.text.text import _Paragraph
@@ -30,6 +34,7 @@ from conversion.conversion.domain.document_model import (
     Block,
     DocumentModel,
     Page,
+    Picture,
     Table,
     TextBlock,
     TextKind,
@@ -39,6 +44,10 @@ from conversion.conversion.domain.ports import StepRequest, StepResult
 from conversion.conversion.domain.route import Converter
 from conversion.conversion.infrastructure.model_file import model_path, write_model
 
+log = structlog.get_logger(__name__)
+
+_EMU_PER_POINT = 12_700
+_WORD_READS = frozenset({"png", "jpg", "jpeg"})  # any other kind is redrawn as a PNG, when it can be
 _ROW_BAND_EMU = 228_600  # 0.25 inch: shapes whose tops are this close read as one row, then left to right
 _BULLETED_PLACEHOLDERS = frozenset({PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT})  # bullets come from the layout
 _ALIGNMENTS = {PP_ALIGN.CENTER: Alignment.CENTER, PP_ALIGN.RIGHT: Alignment.RIGHT}
@@ -99,9 +108,31 @@ def _blocks(shape: BaseShape) -> list[Block]:
             table = _table(shape.table)
             return [table] if table is not None else []
         return _chart(shape.chart) if shape.has_chart else []
+    if isinstance(shape, SlidePicture):
+        picture = _picture(shape)
+        return [picture] if picture is not None else []
     if isinstance(shape, Shape) and shape.has_text_frame:  # text boxes, placeholders and shapes with text
         return [block for paragraph in shape.text_frame.paragraphs if (block := _text(paragraph, shape))]
-    return []  # pictures, lines, embedded objects
+    return []  # lines, embedded objects
+
+
+def _picture(shape: SlidePicture) -> Picture | None:
+    """The slide's image, at the width it is shown. A vector drawing (EMF, WMF) that can't be redrawn is left out."""
+    width = (shape.width or 0) / _EMU_PER_POINT
+    try:
+        image = shape.image
+        data = image.blob if image.ext.lower() in _WORD_READS else _as_png(image.blob)
+    except (ValueError, OSError, UnidentifiedImageError):  # no image behind it, or one nothing here can draw
+        log.info("slide_picture_left_out")
+        return None
+    return Picture(data=data, width_pt=width) if width > 0 else None
+
+
+def _as_png(data: bytes) -> bytes:
+    stream = io.BytesIO()
+    with Image.open(io.BytesIO(data)) as image:
+        image.save(stream, format="PNG")
+    return stream.getvalue()
 
 
 def _text(paragraph: _Paragraph, shape: Shape) -> TextBlock | None:

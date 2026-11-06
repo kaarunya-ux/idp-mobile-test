@@ -186,3 +186,42 @@ class AiLimitReachedError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("Converting scanned documents is limited per day; this account has reached today's limit.")
+
+
+class FileTooLargeError(DomainError):
+    """Over the synchronous route's size or pages (ADR 0002). Reported as ``CNV-413-FILE-001``: send it as a job."""
+
+    code = ErrorCode.FILE_TOO_LARGE
+    title = "Too large to convert while waiting"
+
+
+class FileTypeUnsupportedError(DomainError):
+    """The content is none of the formats this service reads (FIL-03). Reported as ``CNV-415-FILE-001``."""
+
+    code = ErrorCode.FILE_TYPE_UNSUPPORTED
+    title = "File type not supported"
+
+    def __init__(self) -> None:
+        super().__init__("The file is not a PDF, Word, Excel, PowerPoint, CSV, PNG or JPEG file.")
+
+
+class BusyError(DomainError):
+    """Every synchronous slot is taken (ADR 0002). Reported as ``CNV-429-BUSY-001``: send it as a job."""
+
+    code = ErrorCode.BUSY
+    title = "Busy"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("Conversion is busy right now. Send the file as a job instead.")
+
+
+class NeedsReadingError(DomainError):
+    """The synchronous route converts with the libraries only (ADR 0002); a scan or photo to a document needs its text
+    read. Reported as ``CNV-422-SYNC-001``: send it as a job."""
+
+    code = ErrorCode.NEEDS_READING
+    title = "Needs a job"
+
+    def __init__(self) -> None:
+        super().__init__("This is a scan or a picture, so its text has to be read. Send it as a job instead.")

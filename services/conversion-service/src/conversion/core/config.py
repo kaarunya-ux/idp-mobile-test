@@ -54,6 +54,9 @@ class OfficeSettings(BaseModel):
 
     binary: str = Field("soffice", min_length=1, max_length=255)
     timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=5), le=timedelta(minutes=10))
+    # one LibreOffice kept started ahead of each document, per process: about 0.3 s a document instead of 3 s, for about
+    # 100 MB. On for the synchronous route (ADR 0002), where someone is waiting; not worth it for queued jobs
+    keep_warm: bool = False
 
 
 class DatabaseSettings(BaseModel):
@@ -139,6 +142,37 @@ class OcrSettings(BaseModel):
     threads: int = Field(2, ge=1, le=64)
 
 
+class SyncSettings(BaseModel):
+    """``POST /api/v1/convert`` and ``/merge`` of the ``conversion-sync`` process (ADR 0002): files converted by the
+    libraries while the caller waits, with no OCR and no AI. The backend chooses between this and the queued way and
+    decides how much to send, so these are only the ceilings that protect the machine (FIL-05); pages are limited by
+    ``LIMITS__MAX_PAGES``, as on the queued way."""
+
+    max_file_size: ByteSize = ByteSize(200 * 1024 * 1024)  # each file, as STORAGE__MAX_INPUT_SIZE on the queued way
+    max_total_size: ByteSize = ByteSize(1024 * 1024 * 1024)  # all of one request's files together
+    max_files: int = Field(200, ge=1, le=200)  # as MAX_INPUTS on the queued way
+    max_concurrent: int = Field(4, ge=1, le=32)  # worker processes; one more request is told busy (429) at once
+    # false lets a request in without a token (integration testing, as extraction's ADR 0011). A request that does send
+    # a token is still checked
+    require_token: bool = True
+
+
+class IssuerSettings(BaseModel):
+    """One token issuer the route trusts (IDP-01 ch. 2)."""
+
+    issuer: HttpUrl  # the token's iss claim, exactly
+    jwks_url: HttpUrl
+
+
+class AuthSettings(BaseModel):
+    """Bearer token verification (SEC-01). Without issuers, every token is refused."""
+
+    issuers: list[IssuerSettings] = Field(default_factory=list, max_length=5)
+    audience: str = Field("idp-api", min_length=1, max_length=128)  # IDP-01: aud=idp-api
+    jwks_cache: timedelta = Field(timedelta(minutes=10), ge=timedelta(minutes=1), le=timedelta(hours=24))
+    leeway: timedelta = Field(timedelta(seconds=30), ge=timedelta(0), le=timedelta(minutes=5))  # clock skew
+
+
 class ServiceAuthSettings(BaseModel):
     """This service's own client-credentials login, for calls to ai-gateway (SEC-07)."""
 
@@ -169,6 +203,8 @@ class Settings(BaseSettings):
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
     ocr: OcrSettings = Field(default_factory=OcrSettings)
+    sync: SyncSettings = Field(default_factory=SyncSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
     service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
     # No defaults: credentials never live in code (CFG-03). Only the processes that use a group require it, so the
     # health server and unit tests run without them; ``require_*`` stops a worker at startup instead.

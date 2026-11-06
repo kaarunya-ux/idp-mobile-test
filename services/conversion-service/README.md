@@ -60,6 +60,7 @@ Integration tests (`tests/integration/`) start PostgreSQL, RabbitMQ and MinIO in
 | Process | Command | Image |
 |---|---|---|
 | health HTTP (probes only) | `uvicorn conversion.health:app --port 8001` | `health` |
+| `conversion-sync` (`POST /api/v1/convert` and `/merge`, ADR 0002) | `uvicorn --factory conversion.sync_main:create_sync_app --port 8004` | `worker` |
 | `intake` (FastStream consumer) | `faststream run conversion.consumers:create_app --factory` | `service` |
 | `relay` (outbox publisher) | `python -m conversion.outbox_relay` | `service` |
 | migrations (pre-deploy job) | `alembic upgrade head` | `service` |
@@ -105,6 +106,10 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `AI_GATEWAY__URL` | — (off) | `http://ai-gateway:8002` | The scanned routes (scan or photo to Word, Excel or CSV) read pages through ai-gateway's `page-read`. Unset: they answer `CNV-422-ROUTE-001` |
 | `AI_GATEWAY__TIMEOUT` / `__RENDER_DPI` / `__MAX_PAGES` | `240` s / `200` / `50` | | Per page; the DPI a scanned PDF page is drawn at; pages read per document |
 | `AI_GATEWAY__RENDER_MAX_SIDE_PX` / `__PAGE_CONCURRENCY` | `2048` / `4` | 512–8192 / 1–32 | A drawn page's long side is capped (ai-gateway shrinks pages to 2048 px anyway); pages read at the same time (the page model's parallel slots). The page picture goes inside the page-read call: the scanned routes use no storage for it |
+| `SYNC__MAX_FILE_SIZE` / `__MAX_TOTAL_SIZE` / `__MAX_FILES` / `__MAX_CONCURRENT` | 200 MiB / 1 GiB / 200 / 4 | | `POST /api/v1/convert` and `/merge`: the first three are ceilings that protect the machine (`CNV-413-FILE-001`); one more request than the fourth answers `CNV-429-BUSY-001` |
+| `OFFICE__KEEP_WARM` | `false` | | one LibreOffice kept started per process, for about 0.3 s a document instead of 3 s, at about 100 MB; `conversion-sync` always turns it on |
+| `SYNC__REQUIRE_TOKEN` | `true` | | `false` lets a request in without a token (integration testing); a token that is sent is still checked |
+| `AUTH__ISSUERS` / `__AUDIENCE` | none / `idp-api` | | who may sign the tokens `POST /api/v1/convert` accepts: JSON list of `{"issuer", "jwks_url"}` |
 | `SERVICE_AUTH__TOKEN_URL` / `__CLIENT_SECRET` / `__CLIENT_ID` / `__AUDIENCE` | — / — / `conversion-service` / `ai-gateway` | | Keycloak client credentials for ai-gateway; needed with `AI_GATEWAY__URL` |
 | `PREVIEW__MAX_SIDE_PX` | `400` | 64–2000 | Longest side of a page thumbnail; an A4 page comes out 283 × 400 |
 | `PREVIEW__JPEG_QUALITY` | `75` | 30–95 | JPEG quality of thumbnails |

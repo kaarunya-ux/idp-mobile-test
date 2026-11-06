@@ -13,6 +13,7 @@ What is read, page by page, from the PDF's own text layer (no OCR, no AI):
   document's body text is a heading; the largest size is level 1. A line starting with a bullet (a character, or a
   small drawn dot just left of it) or a number is a list item; the page's list indents, left to right, are its
   levels. A word broken across lines at a hyphen is joined back without a space.
+- **Pictures** where they sit among the text (``pdf_page_pictures``).
 
 The PDF is opened with PDFium first, so a password-protected or damaged file gets the same error as in
 ``pdf_to_images``. Scanned pages have no text layer; they take the OCR route instead (planner variant SCANNED).
@@ -25,6 +26,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import pdfplumber
+import pypdfium2 as pdfium
 from pdfplumber.page import Page as PdfPage
 from pdfplumber.utils.exceptions import PdfminerException
 
@@ -35,6 +37,7 @@ from conversion.conversion.domain.document_model import (
     Block,
     DocumentModel,
     Page,
+    Picture,
     Table,
     TextBlock,
     TextKind,
@@ -42,6 +45,7 @@ from conversion.conversion.domain.document_model import (
 from conversion.conversion.domain.exceptions import CorruptPdfError, LimitExceededError
 from conversion.conversion.domain.ports import StepRequest, StepResult
 from conversion.conversion.domain.route import Converter
+from conversion.conversion.infrastructure.converters.pdf_page_pictures import pictures_on
 from conversion.conversion.infrastructure.converters.pdf_ruled_tables import RuledTable, reach, ruled_tables
 from conversion.conversion.infrastructure.converters.pdf_to_images import open_pdf
 from conversion.conversion.infrastructure.model_file import model_path, write_model
@@ -90,6 +94,7 @@ class _PageContent:
     height: float
     lines: list[_Line]
     tables: list[tuple[float, Table]]  # (top, table)
+    pictures: list[tuple[float, Picture]]  # (top, picture)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -100,6 +105,7 @@ class _Layout:
     heading_levels: dict[float, int]  # heading size -> level
     page_width: float
     right: float  # the page's right text margin
+    left: float  # the page's left text margin: where most of its lines start
     list_indents: tuple[float, ...]  # where the page's list items start, one per level, left to right
 
 
@@ -117,15 +123,17 @@ class PdfplumberReader:
         (source,) = request.inputs
         with open_pdf(source) as document:  # PDFium: a clear error for a password or a damaged file
             page_count = len(document)
-        if page_count > self._max_pages:
-            raise LimitExceededError(f"The PDF has more than {self._max_pages:,} pages.")
-        options = request.options
-        indexes = options.page_range.select(page_count) if options.page_range else range(page_count)
-        try:
-            with pdfplumber.open(source) as pdf:
-                contents = _without_running_lines([_read_page(pdf.pages[index]) for index in indexes])
-        except PdfminerException as exc:  # PDFium repaired something pdfminer can't parse
-            raise CorruptPdfError from exc
+            if page_count > self._max_pages:
+                raise LimitExceededError(f"The PDF has more than {self._max_pages:,} pages.")
+            options = request.options
+            indexes = options.page_range.select(page_count) if options.page_range else range(page_count)
+            try:
+                with pdfplumber.open(source) as pdf:
+                    contents = _without_running_lines(
+                        [_read_page(pdf.pages[index], _pictures(document, index)) for index in indexes]
+                    )
+            except PdfminerException as exc:  # PDFium repaired something pdfminer can't parse
+                raise CorruptPdfError from exc
         body_size, heading_levels = _text_styles([line for content in contents for line in content.lines])
         pages = tuple(Page(blocks=_blocks(content, body_size, heading_levels)) for content in contents)
         output = model_path(request.output_dir, source)
@@ -133,7 +141,15 @@ class PdfplumberReader:
         return StepResult(outputs=(output,), page_count=len(pages))
 
 
-def _read_page(page: PdfPage) -> _PageContent:
+def _pictures(document: pdfium.PdfDocument, index: int) -> list[tuple[float, Picture]]:
+    page = document[index]
+    try:
+        return pictures_on(page)
+    finally:
+        page.close()
+
+
+def _read_page(page: PdfPage, pictures: list[tuple[float, Picture]]) -> _PageContent:
     try:
         tables: list[tuple[float, Table]] = []
         text_area = page
@@ -149,7 +165,9 @@ def _read_page(page: PdfPage) -> _PageContent:
         bullets = _bullets(page)
         raw_lines = text_area.extract_text_lines(return_chars=True, strip=True, y_tolerance=_SAME_LINE_PT)
         lines = [_line(raw, bullets) for raw in raw_lines if raw["text"]]
-        return _PageContent(width=float(page.width), height=float(page.height), lines=lines, tables=tables)
+        return _PageContent(
+            width=float(page.width), height=float(page.height), lines=lines, tables=tables, pictures=pictures
+        )
     finally:
         page.close()  # drop the page's parsed objects; a long PDF is read one page at a time
 
@@ -251,6 +269,11 @@ def _without_running_lines(contents: list[_PageContent]) -> list[_PageContent]:
     ]
 
 
+def _most_lines_start(lines: Sequence[_Line]) -> float:
+    starts = Counter(round(line.x0) for line in lines)
+    return float(starts.most_common(1)[0][0]) if starts else 0.0
+
+
 def _indents(starts: Iterable[float]) -> tuple[float, ...]:
     """Where list items start, close starts taken as one, left to right."""
     indents: list[float] = []
@@ -277,11 +300,12 @@ def _blocks(content: _PageContent, body_size: float, heading_levels: dict[float,
         heading_levels=heading_levels,
         page_width=content.width,
         right=max((line.x1 for line in content.lines), default=content.width),
+        left=_most_lines_start(content.lines),
         list_indents=_indents(  # a numbered heading ("1. Scope") is no list item
             line.indent for line in content.lines if _starts_list(line) and line.size not in heading_levels
         ),
     )
-    placed: list[tuple[float, Block]] = list(content.tables)
+    placed: list[tuple[float, Block]] = [*content.tables, *content.pictures]
     paragraph: list[_Line] = []
     for line in content.lines:
         if paragraph and _continues(paragraph[-1], line):
@@ -338,12 +362,17 @@ def _joined(pieces: Iterable[str]) -> str:
 
 
 def _alignment(lines: list[_Line], layout: _Layout) -> Alignment:
-    """Centred when every line sits in the middle of the page; right-aligned when every line ends at the margin."""
+    """Centred when every line sits in the middle of the page; right-aligned when every line ends at the margin. A line
+    starting at the page's left margin is left-aligned, however central it looks: with wide margins (Word's default
+    leaves 70% of the page for text) a body line can sit in the middle by chance."""
     middle = layout.page_width / 2
 
     def centred(line: _Line) -> bool:
         narrow = line.x1 - line.x0 < layout.page_width * _FULL_WIDTH
-        return narrow and abs((line.x0 + line.x1) / 2 - middle) <= layout.page_width * _CENTRE_TOLERANCE
+        at_margin = abs(line.x0 - layout.left) <= _EDGE_TOLERANCE_PT
+        return (
+            narrow and not at_margin and abs((line.x0 + line.x1) / 2 - middle) <= layout.page_width * _CENTRE_TOLERANCE
+        )
 
     def right_aligned(line: _Line) -> bool:
         return line.x1 >= layout.right - _EDGE_TOLERANCE_PT and line.x0 > middle

@@ -49,6 +49,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libglib2.0-0 libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-core fonts-noto-extra \
     && rm -rf /var/lib/apt/lists/*
+# tini as PID 1: LibreOffice leaves helper processes behind (about 6 per document), which pass to PID 1 when their parent
+# ends. Neither uvicorn nor Celery reaps them, so they would pile up as zombies.
+RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["/usr/bin/tini", "--"]
 COPY --from=build-workers /app /app
 # The OCR models are not in the image: they are mounted at OCR__MODELS_DIR. models.yaml pins their checksums (ML-01).
 COPY models.yaml ./
