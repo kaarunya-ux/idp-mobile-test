@@ -217,11 +217,22 @@ class BusyError(DomainError):
 
 
 class NeedsReadingError(DomainError):
-    """The synchronous route converts with the libraries only (ADR 0002); a scan or photo to a document needs its text
-    read. Reported as ``CNV-422-SYNC-001``: send it as a job."""
+    """The synchronous route doesn't read a scanned PDF (ADR 0002), nor a photo when this build has no reader: their
+    text has to be read. Reported as ``CNV-422-SYNC-001``: send it as a job."""
 
     code = ErrorCode.NEEDS_READING
     title = "Needs a job"
 
     def __init__(self) -> None:
         super().__init__("This is a scan or a picture, so its text has to be read. Send it as a job instead.")
+
+
+class NoAccountError(DomainError):
+    """A photo's reading is counted on an account (ai-gateway's daily limit), and the token has none: platform staff,
+    or a user still onboarding. Reported as ``CNV-403-AUTH-001``."""
+
+    code = ErrorCode.FORBIDDEN
+    title = "Not allowed"
+
+    def __init__(self) -> None:
+        super().__init__("Reading a picture's text needs a signed-in account.")

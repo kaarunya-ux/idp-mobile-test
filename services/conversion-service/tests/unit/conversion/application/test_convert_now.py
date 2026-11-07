@@ -1,9 +1,10 @@
-"""Converting one file while the caller waits, with the libraries only: its type from its content, the limits, one
-file back, and anything that needs reading sent to a job."""
+"""Converting one file while the caller waits: its type from its content, the limits, one file back, a photo read for
+the caller's account, and a scanned PDF to a document sent to a job."""
 
 import zipfile
 from collections.abc import Sequence
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -20,6 +21,7 @@ from conversion.conversion.domain.exceptions import (
     InvalidOptionError,
     InvalidRequestError,
     NeedsReadingError,
+    NoAccountError,
     RouteNotFoundError,
 )
 from conversion.conversion.domain.formats import Format
@@ -28,6 +30,8 @@ from conversion.conversion.domain.route import Converter
 from conversion.conversion.domain.route_planner import RoutePlanner
 from conversion.conversion.infrastructure.registry import ConverterRegistry
 from conversion.core.config import Settings
+
+ACCOUNT = UUID("0192f0aa-0000-7000-8000-00000000a001")  # made up
 
 
 class FakeInspector:
@@ -76,11 +80,15 @@ class FakeMerger:
 
 
 def _service(
-    inspector: FakeInspector, *converters: ConverterPort, merger: FakeMerger | None = None
+    inspector: FakeInspector, *converters: ConverterPort, merger: FakeMerger | None = None, reads_photos: bool = False
 ) -> ConvertNowService:
     planner = RoutePlanner()
     return ConvertNowService(
-        planner, ConvertFileService(planner, ConverterRegistry(list(converters))), inspector, merger or FakeMerger()
+        planner,
+        ConvertFileService(planner, ConverterRegistry(list(converters))),
+        inspector,
+        merger or FakeMerger(),
+        reads_photos=reads_photos,
     )
 
 
@@ -96,9 +104,15 @@ def _uploads(tmp_path: Path, *names: str) -> tuple[UploadedFile, ...]:
 
 
 def _command(
-    tmp_path: Path, target: str = "PNG", options: dict[str, object] | None = None, names: Sequence[str] = ("report",)
+    tmp_path: Path,
+    target: str = "PNG",
+    options: dict[str, object] | None = None,
+    names: Sequence[str] = ("report",),
+    account_id: UUID | None = None,
 ) -> ConvertNowCommand:
-    return ConvertNowCommand(uploads=_uploads(tmp_path, *names), folder=tmp_path, target=target, options=options or {})
+    return ConvertNowCommand(
+        uploads=_uploads(tmp_path, *names), folder=tmp_path, target=target, options=options or {}, account_id=account_id
+    )
 
 
 def test_runs_the_step_on_the_upload_named_by_its_real_format_and_answers_the_one_file(tmp_path: Path) -> None:
@@ -139,18 +153,55 @@ def test_refuses_a_conversion_that_does_not_exist_before_any_work(tmp_path: Path
 
 
 @pytest.mark.parametrize("target", ["DOCX", "XLSX", "CSV"])
-def test_sends_a_scanned_pdf_to_a_job_without_reading_it(tmp_path: Path, target: str) -> None:
+def test_sends_a_scanned_pdf_to_a_job_without_reading_it_even_when_photos_are_read(tmp_path: Path, target: str) -> None:
     reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
 
     with pytest.raises(NeedsReadingError):
-        _service(FakeInspector(scanned=True), reader).convert(_command(tmp_path, target))
+        _service(FakeInspector(scanned=True), reader, reads_photos=True).convert(
+            _command(tmp_path, target, account_id=ACCOUNT)
+        )
 
     assert reader.requests == []
 
 
-def test_sends_a_photo_to_a_document_to_a_job(tmp_path: Path) -> None:
+def test_sends_a_photo_to_a_document_to_a_job_when_this_build_has_no_reader(tmp_path: Path) -> None:
     with pytest.raises(NeedsReadingError):
-        _service(FakeInspector(Format.PNG, pages=1)).convert(_command(tmp_path, "DOCX"))
+        _service(FakeInspector(Format.PNG, pages=1)).convert(_command(tmp_path, "DOCX", account_id=ACCOUNT))
+
+
+@pytest.mark.parametrize(
+    ("target", "writer_step", "written"),
+    [
+        ("DOCX", Converter.MODEL_TO_DOCX, "input.docx"),
+        ("XLSX", Converter.MODEL_TO_XLSX, "input.xlsx"),
+        ("CSV", Converter.MODEL_TO_CSV, "input.csv"),
+    ],
+)
+def test_reads_a_photo_into_a_document_for_the_callers_account(
+    tmp_path: Path, target: str, writer_step: Converter, written: str
+) -> None:
+    reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
+    writer = FakeConverter(writer_step, [written])
+
+    result = _service(FakeInspector(Format.JPEG, pages=1), reader, writer, reads_photos=True).convert(
+        _command(tmp_path, target, account_id=ACCOUNT)
+    )
+
+    context = reader.requests[0].context
+    assert context is not None
+    assert context.account_id == ACCOUNT
+    assert reader.requests[0].inputs == (tmp_path / "in-1" / "input.jpg",)
+    assert result.file.name == f"report{Path(written).suffix}"
+
+
+def test_refuses_to_read_a_photo_without_an_account_to_count_it_on(tmp_path: Path) -> None:
+    reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
+
+    with pytest.raises(NoAccountError) as caught:
+        _service(FakeInspector(Format.PNG, pages=1), reader, reads_photos=True).convert(_command(tmp_path, "DOCX"))
+
+    assert caught.value.detail.startswith("report: ")
+    assert reader.requests == []
 
 
 def test_still_draws_a_scanned_pdfs_pages_as_images_because_that_reads_nothing(tmp_path: Path) -> None:
@@ -227,7 +278,7 @@ def test_refuses_to_merge_anything_but_pdfs_and_images(tmp_path: Path) -> None:
         )
 
 
-def test_never_gets_the_scanned_reader_even_when_ai_gateway_is_configured() -> None:
+def test_gets_the_scanned_reader_for_photos_when_ai_gateway_is_configured() -> None:
     settings = Settings.model_validate(
         {
             "ai_gateway": {"url": "http://ai-gateway:8002"},
@@ -238,5 +289,13 @@ def test_never_gets_the_scanned_reader_even_when_ai_gateway_is_configured() -> N
 
     service = build_convert_now_service(settings)
 
+    assert service._reads_photos
+    assert service._converter._converters.get(Converter.OCR_TO_MODEL).converter is Converter.OCR_TO_MODEL
+
+
+def test_sends_photos_to_a_job_when_ai_gateway_is_not_configured() -> None:
+    service = build_convert_now_service(Settings.model_validate({"office": {"binary": "no-such-office"}}))
+
+    assert not service._reads_photos
     with pytest.raises(LookupError):
         service._converter._converters.get(Converter.OCR_TO_MODEL)

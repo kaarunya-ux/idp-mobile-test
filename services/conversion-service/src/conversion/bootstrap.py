@@ -61,7 +61,7 @@ from conversion.conversion.infrastructure.secrets import RsaSecrets
 from conversion.conversion.infrastructure.storage import S3ObjectStorage
 from conversion.conversion.infrastructure.tasks import CeleryTaskQueue
 from conversion.core.clock import Clock, SystemClock
-from conversion.core.config import AiGatewaySettings, OcrSettings, Settings, StorageSettings
+from conversion.core.config import OcrSettings, Settings, StorageSettings
 from conversion.core.db import SessionFactory, create_db_engine, create_session_factory
 from conversion.core.outbox import OutboxRelay
 from conversion.core.service_auth import ServiceTokenProvider
@@ -141,21 +141,21 @@ def build_convert_file_service(settings: Settings, storage: ObjectStoragePort | 
 
 
 def build_convert_now_service(settings: Settings) -> ConvertNowService:
-    """The synchronous route's use case (ADR 0002): the libraries only, so no ai-gateway even when it is configured;
-    no storage and no database."""
-    libraries_only = settings.model_copy(
-        update={
-            "ai_gateway": AiGatewaySettings(),
-            "service_auth": None,
-            "office": settings.office.model_copy(update={"keep_warm": True}),
-        }
-    )
+    """The synchronous route's use case (ADR 0002): the libraries, and the scanned reader for photos when ai-gateway is
+    configured (each picture goes inside the call); no storage and no database."""
+    warm = settings.model_copy(update={"office": settings.office.model_copy(update={"keep_warm": True})})
     return ConvertNowService(
         RoutePlanner(),
-        build_convert_file_service(libraries_only),
+        build_convert_file_service(warm),
         PdfiumFileInspector(),
         PikepdfMerger(max_pages=settings.limits.max_pages),
+        reads_photos=_scanned_reader_configured(settings),
     )
+
+
+def _scanned_reader_configured(settings: Settings) -> bool:
+    """As ``_scanned_reader`` decides: ai-gateway and this service's login to it."""
+    return settings.ai_gateway.url is not None and settings.service_auth is not None
 
 
 def build_job_runner(settings: Settings, storage: ObjectStoragePort) -> JobRunner:

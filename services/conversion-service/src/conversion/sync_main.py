@@ -1,4 +1,4 @@
-"""The ``conversion-sync`` process: the synchronous conversion with the libraries only (ADR 0002).
+"""The ``conversion-sync`` process: files converted while the caller waits, a photo read through ai-gateway (ADR 0002).
 
 Run with ``uvicorn --factory conversion.sync_main:create_sync_app --port 8004``, from the worker image: it has the
 converters and LibreOffice. Each request runs in a worker process; at most ``SYNC__MAX_CONCURRENT`` at once, and one
@@ -55,6 +55,7 @@ def create_sync_app(
         max_files=settings.sync.max_files,
     )
     app.state.sync_require_token = settings.sync.require_token
+    app.state.sync_default_account = settings.sync.default_account_id
     app.include_router(health.router)
     app.include_router(routes.router)
     return app

@@ -2,7 +2,12 @@
 
 import pickle
 
-from conversion.conversion.domain.exceptions import AiUnavailableError, InvalidOptionError, NeedsReadingError
+from conversion.conversion.domain.exceptions import (
+    AiUnavailableError,
+    InvalidOptionError,
+    NeedsReadingError,
+    NoAccountError,
+)
 
 
 def test_keeps_its_type_detail_and_attributes_when_it_crosses_a_process() -> None:
@@ -14,7 +19,7 @@ def test_keeps_its_type_detail_and_attributes_when_it_crosses_a_process() -> Non
 
 
 def test_keeps_an_error_whose_init_takes_no_arguments_when_it_crosses_a_process() -> None:
-    for error in (AiUnavailableError(), NeedsReadingError()):
+    for error in (AiUnavailableError(), NeedsReadingError(), NoAccountError()):
         copy = pickle.loads(pickle.dumps(error))  # noqa: S301 - our own bytes
 
         assert type(copy) is type(error)

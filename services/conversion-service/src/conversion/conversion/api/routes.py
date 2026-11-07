@@ -3,11 +3,13 @@
 ``POST /api/v1/convert`` takes one or more ``file`` and a ``target`` (and optionally ``options``, the JSON a job's
 options are) and answers with the converted file: several files come back as one ZIP, except images to a PDF or a deck,
 which become one file. ``POST /api/v1/merge`` takes PDFs and images and answers with one PDF, in the order sent. Both
-use the libraries only, never OCR or the AI. The backend chooses these or the queued way (``ConversionRequested``), and
-decides how much to send: ``CNV-422-SYNC-001`` and ``CNV-429-BUSY-001`` mean "send it queued".
+use the libraries, except a photo to Word, Excel or CSV, which is read through ai-gateway. The backend chooses these or
+the queued way (``ConversionRequested``), and decides how much to send: ``CNV-422-SYNC-001`` (a scanned PDF to a
+document) and ``CNV-429-BUSY-001`` mean "send it queued".
 
-The token is the person's, forwarded by the backend. With ``SYNC__REQUIRE_TOKEN=false`` (integration testing) a request
-without one is let in; a request that sends one is still checked.
+The token is the person's, forwarded by the backend: its account is the one a photo's AI calls are counted on. With
+``SYNC__REQUIRE_TOKEN=false`` (integration testing) a request without one is let in, counted on
+``SYNC__DEFAULT_ACCOUNT_ID``; a request that sends one is still checked.
 """
 
 import asyncio
@@ -20,6 +22,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -73,14 +76,18 @@ async def check_token(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     verifier: Annotated[TokenVerifier, Depends(provide_token_verifier)],
-) -> None:
+) -> UUID | None:
+    """The caller's account, which a photo's reading is counted on: the token's, or the default for a tokenless
+    request; None when there is none."""
     if credentials is None:
         if request.app.state.sync_require_token:
             raise UnauthenticatedError
-        return
+        account: UUID | None = request.app.state.sync_default_account
+        return account
     principal = await verifier.verify(credentials.credentials)
     if perm.DOCUMENT_WRITE not in principal.permissions:
         raise PermissionDeniedError(perm.DOCUMENT_WRITE)
+    return principal.tenant_id
 
 
 def provide_runner(request: Request) -> ConvertNowRunner:
@@ -110,17 +117,18 @@ def provide_limits(request: Request) -> UploadLimits:
 type Runner = Annotated[ConvertNowRunner, Depends(provide_runner)]
 type Admitted = Annotated[Admission, Depends(provide_admission)]
 type Limits = Annotated[UploadLimits, Depends(provide_limits)]
+type Account = Annotated[UUID | None, Depends(check_token)]
 _FILES = "PDF, Word, Excel, PowerPoint, CSV, PNG or JPEG; repeat the field for several files"
 
 
 @router.post(
     "/convert",
-    summary="Convert files now with the libraries: the answer is the converted file, or one ZIP",
+    summary="Convert files now: the answer is the converted file, or one ZIP",
     response_class=FileResponse,
     responses=_ERRORS,
-    dependencies=[Depends(check_token)],
 )
 async def convert(
+    account: Account,
     runner: Runner,
     admission: Admitted,
     limits: Limits,
@@ -133,7 +141,7 @@ async def convert(
     async with admission.enter(), _WorkFolder() as folder:
         uploads = await asyncio.to_thread(_saved, file, folder.path)
         result = await runner.convert(
-            ConvertNowCommand(uploads=uploads, folder=folder.path, target=target, options=parsed)
+            ConvertNowCommand(uploads=uploads, folder=folder.path, target=target, options=parsed, account_id=account)
         )
     name = uploads[0].name if len(uploads) == 1 else _SEVERAL_FILES_NAME
     return _answer(result, name, folder.path)

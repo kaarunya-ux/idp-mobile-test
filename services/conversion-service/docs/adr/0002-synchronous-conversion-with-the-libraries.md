@@ -1,6 +1,6 @@
-# 2. Synchronous conversion and merge beside the queued path, with the libraries only
+# 2. Synchronous conversion and merge beside the queued path, with the libraries and, for photos, the AI
 
-Status: Proposed · Date: 2026-11-06 · Deciders: Python team lead (Prakyath)
+Status: Proposed · Date: 2026-11-06, amended 2026-11-07 (photos read) · Deciders: Python team lead (Prakyath)
 
 ## Context
 
@@ -19,10 +19,12 @@ and the queue, as it already does for extraction (extraction ADR 0009).
    converted one by one and come back as one ZIP, named after each file; so does one file that makes several (a PDF's
    pages as images). If one of them can't be converted, the request fails and the error names the file. Files in one
    request run one after another, in one worker process.
-3. **The libraries only: no OCR and no AI.** A scanned PDF or a photo to Word, Excel or CSV is refused at once with
-   `CNV-422-SYNC-001`: send it as a job. Drawing a scanned PDF's pages as images reads nothing, so it stays allowed. The
-   process is built without ai-gateway even when `AI_GATEWAY__URL` is set, and an import contract keeps the routes away
-   from `httpx` and `idp_ocr_engines`.
+3. **The libraries, and the AI for a photo only.** A photo (PNG, JPEG) to Word, Excel or CSV is read while the caller
+   waits, by the job path's own reader (`AI_GATEWAY__PAGE_READER`; one page, 10 to 40 s on the 35B), when ai-gateway is
+   configured; without it, it answers `CNV-422-SYNC-001`. A scanned PDF to a document is refused at once with
+   `CNV-422-SYNC-001` (many pages, minutes of reading): send it as a job. Drawing a scanned PDF's pages as images reads
+   nothing, so it stays allowed. An import contract keeps the routes away from `httpx` and `idp_ocr_engines`. (Until
+   2026-11-07 photos were refused too; the owner asked for them so the backend can test every image conversion here.)
 4. **The backend decides how much to send.** Our limits are only ceilings that protect the machine (FIL-05), the same as
    the queued way: `SYNC__MAX_FILE_SIZE` (200 MiB), `SYNC__MAX_TOTAL_SIZE` (1 GiB), `SYNC__MAX_FILES` (200) answer
    `CNV-413-FILE-001`, and `LIMITS__MAX_PAGES` (1000) answers `CNV-422-LIMIT-001`. `SYNC__MAX_CONCURRENT` (4) requests run
@@ -40,7 +42,8 @@ and the queue, as it already does for extraction (extraction ADR 0009).
    NUL byte is taken as CSV. The caller's file name is used only for the outputs' names, made safe.
 8. **The token is the person's**, as on extraction's route: the permission `document:write`. `SYNC__REQUIRE_TOKEN=false`
    lets a request in without one for integration testing (as extraction's ADR 0011); a token that is sent is still
-   checked. No account is needed: nothing here counts AI calls.
+   checked. A photo's AI calls are counted on the token's account, or on `SYNC__DEFAULT_ACCOUNT_ID` for a tokenless
+   request; with neither, a photo to a document answers `CNV-403-AUTH-001`. The other conversions need no account.
 9. **Errors are RFC 9457 problem details**, with the same codes a `WorkFailed` carries. `DomainError` can now be rebuilt
    from its detail and attributes, because these errors come back from a worker process.
 
@@ -68,3 +71,5 @@ and the queue, as it already does for extraction (extraction ADR 0009).
 - `core/security.py` and `core/problem_details.py` are copies of extraction's, until the shared `idp-py-platform` package
   exists.
 - One more process to run and watch; it is the worker image with a different command.
+- A photo holds a slot for as long as the model reads it (10 to 40 s), so a few photos at once can make library
+  requests answer `CNV-429-BUSY-001`. A separate limit for photos is the fix if that happens.

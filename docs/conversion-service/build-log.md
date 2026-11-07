@@ -1200,3 +1200,36 @@ about 1.5 s. Stopping the server left no spare and no temp folder.
 In Docker, the 36 conversions (median of 3, requests 1.2 s apart): PDF to Word 1.47 s, Word to PDF 0.23 s, PowerPoint to
 PDF 0.32 s, nothing over 1.5 s. The spares work there: 383 MB for the 4. The first run also showed about 6 zombie processes
 left per Office document, as uvicorn was PID 1 and reaps nothing, so the worker image now runs under `tini`.
+
+## Entry 17: A photo to Word, Excel or CSV over HTTP, read by the 35B (2026-11-07)
+
+**Goal:** the backend can test every image conversion over HTTP. The owner asked for the photo routes on the HTTP lane;
+scanned PDFs stay on the job path.
+
+### What we did
+
+- `conversion-sync` now has the scanned reader when ai-gateway is configured, the same one the `ocr` worker uses
+  (`AI_GATEWAY__PAGE_READER`, `model` by default: page-read on the 35B). A photo (PNG, JPEG) to Word, Excel or CSV is
+  read while the caller waits; the picture goes inside the call, nothing is stored.
+- The AI calls are counted on the caller's account: the token's `account_id`, or `SYNC__DEFAULT_ACCOUNT_ID` for a
+  tokenless request (compose: the test account extraction's quick-extract uses). No account answers `CNV-403-AUTH-001`
+  (`NoAccountError`, an existing code).
+- A scanned PDF to a document still answers `CNV-422-SYNC-001`: many pages, minutes of reading. So does a photo when
+  ai-gateway isn't configured, as before.
+- Compose: `conversion-sync` gets ai-gateway's address, the `conversion-service` login and the models volume.
+- ADR 0002, decision 3 and 8 changed.
+
+### Check it
+
+`make check-unit` lint, types and 8 import contracts green; 580 unit tests pass, plus the known Hindi-font test that
+passes only in Docker. Integration tests not run (no Docker access from here).
+
+Real HTTP on this laptop against the running ai-gateway and the 35B, a made-up invoice photo (title, two text lines, a
+4-row table): Word 20.8 s (first call, with the service login), Excel 11.8 s, CSV 11.9 s. Every word and every table cell
+came back right. The photo made into a PDF, then to Word: `CNV-422-SYNC-001`. PNG to PDF 0.02 s and Word to PDF 0.53 s,
+unchanged.
+
+### Risk
+
+A photo holds one of the `SYNC__MAX_CONCURRENT` (4) slots for 10 to 40 s, so four photos at once make library requests
+answer 429 until one finishes.

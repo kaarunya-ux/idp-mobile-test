@@ -1,24 +1,32 @@
-"""Use case: convert or merge uploaded files with the libraries while the caller waits (ADR 0002).
+"""Use case: convert or merge uploaded files while the caller waits (ADR 0002).
 
-The same conversions as a queued job, without storage, a job record, OCR or the AI: each file's real type comes from its
-content (FIL-03). Several images to a PDF or a deck become one file, as on a job; any other several files are converted
-one by one and come back as one ZIP, as does one file that makes several (a PDF's pages as images). A scanned PDF or a
-photo to a document needs reading: it is refused with a code that means "send it as a job", and the backend chooses.
+The same conversions as a queued job, without storage or a job record: each file's real type comes from its content
+(FIL-03). Several images to a PDF or a deck become one file, as on a job; any other several files are converted one by
+one and come back as one ZIP, as does one file that makes several (a PDF's pages as images). A photo to Word, Excel or
+CSV is read through ai-gateway, as on a job, counted on the caller's account. A scanned PDF to a document is refused
+with a code that means "send it as a job" (many pages, minutes of reading), and so is a photo when this build has no
+reader.
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from uuid import UUID
 
 from conversion.conversion.application.commands import ConvertFileCommand
 from conversion.conversion.application.services.convert_file import ConvertFileService
 from conversion.conversion.application.services.merging import merge_into_pdf
 from conversion.conversion.application.services.packaging import format_of_file, package_outputs
-from conversion.conversion.domain.exceptions import FileTypeUnsupportedError, InvalidRequestError, NeedsReadingError
+from conversion.conversion.domain.exceptions import (
+    FileTypeUnsupportedError,
+    InvalidRequestError,
+    NeedsReadingError,
+    NoAccountError,
+)
 from conversion.conversion.domain.formats import ZIP_CONTENT_TYPE, Format
 from conversion.conversion.domain.options import JobOptions, parse_job_options, resolve_target
-from conversion.conversion.domain.ports import FileInspectorPort, PdfMergerPort
+from conversion.conversion.domain.ports import FileInspectorPort, PdfMergerPort, StepContext
 from conversion.conversion.domain.route_planner import RoutePlanner, RouteRequest
 from conversion.conversion.domain.values import OutputMode
 from conversion.core.errors import DomainError
@@ -41,6 +49,7 @@ class ConvertNowCommand:
     folder: Path
     target: str
     options: Mapping[str, object]
+    account_id: UUID | None = None  # whose AI calls a photo's reading is counted on; None: no account
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -71,11 +80,14 @@ class ConvertNowService:
         converter: ConvertFileService,
         inspector: FileInspectorPort,
         merger: PdfMergerPort,
+        *,
+        reads_photos: bool = False,
     ) -> None:
         self._planner = planner
         self._converter = converter
         self._inspector = inspector
         self._merger = merger
+        self._reads_photos = reads_photos  # the scanned reader is in this build (ai-gateway configured)
 
     def convert(self, command: ConvertNowCommand) -> ConvertNowResult:
         options = parse_job_options(command.options)
@@ -84,7 +96,9 @@ class ConvertNowService:
         if len(files) > 1 and target in _COMBINED_TARGETS and all(found.is_image for _, _, found in files):
             return self._combined(files, target, options, command.folder)
         converted = [
-            self._converted_one(upload, path, source, target, options, command.folder / f"out-{number}")
+            self._converted_one(
+                upload, path, source, target, options, command.folder / f"out-{number}", account_id=command.account_id
+            )
             for number, (upload, path, source) in enumerate(files, start=1)
         ]
         outputs = tuple(file for files_of_one, _ in converted for file in files_of_one)
@@ -115,7 +129,7 @@ class ConvertNowService:
         self, files: Sequence[tuple[UploadedFile, Path, Format]], target: Format, options: JobOptions, folder: Path
     ) -> ConvertNowResult:
         source = files[0][2]
-        self._check_no_reading(source, target, scanned=False, options=options)
+        self._reading_context(source, target, scanned=False, options=options, account_id=None)  # never reads
         result = self._converter.convert(
             ConvertFileCommand(
                 source=source,
@@ -129,12 +143,20 @@ class ConvertNowService:
         return self._packaged(result.outputs, options.output, result.page_count, folder)
 
     def _converted_one(
-        self, upload: UploadedFile, path: Path, source: Format, target: Format, options: JobOptions, output_dir: Path
+        self,
+        upload: UploadedFile,
+        path: Path,
+        source: Format,
+        target: Format,
+        options: JobOptions,
+        output_dir: Path,
+        *,
+        account_id: UUID | None,
     ) -> tuple[tuple[Path, ...], int]:
         """Its outputs named after the caller's file, so several files' outputs can share one ZIP."""
         try:
             scanned = source is Format.PDF and self._inspector.is_scanned_pdf(path)
-            self._check_no_reading(source, target, scanned=scanned, options=options)
+            context = self._reading_context(source, target, scanned=scanned, options=options, account_id=account_id)
             result = self._converter.convert(
                 ConvertFileCommand(
                     source=source,
@@ -144,6 +166,7 @@ class ConvertNowService:
                     options=options.conversion,
                     pdf_is_scanned=scanned,
                     ocr=options.ocr,
+                    context=context,
                 )
             )
         except DomainError as exc:
@@ -151,13 +174,22 @@ class ConvertNowService:
             raise
         return tuple(_renamed(file, upload.name) for file in result.outputs), result.page_count
 
-    def _check_no_reading(self, source: Format, target: Format, *, scanned: bool, options: JobOptions) -> None:
-        """A route that doesn't exist answers its own error here, before any work."""
+    def _reading_context(
+        self, source: Format, target: Format, *, scanned: bool, options: JobOptions, account_id: UUID | None
+    ) -> StepContext | None:
+        """Whom a photo's reading is for; None when the route reads nothing. A route that doesn't exist answers its
+        own error here, before any work, and so does one that has to go as a job."""
         route = self._planner.get_route(
             RouteRequest(source=source, target=target, pdf_is_scanned=scanned, ocr=options.ocr)
         )
-        if route.uses_ocr:
+        if not route.uses_ocr:
+            return None
+        if scanned or not self._reads_photos:
             raise NeedsReadingError
+        if account_id is None:
+            raise NoAccountError
+        # the readers send each picture inside the call and store nothing, so the prefix only names the work
+        return StepContext(account_id=account_id, key_prefix=f"{account_id}/sync")
 
     def _packaged(self, outputs: tuple[Path, ...], output: OutputMode, pages: int, folder: Path) -> ConvertNowResult:
         mode = OutputMode.SINGLE if output is OutputMode.SINGLE else OutputMode.ZIP  # one answer, one file

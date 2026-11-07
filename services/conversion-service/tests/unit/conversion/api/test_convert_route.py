@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from http import HTTPStatus
 from typing import Any
+from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
@@ -25,6 +26,7 @@ from conversion.sync_main import create_sync_app
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 FILE: dict[str, Any] = {"file": ("report.pdf", b"%PDF-made-up", "application/pdf")}
 BEARER = {"Authorization": "Bearer made-up"}
+ACCOUNT = UUID("0192f0aa-0000-7000-8000-00000000a001")  # made up
 
 
 class FakeRunner:
@@ -61,8 +63,8 @@ class FakeVerifier:
         return self.principal
 
 
-def _principal(*permissions: str) -> Principal:
-    return Principal(actor_id="user-1", tenant_id=None, permissions=frozenset(permissions), kind="user")
+def _principal(*permissions: str, tenant_id: UUID | None = None) -> Principal:
+    return Principal(actor_id="user-1", tenant_id=tenant_id, permissions=frozenset(permissions), kind="user")
 
 
 def _app(runner: FakeRunner, **sync: object) -> FastAPI:
@@ -259,6 +261,30 @@ async def test_refuses_a_token_that_is_bad_or_has_no_permission(
 
     assert (response.status_code, response.json()["code"]) == (status, code)
     assert runner.commands == []
+
+
+@pytest.mark.parametrize(("default", "expected"), [(ACCOUNT, ACCOUNT), (None, None)])
+async def test_counts_a_tokenless_request_on_the_default_account_when_there_is_one(
+    runner: FakeRunner, default: UUID | None, expected: UUID | None
+) -> None:
+    async with _http(_app(runner, default_account_id=default)) as client:
+        await client.post("/api/v1/convert", files=FILE, data={"target": "DOCX"})
+
+    command = runner.commands[0]
+    assert isinstance(command, ConvertNowCommand)
+    assert command.account_id == expected
+
+
+async def test_counts_a_request_with_a_token_on_the_tokens_account_not_the_default(runner: FakeRunner) -> None:
+    mine = UUID("0192f0aa-0000-7000-8000-00000000b002")  # made up
+    app = _app(runner, default_account_id=ACCOUNT)
+    app.state.token_verifier = FakeVerifier(_principal(DOCUMENT_WRITE, tenant_id=mine))
+    async with _http(app) as client:
+        await client.post("/api/v1/convert", files=FILE, data={"target": "DOCX"}, headers=BEARER)
+
+    command = runner.commands[0]
+    assert isinstance(command, ConvertNowCommand)
+    assert command.account_id == mine
 
 
 async def test_serves_the_probes_when_asked(client: AsyncClient) -> None:
