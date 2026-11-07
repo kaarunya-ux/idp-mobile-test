@@ -5,8 +5,9 @@ same document) as multipart/form-data, and answers with the document's type and 
 reads only the crops of the fields the two engines left unsure, or the whole document when no template matches.
 ``POST /api/v1/extract/generic`` takes the same and sends the document straight to the AI: no OCR, any document.
 ``POST /api/v1/extract/custom`` also takes ``fields``, the keys of a user's own template (ADR 0013), and answers with
-exactly those keys: each read by its label, OCR first, the AI for what OCR leaves unsure. The
-backend chooses a route or the queued one (``ExtractionRequested``): ``EXT-429-BUSY-001`` means "send it queued".
+exactly those keys: each read inside the box drawn around its value, else by its label, OCR first, the AI for what
+OCR leaves unsure. The backend chooses a route or the queued one (``ExtractionRequested``): ``EXT-429-BUSY-001``
+means "send it queued".
 The token is the person's (forwarded by the backend): its account is the one whose daily AI calls are counted. With
 ``QUICK__REQUIRE_TOKEN=false`` (integration testing, ADR 0011) a request without one is counted on
 ``QUICK__DEFAULT_ACCOUNT_ID``; a request that sends one is still checked.
@@ -147,8 +148,9 @@ async def extract_custom(
     fields: Annotated[
         str,
         Form(
-            description='JSON list of the keys to read: [{"key": "card_number", "label": "Card No", "type": "text"}];'
-            " type is text, date or number (default text); 1 to 50 keys"
+            description='JSON list of the keys to read: [{"key": "card_number", "label": "Card No", "type": "text",'
+            ' "box": {"page": 1, "x": 13.5, "y": 26.2, "w": 26, "h": 1.3}}]; type is text, date or number (default'
+            " text); box (optional) is drawn around the value, in percent of the first page; 1 to 50 keys"
         ),
     ],
     back: Annotated[UploadFile | None, File(description="Optional: the back picture of the same document")] = None,
