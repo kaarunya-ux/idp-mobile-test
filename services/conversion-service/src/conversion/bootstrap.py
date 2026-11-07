@@ -141,15 +141,16 @@ def build_convert_file_service(settings: Settings, storage: ObjectStoragePort | 
 
 
 def build_convert_now_service(settings: Settings) -> ConvertNowService:
-    """The synchronous route's use case (ADR 0002): the libraries, and the scanned reader for photos when ai-gateway is
-    configured (each picture goes inside the call); no storage and no database."""
+    """The synchronous route's use case (ADR 0002): the libraries, and the scanned reader for scans and photos when
+    ai-gateway is configured (each picture goes inside the call); no storage and no database."""
     warm = settings.model_copy(update={"office": settings.office.model_copy(update={"keep_warm": True})})
     return ConvertNowService(
         RoutePlanner(),
         build_convert_file_service(warm),
         PdfiumFileInspector(),
         PikepdfMerger(max_pages=settings.limits.max_pages),
-        reads_photos=_scanned_reader_configured(settings),
+        reads=_scanned_reader_configured(settings),
+        max_read_pages=settings.sync.max_read_pages,
     )
 
 

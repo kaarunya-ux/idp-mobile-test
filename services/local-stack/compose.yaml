@@ -304,8 +304,8 @@ services:
       <<: *conversion-ready
       ai-gateway: {condition: service_healthy}
 
-  # POST /api/v1/convert and /merge: files now, by the libraries; a photo to Word, Excel or CSV read through
-  # ai-gateway; a scanned PDF to a document goes as a job (conversion ADR 0002)
+  # POST /api/v1/convert and /merge: files now, by the libraries; a scan or photo to Word, Excel or CSV read through
+  # ai-gateway, a scan of more than SYNC__MAX_READ_PAGES pages goes as a job (conversion ADR 0002)
   conversion-sync:
     image: idp-local/conversion-service:worker
     restart: unless-stopped
@@ -319,6 +319,7 @@ services:
       SYNC__REQUIRE_TOKEN: ${SYNC_REQUIRE_TOKEN:-false}  # integration testing: a request without a token is let in
       # ... and its photo reading is counted on the test account (the same one extraction's quick-extract uses)
       SYNC__DEFAULT_ACCOUNT_ID: 0192f0aa-0000-7000-8000-00000000a001
+      SYNC__MAX_READ_PAGES: ${SYNC_MAX_READ_PAGES:-5}
       AI_GATEWAY__URL: http://ai-gateway:8002
       AI_GATEWAY__PAGE_READER: ${CONVERSION_PAGE_READER:-model}
       SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}

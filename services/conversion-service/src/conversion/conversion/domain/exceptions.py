@@ -217,14 +217,16 @@ class BusyError(DomainError):
 
 
 class NeedsReadingError(DomainError):
-    """The synchronous route doesn't read a scanned PDF (ADR 0002), nor a photo when this build has no reader: their
-    text has to be read. Reported as ``CNV-422-SYNC-001``: send it as a job."""
+    """The synchronous route reads a scan or photo only when this build has a reader, and a scan only up to
+    ``SYNC__MAX_READ_PAGES`` pages (ADR 0002). Reported as ``CNV-422-SYNC-001``: send it as a job."""
 
     code = ErrorCode.NEEDS_READING
     title = "Needs a job"
 
-    def __init__(self) -> None:
-        super().__init__("This is a scan or a picture, so its text has to be read. Send it as a job instead.")
+    def __init__(
+        self, detail: str = "This is a scan or a picture, so its text has to be read. Send it as a job instead."
+    ) -> None:
+        super().__init__(detail)
 
 
 class NoAccountError(DomainError):

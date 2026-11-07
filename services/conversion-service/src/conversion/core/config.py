@@ -145,9 +145,9 @@ class OcrSettings(BaseModel):
 
 class SyncSettings(BaseModel):
     """``POST /api/v1/convert`` and ``/merge`` of the ``conversion-sync`` process (ADR 0002): files converted while the
-    caller waits, by the libraries, and a photo to a document read through ai-gateway. The backend chooses between this
-    and the queued way and decides how much to send, so these are only the ceilings that protect the machine (FIL-05);
-    pages are limited by ``LIMITS__MAX_PAGES``, as on the queued way."""
+    caller waits, by the libraries, and a scan or photo to a document read through ai-gateway. The backend chooses
+    between this and the queued way and decides how much to send, so these are only the ceilings that protect the
+    machine (FIL-05); pages are limited by ``LIMITS__MAX_PAGES``, as on the queued way."""
 
     max_file_size: ByteSize = ByteSize(200 * 1024 * 1024)  # each file, as STORAGE__MAX_INPUT_SIZE on the queued way
     max_total_size: ByteSize = ByteSize(1024 * 1024 * 1024)  # all of one request's files together
@@ -156,7 +156,9 @@ class SyncSettings(BaseModel):
     # false lets a request in without a token (integration testing, as extraction's ADR 0011). A request that does send
     # a token is still checked
     require_token: bool = True
-    # the account a tokenless request's photo reading is counted on; without one, such a photo answers CNV-403-AUTH-001
+    # a scanned PDF with more pages to read goes as a job (CNV-422-SYNC-001): the model reads about 4 pages each 15 s
+    max_read_pages: int = Field(5, ge=1, le=50)
+    # the account a tokenless request's reading is counted on; without one, a scan or photo answers CNV-403-AUTH-001
     default_account_id: UUID | None = None
 
 

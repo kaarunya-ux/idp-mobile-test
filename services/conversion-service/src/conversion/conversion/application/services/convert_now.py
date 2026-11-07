@@ -2,10 +2,10 @@
 
 The same conversions as a queued job, without storage or a job record: each file's real type comes from its content
 (FIL-03). Several images to a PDF or a deck become one file, as on a job; any other several files are converted one by
-one and come back as one ZIP, as does one file that makes several (a PDF's pages as images). A photo to Word, Excel or
-CSV is read through ai-gateway, as on a job, counted on the caller's account. A scanned PDF to a document is refused
-with a code that means "send it as a job" (many pages, minutes of reading), and so is a photo when this build has no
-reader.
+one and come back as one ZIP, as does one file that makes several (a PDF's pages as images). A photo or a scanned PDF
+to Word, Excel or CSV is read through ai-gateway, as on a job, counted on the caller's account. A scan with more pages
+to read than ``max_read_pages`` is refused with a code that means "send it as a job" (each page takes the model
+seconds), and so is any reading when this build has no reader.
 """
 
 from collections.abc import Mapping, Sequence
@@ -49,7 +49,7 @@ class ConvertNowCommand:
     folder: Path
     target: str
     options: Mapping[str, object]
-    account_id: UUID | None = None  # whose AI calls a photo's reading is counted on; None: no account
+    account_id: UUID | None = None  # whose AI calls a scan's or photo's reading is counted on; None: no account
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -81,13 +81,15 @@ class ConvertNowService:
         inspector: FileInspectorPort,
         merger: PdfMergerPort,
         *,
-        reads_photos: bool = False,
+        reads: bool = False,
+        max_read_pages: int = 0,
     ) -> None:
         self._planner = planner
         self._converter = converter
         self._inspector = inspector
         self._merger = merger
-        self._reads_photos = reads_photos  # the scanned reader is in this build (ai-gateway configured)
+        self._reads = reads  # the scanned reader is in this build (ai-gateway configured)
+        self._max_read_pages = max_read_pages  # a scan with more pages to read goes as a job
 
     def convert(self, command: ConvertNowCommand) -> ConvertNowResult:
         options = parse_job_options(command.options)
@@ -129,7 +131,7 @@ class ConvertNowService:
         self, files: Sequence[tuple[UploadedFile, Path, Format]], target: Format, options: JobOptions, folder: Path
     ) -> ConvertNowResult:
         source = files[0][2]
-        self._reading_context(source, target, scanned=False, options=options, account_id=None)  # never reads
+        self._reading_context(source, target, path=None, scanned=False, options=options, account_id=None)  # never reads
         result = self._converter.convert(
             ConvertFileCommand(
                 source=source,
@@ -156,7 +158,9 @@ class ConvertNowService:
         """Its outputs named after the caller's file, so several files' outputs can share one ZIP."""
         try:
             scanned = source is Format.PDF and self._inspector.is_scanned_pdf(path)
-            context = self._reading_context(source, target, scanned=scanned, options=options, account_id=account_id)
+            context = self._reading_context(
+                source, target, path=path, scanned=scanned, options=options, account_id=account_id
+            )
             result = self._converter.convert(
                 ConvertFileCommand(
                     source=source,
@@ -175,21 +179,41 @@ class ConvertNowService:
         return tuple(_renamed(file, upload.name) for file in result.outputs), result.page_count
 
     def _reading_context(
-        self, source: Format, target: Format, *, scanned: bool, options: JobOptions, account_id: UUID | None
+        self,
+        source: Format,
+        target: Format,
+        *,
+        path: Path | None,
+        scanned: bool,
+        options: JobOptions,
+        account_id: UUID | None,
     ) -> StepContext | None:
-        """Whom a photo's reading is for; None when the route reads nothing. A route that doesn't exist answers its
-        own error here, before any work, and so does one that has to go as a job."""
+        """Whom a scan's or photo's reading is for; None when the route reads nothing. A route that doesn't exist
+        answers its own error here, before any work, and so does one that has to go as a job."""
         route = self._planner.get_route(
             RouteRequest(source=source, target=target, pdf_is_scanned=scanned, ocr=options.ocr)
         )
         if not route.uses_ocr:
             return None
-        if scanned or not self._reads_photos:
+        if not self._reads:
             raise NeedsReadingError
+        if scanned and path is not None:
+            self._check_pages_to_read(path, options)
         if account_id is None:
             raise NoAccountError
         # the readers send each picture inside the call and store nothing, so the prefix only names the work
         return StepContext(account_id=account_id, key_prefix=f"{account_id}/sync")
+
+    def _check_pages_to_read(self, path: Path, options: JobOptions) -> None:
+        """The pages the model would read, the ``pageRange`` if one is given: one call each, seconds each."""
+        total = self._inspector.count_pages(path, Format.PDF) or 0
+        page_range = options.conversion.page_range
+        pages = len(page_range.select(total)) if page_range else total
+        if pages > self._max_read_pages:
+            raise NeedsReadingError(
+                f"This scan has {pages:,} pages to read, and up to {self._max_read_pages:,} are read here. "
+                "Send it as a job, or a pageRange of fewer pages."
+            )
 
     def _packaged(self, outputs: tuple[Path, ...], output: OutputMode, pages: int, folder: Path) -> ConvertNowResult:
         mode = OutputMode.SINGLE if output is OutputMode.SINGLE else OutputMode.ZIP  # one answer, one file

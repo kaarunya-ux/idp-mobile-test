@@ -1233,3 +1233,36 @@ unchanged.
 
 A photo holds one of the `SYNC__MAX_CONCURRENT` (4) slots for 10 to 40 s, so four photos at once make library requests
 answer 429 until one finishes.
+
+## Entry 18: A scanned PDF to Word, Excel or CSV over HTTP, up to 5 pages (2026-11-07)
+
+**Goal:** finish the scanned side of the HTTP lane, so every conversion can be tested there.
+
+### What we did
+
+- A scanned PDF to Word, Excel or CSV is read on `conversion-sync` by the same reader as a photo (entry 17), 4 pages at
+  a time, counted on the caller's account.
+- `SYNC__MAX_READ_PAGES` (5, compose `SYNC_MAX_READ_PAGES`): a scan with more pages to read answers `CNV-422-SYNC-001`
+  at once, and the detail says how many pages it has. A `pageRange` counts, so pages 1 to 5 of a long scan are read.
+- `NeedsReadingError` takes its detail; the default is unchanged. It still crosses the worker process (test added).
+- ADR 0002 decision 3 changed again, and its consequences name the mixed PDF limit.
+
+### Check it
+
+Lint, types, 8 import contracts green; 582 unit tests pass, plus the known Hindi-font test. `convert_now.py` and
+`routes.py` at 100% coverage.
+
+Real HTTP on this laptop against the running ai-gateway and the 35B, made-up scans (no text layer):
+
+| Input | Target | Time | Result |
+|---|---|---|---|
+| 3 pages | Word | 85 s first (model cold), 17 s again | headings, paragraphs, bullets, both tables right |
+| 3 pages | Excel | 19 s | one sheet per table, every cell right |
+| 3 pages | CSV | 18 s | first table (CSV holds one) |
+| 6 pages | Word | 0.01 s | `CNV-422-SYNC-001`, "6 pages to read, and up to 5" |
+| 6 pages, `pageRange` 1-2 | Word | 15 s | read |
+
+### Still open
+
+A PDF with text on some pages and scans on others is taken as digital, on HTTP and on jobs: its scanned pages' text
+is lost. Next: decide page by page.

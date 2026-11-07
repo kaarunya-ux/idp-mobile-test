@@ -1,5 +1,5 @@
-"""Converting one file while the caller waits: its type from its content, the limits, one file back, a photo read for
-the caller's account, and a scanned PDF to a document sent to a job."""
+"""Converting one file while the caller waits: its type from its content, the limits, one file back, a scan or photo
+read for the caller's account, and a scan with too many pages sent to a job."""
 
 import zipfile
 from collections.abc import Sequence
@@ -80,7 +80,7 @@ class FakeMerger:
 
 
 def _service(
-    inspector: FakeInspector, *converters: ConverterPort, merger: FakeMerger | None = None, reads_photos: bool = False
+    inspector: FakeInspector, *converters: ConverterPort, merger: FakeMerger | None = None, reads: bool = False
 ) -> ConvertNowService:
     planner = RoutePlanner()
     return ConvertNowService(
@@ -88,7 +88,8 @@ def _service(
         ConvertFileService(planner, ConverterRegistry(list(converters))),
         inspector,
         merger or FakeMerger(),
-        reads_photos=reads_photos,
+        reads=reads,
+        max_read_pages=5,
     )
 
 
@@ -152,16 +153,46 @@ def test_refuses_a_conversion_that_does_not_exist_before_any_work(tmp_path: Path
         _service(FakeInspector()).convert(_command(tmp_path, "PDF"))
 
 
-@pytest.mark.parametrize("target", ["DOCX", "XLSX", "CSV"])
-def test_sends_a_scanned_pdf_to_a_job_without_reading_it_even_when_photos_are_read(tmp_path: Path, target: str) -> None:
+def test_reads_a_scanned_pdf_into_a_document_for_the_callers_account(tmp_path: Path) -> None:
+    reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
+    writer = FakeConverter(Converter.MODEL_TO_DOCX, ["input.docx"])
+
+    result = _service(FakeInspector(scanned=True, pages=5), reader, writer, reads=True).convert(
+        _command(tmp_path, "DOCX", account_id=ACCOUNT)
+    )
+
+    context = reader.requests[0].context
+    assert context is not None
+    assert context.account_id == ACCOUNT
+    assert reader.requests[0].inputs == (tmp_path / "in-1" / "input.pdf",)
+    assert result.file.name == "report.docx"
+
+
+def test_sends_a_scan_with_more_pages_to_read_than_the_limit_to_a_job(tmp_path: Path) -> None:
     reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
 
-    with pytest.raises(NeedsReadingError):
-        _service(FakeInspector(scanned=True), reader, reads_photos=True).convert(
-            _command(tmp_path, target, account_id=ACCOUNT)
+    with pytest.raises(NeedsReadingError, match="6 pages to read, and up to 5"):
+        _service(FakeInspector(scanned=True, pages=6), reader, reads=True).convert(
+            _command(tmp_path, "DOCX", account_id=ACCOUNT)
         )
 
     assert reader.requests == []
+
+
+def test_reads_a_long_scan_when_its_page_range_is_within_the_limit(tmp_path: Path) -> None:
+    reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
+    writer = FakeConverter(Converter.MODEL_TO_XLSX, ["input.xlsx"])
+
+    result = _service(FakeInspector(scanned=True, pages=40), reader, writer, reads=True).convert(
+        _command(tmp_path, "XLSX", options={"pageRange": "2-4,9"}, account_id=ACCOUNT)
+    )
+
+    assert result.file.name == "report.xlsx"
+
+
+def test_sends_a_scanned_pdf_to_a_job_when_this_build_has_no_reader(tmp_path: Path) -> None:
+    with pytest.raises(NeedsReadingError):
+        _service(FakeInspector(scanned=True)).convert(_command(tmp_path, "DOCX", account_id=ACCOUNT))
 
 
 def test_sends_a_photo_to_a_document_to_a_job_when_this_build_has_no_reader(tmp_path: Path) -> None:
@@ -183,7 +214,7 @@ def test_reads_a_photo_into_a_document_for_the_callers_account(
     reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
     writer = FakeConverter(writer_step, [written])
 
-    result = _service(FakeInspector(Format.JPEG, pages=1), reader, writer, reads_photos=True).convert(
+    result = _service(FakeInspector(Format.JPEG, pages=1), reader, writer, reads=True).convert(
         _command(tmp_path, target, account_id=ACCOUNT)
     )
 
@@ -198,7 +229,7 @@ def test_refuses_to_read_a_photo_without_an_account_to_count_it_on(tmp_path: Pat
     reader = FakeConverter(Converter.OCR_TO_MODEL, ["input.model.json"])
 
     with pytest.raises(NoAccountError) as caught:
-        _service(FakeInspector(Format.PNG, pages=1), reader, reads_photos=True).convert(_command(tmp_path, "DOCX"))
+        _service(FakeInspector(Format.PNG, pages=1), reader, reads=True).convert(_command(tmp_path, "DOCX"))
 
     assert caught.value.detail.startswith("report: ")
     assert reader.requests == []
@@ -289,13 +320,13 @@ def test_gets_the_scanned_reader_for_photos_when_ai_gateway_is_configured() -> N
 
     service = build_convert_now_service(settings)
 
-    assert service._reads_photos
+    assert service._reads
     assert service._converter._converters.get(Converter.OCR_TO_MODEL).converter is Converter.OCR_TO_MODEL
 
 
 def test_sends_photos_to_a_job_when_ai_gateway_is_not_configured() -> None:
     service = build_convert_now_service(Settings.model_validate({"office": {"binary": "no-such-office"}}))
 
-    assert not service._reads_photos
+    assert not service._reads
     with pytest.raises(LookupError):
         service._converter._converters.get(Converter.OCR_TO_MODEL)

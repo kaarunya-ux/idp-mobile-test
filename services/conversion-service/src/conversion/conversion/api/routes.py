@@ -3,11 +3,11 @@
 ``POST /api/v1/convert`` takes one or more ``file`` and a ``target`` (and optionally ``options``, the JSON a job's
 options are) and answers with the converted file: several files come back as one ZIP, except images to a PDF or a deck,
 which become one file. ``POST /api/v1/merge`` takes PDFs and images and answers with one PDF, in the order sent. Both
-use the libraries, except a photo to Word, Excel or CSV, which is read through ai-gateway. The backend chooses these or
-the queued way (``ConversionRequested``), and decides how much to send: ``CNV-422-SYNC-001`` (a scanned PDF to a
-document) and ``CNV-429-BUSY-001`` mean "send it queued".
+use the libraries, except a scan or photo to Word, Excel or CSV, which is read through ai-gateway. The backend chooses
+these or the queued way (``ConversionRequested``), and decides how much to send: ``CNV-422-SYNC-001`` (a scan with more
+pages to read than ``SYNC__MAX_READ_PAGES``) and ``CNV-429-BUSY-001`` mean "send it queued".
 
-The token is the person's, forwarded by the backend: its account is the one a photo's AI calls are counted on. With
+The token is the person's, forwarded by the backend: its account is the one a scan's AI calls are counted on. With
 ``SYNC__REQUIRE_TOKEN=false`` (integration testing) a request without one is let in, counted on
 ``SYNC__DEFAULT_ACCOUNT_ID``; a request that sends one is still checked.
 """
@@ -77,8 +77,8 @@ async def check_token(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     verifier: Annotated[TokenVerifier, Depends(provide_token_verifier)],
 ) -> UUID | None:
-    """The caller's account, which a photo's reading is counted on: the token's, or the default for a tokenless
-    request; None when there is none."""
+    """The caller's account, which a scan's or photo's reading is counted on: the token's, or the default for a
+    tokenless request; None when there is none."""
     if credentials is None:
         if request.app.state.sync_require_token:
             raise UnauthenticatedError

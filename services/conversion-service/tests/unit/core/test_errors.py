@@ -24,3 +24,9 @@ def test_keeps_an_error_whose_init_takes_no_arguments_when_it_crosses_a_process(
 
         assert type(copy) is type(error)
         assert copy.detail == error.detail
+
+
+def test_keeps_an_errors_own_detail_when_it_crosses_a_process() -> None:
+    copy = pickle.loads(pickle.dumps(NeedsReadingError("This scan has 9 pages to read.")))  # noqa: S301 - our own bytes
+
+    assert copy.detail == "This scan has 9 pages to read."
