@@ -5,6 +5,7 @@ Every variable is listed in README.md (CFG-05). Nested groups use a double under
 
 from datetime import timedelta
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr, field_validator, model_validator
@@ -55,11 +56,39 @@ class ModelSettings(BaseModel):
     timeouts: ModelTimeouts = Field(default_factory=ModelTimeouts)
     max_image_side_px: int = Field(1280, ge=256, le=4096)  # IDP-03 ch. 4.3
     page_read_max_side_px: int = Field(2048, ge=256, le=4096)  # whole pages: small print needs more pixels than a card
+    # a page read is refused (and asked for once more) when it writes fewer blocks than this share of the number its own
+    # analysis counted: a hijacked or cut-off reading looks like that (ML-07: a threshold lives in settings)
+    page_read_min_block_share: float = Field(0.5, ge=0.1, le=1.0)
     min_image_side_px: int = Field(768, ge=0, le=2048)  # smaller card pictures are enlarged (the web app's MIN_EDGE)
     max_image_bytes: ByteSize = ByteSize(20 * 1024 * 1024)  # larger page images are refused (AIG-422-INPUT-001)
     send_schema: bool = True  # false for mlx_vlm.server, whose schema enforcement corrupts the first value
     page: PageServerSettings = Field(default_factory=PageServerSettings)
     thinking: bool | None = False  # hybrid models' reasoning when the prompt doesn't say; None sends nothing
+    # The model registry (ML-01): ``models.yaml`` pins each model's version, quantisation and checksums. At start-up the
+    # gateway asks each server which model it serves and compares it with the registry: ``off`` does not ask, ``warn``
+    # logs a mismatch, ``strict`` stops the gateway on a mismatch. Use ``strict`` in pre-prod and prod.
+    registry_file: Path = Path("models.yaml")
+    registry_check: Literal["off", "warn", "strict"] = "off"
+    # how long start-up keeps asking a model server that does not answer yet (a large model loads for minutes, and on
+    # a VM the gateway may start before it); 0 asks once
+    registry_wait: timedelta = Field(timedelta(0), ge=timedelta(0), le=timedelta(minutes=15))
+
+
+class PromptSettings(BaseModel):
+    """Which version of a prompt to use. By default the highest; a pin fixes a prompt at an older version, which is the
+    rollback when a new version turns out worse: ``PROMPTS__PINS='{"page-read": 2}'`` and a restart."""
+
+    pins: dict[str, int] = Field(default_factory=dict)
+    # The copy of the prompt files kept at each start-up, to log what changed since the one before. It needs a place the
+    # gateway may write to; when it cannot, it logs prompt_history_unavailable and starts anyway.
+    history_file: Path = Path("prompt_history.json")
+
+    @field_validator("pins")
+    @classmethod
+    def _versions_start_at_one(cls, pins: dict[str, int]) -> dict[str, int]:
+        if any(version < 1 for version in pins.values()):
+            raise ValueError("a prompt version is a whole number from 1")
+        return pins
 
 
 class QueueSettings(BaseModel):
@@ -120,6 +149,12 @@ class AuthSettings(BaseModel):
     leeway: timedelta = Field(timedelta(seconds=30), ge=timedelta(0), le=timedelta(minutes=5))
 
 
+class BuildSettings(BaseModel):
+    """Which build is running, for the stamp on every log line. The image build sets ``BUILD__COMMIT``."""
+
+    commit: str = Field("unknown", min_length=1, max_length=64)
+
+
 class MissingSettingsError(RuntimeError):
     """The process started without settings it needs."""
 
@@ -130,7 +165,9 @@ class Settings(BaseSettings):
     service_name: str = Field("ai-gateway", min_length=1, max_length=64)
     environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    build: BuildSettings = Field(default_factory=BuildSettings)
     model: ModelSettings = Field(default_factory=ModelSettings)
+    prompts: PromptSettings = Field(default_factory=PromptSettings)
     queue: QueueSettings = Field(default_factory=QueueSettings)
     caps: CapsSettings = Field(default_factory=CapsSettings)
     breaker: BreakerSettings = Field(default_factory=BreakerSettings)

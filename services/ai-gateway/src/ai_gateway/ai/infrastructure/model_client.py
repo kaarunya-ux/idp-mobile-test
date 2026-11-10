@@ -118,7 +118,13 @@ def _reply(response: httpx.Response, model: str) -> ModelReply:
         content = body["choices"][0]["message"]["content"]
         usage = body.get("usage") or {}
         tokens = Tokens(input=int(usage.get("prompt_tokens", 0)), output=int(usage.get("completion_tokens", 0)))
-        return ModelReply(model=str(body.get("model") or model), content=str(content or ""), tokens=tokens)
+        fingerprint = body.get("system_fingerprint")
+        return ModelReply(
+            model=str(body.get("model") or model),
+            content=str(content or ""),
+            tokens=tokens,
+            fingerprint=str(fingerprint) if fingerprint else None,
+        )
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         log.warning("model_reply_unreadable")
         raise ModelUnavailableError("The model server's reply could not be read.") from exc

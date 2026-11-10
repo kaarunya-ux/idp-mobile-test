@@ -53,12 +53,18 @@ Callers treat every 5xx as "AI unavailable": the fields stay for review, and the
 |---|---|---|
 | `SERVICE_NAME`, `ENVIRONMENT` | `ai-gateway`, `local` | |
 | `LOGGING__LEVEL`, `LOGGING__FORMAT` | `INFO`, `json` | |
+| `BUILD__COMMIT` | `unknown` | The git commit of the image; the image build sets it. With `ENVIRONMENT`, the version and `config_hash` (the settings that change behaviour plus the hash of the prompt files) it is on every log line, and `ai_build_info{env,version,commit,config_hash}` is exported at `/metrics` (prompt drift strategies 1, 3 and 24) |
 | `MODEL__BASE_URL` | `http://10.0.3.66:4000/v1` | OpenAI-style server |
 | `MODEL__API_KEY` | none | Sent as a bearer token when set |
 | `MODEL__VL_MODEL`, `MODEL__SMART_MODEL`, `MODEL__AUTO_MODEL` | `vl`, `smart`, `auto` | The names the server knows |
 | `MODEL__VL_MAX_CONCURRENT` | 4 | The server's capacity, shared by all replicas |
-| `MODEL__TIMEOUTS__FIELD_READ`, `__CLASSIFY`, `__PAGE_ANALYSIS`, `__TEMPLATE_SUGGEST`, `__PAGE_READ`, `__GENERIC_READ`, `__CONNECT` | 30 s, 30 s, 90 s, 90 s, 180 s, 40 s, 2 s | ISO 8601 durations or seconds |
+| `MODEL__TIMEOUTS__FIELD_READ`, `__CLASSIFY`, `__PAGE_ANALYSIS`, `__TEMPLATE_SUGGEST`, `__PAGE_READ`, `__GENERIC_READ`, `__CONNECT` | 30 s, 30 s, 90 s, 90 s, 180 s, 40 s, 2 s | ISO 8601 durations such as `PT180S` (a bare number like `180` is refused) |
 | `MODEL__PAGE_READ_MAX_SIDE_PX` | 2048 | A whole page is sent larger than a card, so small print stays readable |
+| `MODEL__PAGE_READ_MIN_BLOCK_SHARE` | 0.5 | A page read is asked for once more, then refused (`AIG-502-OUTPUT-001`), when it writes fewer blocks than this share of the number its own analysis counted (ADR 0006) |
+| `MODEL__REGISTRY_FILE` / `MODEL__REGISTRY_CHECK` | `models.yaml` / `off` | The model registry (ML-01) and what to do with it at start-up: `off` does not ask the servers, `warn` logs a server that serves a different model than the registry lists for its role, `strict` stops the gateway. **Use `strict` in pre-prod and prod** (ADR 0007) |
+| `PROMPTS__HISTORY_FILE` | `prompt_history.json` | Where the gateway keeps a copy of the prompt files at each start-up, to log what changed since the previous one (`prompt_file_edited`, ADR 0008). It must be a place the gateway may write to; if not, it logs `prompt_history_unavailable` and starts anyway |
+| `PROMPTS__PINS` | `{}` | JSON, for example `{"page-read": 2}`: fixes a prompt at an older version instead of the highest. **This is the rollback** when a new prompt version turns out worse; restart the gateway after setting it (ADR 0008) |
+| `MODEL__REGISTRY_WAIT` | `PT0S` | How long start-up keeps asking a model server that does not answer yet, every 5 s (a 17 GB model loads for minutes, and on a VM the gateway may start first). Use e.g. `PT3M` with `strict`; an ISO 8601 duration, not a bare number |
 | `MODEL__MAX_IMAGE_SIDE_PX`, `MODEL__MAX_IMAGE_BYTES` | 1280, 20 MiB | |
 | `MODEL__PAGE__BASE_URL`, `__MODEL`, `__SEND_SCHEMA`, `__API_KEY` | none, `page`, `true`, none | A separate model server for page-read (conversion's whole pages), e.g. the Qwen3.6-35B on llama-server; unset, page-read uses the main server's vision model (ADR 0005) |
 | `MODEL__SEND_SCHEMA` | `true` | `false` leaves the JSON schema out of `response_format`: mlx_vlm.server's enforcement corrupts the first value. Answers are checked against the schema here either way |
@@ -86,12 +92,70 @@ MODEL__BASE_URL=http://localhost:4000/v1 make run  # the gateway, answered by th
 
 `MOCK_MODEL__LATENCY_MS` adds a delay, to see queueing and timeouts. Never deploy it: it is not a model.
 
+## Data flow and personal data
+
+The pictures sent here can show Aadhaar and PAN cards, names, addresses and dates of birth. Where that data goes
+(DPDP Act 2023, the standard's OBS-04, LLM-06 and FIL-08):
+
+| Step | What happens | Where it stays |
+|---|---|---|
+| In | A caller (extraction-service, conversion-service) sends an image: `{bucket, key}` in MinIO, or `{data}` inside the request (the synchronous lane and conversion's scanned pages) | Inside the request, or in the caller's private bucket |
+| Resize | The picture is resized and tidied in memory | Memory, for the length of the call |
+| Out | The picture and the prompt go to the model server: `MODEL__BASE_URL`, and `MODEL__PAGE__BASE_URL` for whole pages | The company's own model servers; no other host is called |
+| Back | The model's JSON answer is validated and returned to the caller | The response; nothing is stored here |
+| Logs | One line per call: task, prompt version, client, account id, outcome, latency, token counts | Never the picture, the prompt, the answer or a field value. A mask on every log line, tracebacks included, replaces Aadhaar-, PAN-, e-mail- and phone-shaped text as a safety net |
+| Metrics | Labels are task, model and outcome | Never a value |
+| Redis | Per-account daily counters and slot counters, keyed by account id and model, with an expiry | No document data |
+
+Not verified from this repository: whether the model servers keep their own request logs or prompt caches of images.
+That is a setting of `llama-server` or `mlx_vlm.server`, not of this service, and needs checking on each model host
+before real documents are sent there.
+
+## Models
+
+`models.yaml` is the registry (ML-01): each model's version, quantisation, source and revision, runtime, the id the server
+answers with, the roles it serves (`vl`, `page`, `auto`, `smart`) and the SHA-256 and size of every file. Pre-prod runs one
+model for every role: **Qwen3.6-35B-A3B, UD-IQ4_XS** (`Qwen3.6-35B-A3B-UD-IQ4_XS.gguf`, from
+`unsloth/Qwen3.6-35B-A3B-GGUF`, Apache-2.0). The checksum is the one published at the pinned revision.
+
+- **Where the file is placed**, check it: `uv run python scripts/verify_model.py /path/to/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf`
+  compares size and SHA-256 with the registry (exit 1 on a mismatch). The gateway cannot hash a file on another host.
+- **At start-up** with `MODEL__REGISTRY_CHECK=strict`, the gateway asks each role's server (`MODEL__BASE_URL`, and
+  `MODEL__PAGE__BASE_URL` for `page`) which model it serves and stops when it is not the registered one. llama-server
+  reports the model file it loaded at `/props` (`model_path`); that file name decides, because the `--alias` it is
+  started with differs from host to host (`qwen3.6-35b` on one Mac, `qwen3.6-35b-a3b` on another). A server without
+  `/props` is matched by alias or file name. A server that
+  cannot be asked is only logged (`model_registry_unverified`): the circuit breaker already handles a model that is down.
+- **Drift:** the registry's hash is part of `config_hash` on every log line and in `ai_build_info`, so a model change shows
+  as a configuration change.
+- **Not pinned yet:** the vision encoder (`mmproj-*.gguf`, three published variants). Add the one the model host loads.
+
 ## Prompts
 
 `src/ai_gateway/prompts/<task>.v<n>.md`, with front matter (`name`, `version`, `model`, `temperature`, `max_tokens`).
 The highest version is used. Changing a prompt means a new file plus a run on the golden set (LLM-02, ML-12). The
 standard card types' questions are in `ai/domain/card_profiles.py`: change them together with a new
 `field-read` version.
+
+
+**Which prompt is running, and when it changed.** At start-up the gateway logs one `prompt_loaded` line per prompt
+(`prompt_version`, `prompt_hash`, `pinned`, temperature, max tokens) and a `prompts_loaded` summary, each with the build
+stamp (`env`, `commit`, `config_hash`). Every `ai_call_finished` line carries the `prompt_version` and `prompt_hash` that
+answered. A change of prompt therefore shows in the logs as a different version or hash at a later start-up, and
+`golden-tests/drift/logwatch.py` reports it as `PROMPT_CHANGED` with the time, the environment and the commit; a rollback
+by pin as `PROMPT_ROLLED_BACK`; and a version whose answers need more repairs, refusals, time or tokens than the one
+before it as `PROMPT_WORSE`, with the pin that rolls it back. Whether the *text* got worse is for
+`golden-tests/drift/prompt_check.py`.
+
+**Which file changed, and what in it.** Each `prompt_loaded` line also has `file`, `path` (full path on that machine) and
+`folder`. At start-up the gateway compares the prompt files with the copy it kept at the previous start-up
+(`PROMPTS__HISTORY_FILE`) and logs one warning per file that differs: `prompt_file_edited`, `prompt_file_added` or
+`prompt_file_removed`, with `file`, `path`, `folder`, `part` (`front matter`, `text`, `front matter and text`,
+`whole prompt`, `new file`, `file removed`), `lines_added`, `lines_removed`, `changed_share` and `changes`: up to 20
+changed lines, each with its line number, the line before (`was`), the line now (`now`) and the `rule` number when it is a
+numbered rule. `logwatch.py` reports each as `PROMPT_FILE_CHANGED`. The first start-up only logs
+`prompt_history_started`. A prompt is read once at start-up, so a change is logged when the gateway is restarted; a file
+edited twice between two restarts shows the net change.
 
 ## Metrics
 

@@ -1,0 +1,40 @@
+# The model registry (Python Engineering Standard ML-01, ML-02). Code refers to models by `name`, never by path or URL.
+#
+#   version       what the model is called upstream; recorded as provenance (ML-04)
+#   quantization  the quantisation of the weights
+#   source        where the files were obtained, and at which revision; nothing is downloaded at run time (ML-02)
+#   runtime       llama.cpp (llama-server, OpenAI-style /v1); device is gpu or cpu, never a silent fallback (ML-10)
+#   served_as     the aliases the server may be started with (llama-server --alias). The alias differs from host to host,
+#                 so the gateway also matches the model file name the server reports at /props, which is the stable identity
+#   roles         the gateway roles this model serves: vl (cards), page (whole pages), auto, smart
+#   files         every file of the model with its SHA-256 and size, as published at the revision named in `source`
+#
+# The gateway cannot hash a file on another host. Verify the file where it is placed with
+#   uv run python scripts/verify_model.py /path/to/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf
+# and set MODEL__REGISTRY_CHECK=strict in pre-prod and prod, so a server that serves a different model stops the gateway.
+#
+# To add or change a model: put the files on the model host, run scripts/verify_model.py (or sha256sum), edit this file,
+# attach the golden-test comparison (ML-12) and add a line to golden-tests/drift/CHANGES.md.
+#
+# Not pinned yet: the vision encoder. llama-server needs an mmproj file for images (--mmproj). The repository publishes
+# mmproj-BF16.gguf, mmproj-F16.gguf and mmproj-F32.gguf; add the one the model host loads here, with its checksum.
+
+models:
+  - name: qwen3.6-35b-a3b
+    version: "Qwen3.6-35B-A3B"
+    quantization: UD-IQ4_XS
+    source: huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF at revision a483e9e6cbd595906af30beda3187c2663a1118c (base model Qwen/Qwen3.6-35B-A3B, Apache-2.0)
+    runtime: llama.cpp
+    device: gpu
+    served_as:
+      - qwen3.6-35b-a3b
+      - qwen3.6-35b
+    roles:
+      - vl
+      - smart
+      - auto
+      - page
+    files:
+      - path: Qwen3.6-35B-A3B-UD-IQ4_XS.gguf
+        sha256: 649d7508507b84638732c4f52c24c8b15843c6dca2f3ff793ae07c14a67ebbb3
+        size: 17730509792

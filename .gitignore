@@ -93,3 +93,4 @@ input_trans/
 output_trans/
 model/
 trans_test/
+services/ai-gateway/prompt_history.json

@@ -10,6 +10,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
+COPY models.yaml ./
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim-bookworm AS api

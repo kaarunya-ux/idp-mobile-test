@@ -88,6 +88,7 @@ class Prompt:
     max_tokens: int
     model: ModelRole | None = None  # None for a prompt that is part of another call (the repair instruction)
     thinking: bool | None = None  # sent on every call when set: a server's own default must never decide it
+    fingerprint: str = ""  # a short hash of everything above that the model sees; logged on every call (drift)
 
     @property
     def label(self) -> str:
@@ -124,6 +125,7 @@ class ModelReply:
     model: str  # the name the server answered with
     content: str
     tokens: Tokens
+    fingerprint: str | None = None  # the server's own build id (llama.cpp: system_fingerprint), for drift logs
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

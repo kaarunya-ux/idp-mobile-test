@@ -88,7 +88,7 @@ def test_returns_values_and_provenance_when_reading_fields_in_batch(client: Test
     assert response.status_code == 200
     body = response.json()
     assert body["fields"] == [{"key": "pan_number", "value": "ABCDE1234F"}]
-    assert body["promptVersion"] == "field-read.v1"
+    assert body["promptVersion"] == "card-read.v1"
     assert body["tokens"] == {"in": 100, "out": 10}
     assert set(body) >= {"model", "latencyMs"}
 
@@ -231,7 +231,7 @@ def test_returns_a_pages_blocks_in_camel_case_when_reading_a_page() -> None:
         assert response.status_code == 200
         assert body["analysis"] == {"nBlocks": 2, "tableColumnCounts": [2]}
         assert body["blocks"][1]["hasHeader"] is True
-        assert body["promptVersion"] == "page-read.v1"
+        assert body["promptVersion"] == "page-read.v3"
 
 
 def test_returns_the_type_and_every_field_when_reading_any_document(client: TestClient, model: FakeModel) -> None:
