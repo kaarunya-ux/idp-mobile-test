@@ -1,4 +1,4 @@
-# 7. A model registry for the pre-prod model
+# 8. A model registry for the pre-prod model
 
 Status: Proposed · Date: 2026-11-10 · Deciders: Python team lead (Prakyath)
 

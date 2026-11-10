@@ -478,3 +478,39 @@ those, OCR first, and store nothing. Decisions: ADR 0013 (option B; no shared da
 A made-up PAN card with four custom keys, every label printed: 1.68 s, all four by OCR. With a fifth key whose label
 isn't printed: 5.4 s, the four by OCR and the fifth by the AI. Two flaws found and fixed on the way: a label matched at
 the end of a title ("Department" in "INCOME TAX DEPARTMENT"), and an apostrophe stopped "Father's Name" matching.
+
+## Entry 17: Custom keys read inside the box drawn around the value (2026-11-07)
+
+**Goal:** the frontend's report: custom templates published, but on a two-column tax invoice a value ran into the next
+column (`GSTIN` gave `32A... Transport ID 24B...`). The frontend confirmed the box is drawn around the value.
+
+### Cause
+
+The custom route took only `{key, label, type}` and refused anything else, so the boxes never reached us; the value
+was the rest of the label's line, across the whole page. Confidence was 99% because both engines read the same wrong
+text.
+
+### What we did
+
+- `fields` takes an optional `box` per key: `{page: 1, x, y, w, h}` in percent of the page, as the designer stores
+  it (ADR 0013 amended). A box past the page's edge, of no size, or on another page is a 400.
+- A key with a box is read inside it (`FieldDefinition.clip_to_box`), widened a little; a piece of text crossing the
+  edge keeps only its words inside (a word ends at a space or after a colon: "ID:24B..."). When the box holds nothing,
+  the key is read by its label.
+- By label, the value now stops at the first column gap after it starts (a value far right of its label, as on ID
+  cards, is still read).
+
+### Check it
+
+Lint, types, 10 import contracts; 714 unit tests pass.
+
+A made-up two-column invoice, M/S, GSTIN, Tel and Transport ID:
+
+| Run | M/S | GSTIN | Time |
+|---|---|---|---|
+| Docker before (labels) | `Test Engineering Works Challan No: 33` | `32A... Transport ID:24B...` | 2.5 s |
+| New, labels only | `Test Engineering Works` | `32AAAAA0000A1ZA` | 2.1 s, OCR |
+| New, with boxes | `Test Engineering Works` | `32AAAAA0000A1ZA` | 2.4 s, OCR |
+
+All four right in both new runs. A key whose label isn't printed ("Seller phone", in the header line): by label the
+AI gave the buyer's phone; with a box, OCR read the seller's, 2.1 s.

@@ -38,7 +38,7 @@ log = structlog.get_logger(__name__)
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ReadingCheck:
-    """A second reading of every page by OCR, and when the model's page disagrees with it (ADR 0001)."""
+    """A second reading of every page by OCR, and when the model's page disagrees with it (ADR 0003)."""
 
     recognizer: TextRecognizerPort
     policy: ReadingCheckPolicy

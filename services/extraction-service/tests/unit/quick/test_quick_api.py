@@ -275,6 +275,38 @@ def test_reads_only_the_keys_sent_on_the_custom_route() -> None:
     ]
 
 
+def test_passes_a_drawn_box_on_as_fractions_of_the_page() -> None:
+    pipeline = _Pipeline()
+    fields = '[{"key": "gstin", "label": "GSTIN", "box": {"page": 1, "x": 13.5, "y": 26.2, "w": 26, "h": 1.3}}]'
+
+    response = _client(USER, pipeline=pipeline).post(
+        "/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields}
+    )
+
+    assert response.status_code == 200
+    template = pipeline.templates[0]
+    assert template is not None
+    (field,) = template.fields
+    assert field.clip_to_box
+    assert (field.box.x, field.box.y) == pytest.approx((0.13, 0.252))
+    assert (field.box.width, field.box.height) == pytest.approx((0.27, 0.033))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        '[{"key": "a", "label": "A", "box": {"page": 2, "x": 1, "y": 1, "w": 5, "h": 5}}]',  # fields: first page
+        '[{"key": "a", "label": "A", "box": {"x": 90, "y": 1, "w": 20, "h": 5}}]',  # past the page's edge
+        '[{"key": "a", "label": "A", "box": {"x": 1, "y": 1, "w": 0, "h": 5}}]',
+        '[{"key": "a", "label": "A", "box": {"x": 1, "y": 1, "w": 5}}]',
+    ],
+)
+def test_answers_400_on_the_custom_route_when_a_box_is_not_valid(fields: str) -> None:
+    response = _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields})
+
+    assert (response.status_code, response.json()["code"]) == (400, "EXT-400-VALIDATION-001")
+
+
 @pytest.mark.parametrize(
     "fields",
     [

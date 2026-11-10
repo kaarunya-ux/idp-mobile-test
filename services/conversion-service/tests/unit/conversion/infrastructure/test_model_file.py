@@ -9,6 +9,7 @@ from conversion.conversion.domain.document_model import (
     Alignment,
     DocumentModel,
     Page,
+    Picture,
     Table,
     TextBlock,
     TextKind,
@@ -50,3 +51,12 @@ def test_names_model_files_after_the_original_when_given_a_source(tmp_path: Path
     assert path == tmp_path / "letter.model.json"
     assert source_stem(path) == "letter"
     assert source_stem(Path("other.json")) == "other"
+
+
+def test_keeps_a_picture_when_the_model_is_written_and_read_back(tmp_path: Path) -> None:
+    picture = Picture(data=b"\xff\xd8\xff made-up image", width_pt=120.5)
+    path = tmp_path / "doc.model.json"
+
+    write_model(DocumentModel(pages=(Page(blocks=(picture,)),)), path)
+
+    assert read_model(path).pages[0].blocks == (picture,)

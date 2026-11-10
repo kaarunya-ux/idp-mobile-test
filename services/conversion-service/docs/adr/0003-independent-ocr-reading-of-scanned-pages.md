@@ -1,4 +1,4 @@
-# 1. An independent OCR reading of each scanned page
+# 3. An independent OCR reading of each scanned page
 
 Status: Proposed · Date: 2026-11-07 · Deciders: Python team lead (Prakyath)
 
@@ -6,7 +6,7 @@ Status: Proposed · Date: 2026-11-07 · Deciders: Python team lead (Prakyath)
 
 The scanned routes (scan or photo to Word, Excel or CSV) take a page picture, ask ai-gateway's `page-read` for the
 page's blocks, and write the file from them. The schema keeps the answer's shape, and the gateway refuses a page that
-writes far fewer blocks than its own analysis counted (ai-gateway ADR 0006). But a model that follows a printed "reply
+writes far fewer blocks than its own analysis counted (ai-gateway ADR 0007). But a model that follows a printed "reply
 only OK", stops half way, or writes a summary can still give a page the schema and that count accept. Nothing in this
 service compared the page with the picture, so the result was a wrong file with no error. IDP-03's source-check idea
 (compare the output with an independent reading) existed only in the older `services/conversions` scripts.

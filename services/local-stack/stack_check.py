@@ -39,6 +39,7 @@ HEALTH = {
     "extraction-sync": "http://extraction-sync:8003/health/ready",
     "ai-gateway": "http://ai-gateway:8002/health/ready",
     "conversion-health": "http://conversion-health:8001/health/ready",
+    "conversion-sync": "http://conversion-sync:8004/health/ready",
 }
 TIMEOUT_S = 180
 results: list[tuple[str, bool, str]] = []
@@ -223,6 +224,25 @@ def check_conversion() -> None:
     convert("conversion end to end", buffer.getvalue(), "PDF")
 
 
+def check_sync_conversion() -> None:
+    """The HTTP lane: the libraries only, so a picture to PDF is answered on the open request."""
+    name = "synchronous conversion (POST /api/v1/convert)"
+    started = time.monotonic()
+    try:
+        response = httpx.post(
+            "http://conversion-sync:8004/api/v1/convert",
+            files={"file": ("page.png", card_image(), "image/png")},
+            data={"target": "PDF"},
+            timeout=60,
+        )
+    except httpx.HTTPError as exc:
+        step(name, False, type(exc).__name__)
+        return
+    seconds = f"{time.monotonic() - started:.1f} s"
+    passed = response.status_code == httpx.codes.OK and response.content.startswith(b"%PDF")
+    step(name, passed, f"HTTP {response.status_code}, {len(response.content)} bytes, {seconds}")
+
+
 def check_scanned_conversion() -> None:
     convert("scanned conversion end to end (model through ai-gateway)", card_image(), "DOCX")
 
@@ -273,6 +293,7 @@ if __name__ == "__main__":
     check_quick_extract(user_token, "/api/v1/extract/custom", keys)
     guarded("extraction end to end", check_extraction)
     guarded("conversion end to end", check_conversion)
+    guarded("synchronous conversion (POST /api/v1/convert)", check_sync_conversion)
     guarded("scanned conversion end to end (model through ai-gateway)", check_scanned_conversion)
     failed = [name for name, passed, _ in results if not passed]
     summary = f"\n{len(results) - len(failed)} of {len(results)} checks passed"

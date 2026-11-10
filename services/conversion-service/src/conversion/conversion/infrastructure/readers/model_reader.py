@@ -35,7 +35,9 @@ class GatewayPageReader:
 
     def read_page(self, image: Path, number: int, context: StepContext) -> Page:
         picture = base64.b64encode(image.read_bytes()).decode()
-        answer = self._post({"accountId": str(context.account_id), "page": {"data": picture}})
+        answer = post(
+            self._client, self._tokens, PAGE_READ, {"accountId": str(context.account_id), "page": {"data": picture}}
+        )
         try:
             page = to_page(answer["blocks"])
         except (KeyError, TypeError) as exc:
@@ -44,30 +46,31 @@ class GatewayPageReader:
         _log_reading(answer, number, len(page.blocks))
         return page
 
-    def _post(self, body: dict[str, Any]) -> dict[str, Any]:
-        try:
-            response = self._client.post(
-                PAGE_READ, json=body, headers={"Authorization": f"Bearer {self._tokens.token()}"}
-            )
-        except (httpx.HTTPError, ServiceTokenError) as exc:  # the details go to the log, never to the user
-            log.warning("ai_gateway_unreachable", error=type(exc).__name__)
-            raise AiUnavailableError from exc
-        if response.status_code == httpx.codes.UNAUTHORIZED:
-            self._tokens.invalidate()  # the next call fetches a new token
-        if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
-            raise AiLimitReachedError
-        if response.status_code == httpx.codes.UNPROCESSABLE_ENTITY:
-            raise UnreadableImageError
-        if response.status_code != httpx.codes.OK:
-            log.warning("ai_gateway_error", status=response.status_code, code=_code(response))
-            raise AiUnavailableError
-        try:
-            answer = response.json()
-        except ValueError as exc:
-            raise AiUnavailableError from exc
-        if not isinstance(answer, dict):
-            raise AiUnavailableError
-        return answer
+
+def post(client: httpx.Client, tokens: ServiceTokenProvider, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    """One call to ai-gateway, its answer's JSON object. Raises ``AiLimitReachedError`` (429), ``UnreadableImageError``
+    (422) or ``AiUnavailableError`` (anything else that is not 200)."""
+    try:
+        response = client.post(path, json=body, headers={"Authorization": f"Bearer {tokens.token()}"})
+    except (httpx.HTTPError, ServiceTokenError) as exc:  # the details go to the log, never to the user
+        log.warning("ai_gateway_unreachable", error=type(exc).__name__)
+        raise AiUnavailableError from exc
+    if response.status_code == httpx.codes.UNAUTHORIZED:
+        tokens.invalidate()  # the next call fetches a new token
+    if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
+        raise AiLimitReachedError
+    if response.status_code == httpx.codes.UNPROCESSABLE_ENTITY:
+        raise UnreadableImageError
+    if response.status_code != httpx.codes.OK:
+        log.warning("ai_gateway_error", status=response.status_code, code=_code(response))
+        raise AiUnavailableError
+    try:
+        answer = response.json()
+    except ValueError as exc:
+        raise AiUnavailableError from exc
+    if not isinstance(answer, dict):
+        raise AiUnavailableError
+    return answer
 
 
 def _log_reading(answer: dict[str, Any], number: int, block_count: int) -> None:

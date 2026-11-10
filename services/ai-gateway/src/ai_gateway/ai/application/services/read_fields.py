@@ -29,7 +29,7 @@ from ai_gateway.ai.domain.prompt_text import data_block
 
 PROMPT = "field-read"
 # The standard card types are read with a one-line system prompt: the card's own prompt carries every rule. With the
-# long field-read prompt as well, the model returned nulls for cards that said "return null" (live test, ADR 0006).
+# long field-read prompt as well, the model returned nulls for cards that said "return null" (live test, ADR 0007).
 CARD_PROMPT = "card-read"
 
 

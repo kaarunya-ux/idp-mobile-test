@@ -5,13 +5,23 @@ repeat on every page. Heading styles are made plain black, as in the original ``
 because Word's default theme makes them blue.
 """
 
+import io
+import re
+
 import docx
 from docx.document import Document as WordDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
-from docx.shared import RGBColor
+from docx.shared import Pt, RGBColor
 
-from conversion.conversion.domain.document_model import Alignment, Table, TextBlock, TextKind, check_table_sizes
+from conversion.conversion.domain.document_model import (
+    Alignment,
+    Picture,
+    Table,
+    TextBlock,
+    TextKind,
+    check_table_sizes,
+)
 from conversion.conversion.domain.ports import StepRequest, StepResult
 from conversion.conversion.domain.route import Converter
 from conversion.conversion.infrastructure.model_file import read_model, source_stem
@@ -19,6 +29,8 @@ from conversion.conversion.infrastructure.model_file import read_model, source_s
 _BLACK = RGBColor(0, 0, 0)
 _PLAIN_STYLES = ("Title", *(f"Heading {level}" for level in range(1, 7)))
 _LIST_STYLES = ("List Bullet", "List Bullet 2", "List Bullet 3")  # the deepest Word's default template offers
+_NUMBERED_LIST_STYLES = ("List", "List 2", "List 3")  # indented with no bullet: the item's text carries its number
+_NUMBERED = re.compile(r"(\d{1,3}|[a-zA-Z])[.)]\s")
 _ALIGNMENTS = {
     Alignment.LEFT: WD_ALIGN_PARAGRAPH.LEFT,
     Alignment.CENTER: WD_ALIGN_PARAGRAPH.CENTER,
@@ -46,7 +58,9 @@ class PythonDocxWriter:
             if page.name:
                 document.add_heading(page.name, level=1)
             for block in page.blocks:
-                if isinstance(block, Table):
+                if isinstance(block, Picture):
+                    _add_picture(document, block)
+                elif isinstance(block, Table):
                     _add_table(document, block)
                 else:
                     _add_text(document, block)
@@ -60,12 +74,19 @@ def _make_headings_plain(document: WordDocument) -> None:
         document.styles[name].font.color.rgb = _BLACK
 
 
+def _add_picture(document: WordDocument, picture: Picture) -> None:
+    """At the width it was shown at, and no wider than the text."""
+    section = document.sections[-1]
+    room = (section.page_width or 0) - (section.left_margin or 0) - (section.right_margin or 0)
+    document.add_picture(io.BytesIO(picture.data), width=min(Pt(picture.width_pt), room))
+
+
 def _add_text(document: WordDocument, block: TextBlock) -> None:
     if block.kind is TextKind.HEADING:
         document.add_heading(block.text, level=block.level)
         return
     style = {
-        TextKind.LIST_ITEM: _LIST_STYLES[min(block.level, len(_LIST_STYLES)) - 1],
+        TextKind.LIST_ITEM: _list_style(block),
         TextKind.CAPTION: "Caption",
     }.get(block.kind)
     paragraph = document.add_paragraph(block.text, style=style)
@@ -73,6 +94,11 @@ def _add_text(document: WordDocument, block: TextBlock) -> None:
     if block.bold:
         for run in paragraph.runs:
             run.bold = True
+
+
+def _list_style(block: TextBlock) -> str:
+    styles = _NUMBERED_LIST_STYLES if _NUMBERED.match(block.text) else _LIST_STYLES
+    return styles[min(block.level, len(styles)) - 1]
 
 
 def _add_table(document: WordDocument, table: Table) -> None:

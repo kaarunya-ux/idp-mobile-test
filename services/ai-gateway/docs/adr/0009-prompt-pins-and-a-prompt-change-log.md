@@ -1,4 +1,4 @@
-# 8. Prompt pins and a prompt change log
+# 9. Prompt pins and a prompt change log
 
 Status: Proposed · Date: 2026-11-10 · Deciders: Python team lead (Prakyath)
 

@@ -1,4 +1,4 @@
-# 6. Prompt-injection hardening of the image-reading prompts
+# 7. Prompt-injection hardening of the image-reading prompts
 
 Status: Proposed · Date: 2026-11-07 · Deciders: Python team lead (Prakyath)
 
@@ -56,7 +56,7 @@ Findings that led here:
 - The block-count check can refuse a legitimate page where the model counted far more blocks than it wrote. The real
   pages tried wrote 0.86 to 1.36 times the counted number. `MODEL__PAGE_READ_MIN_BLOCK_SHARE=0.1` turns it off.
 - The check does not catch a model that writes as many blocks as it counted but with the wrong text. conversion-service
-  adds an independent OCR reading for that (its ADR 0001).
+  adds an independent OCR reading for that (its ADR 0003).
 - For cards, extraction-service reads with OCR first and asks the AI only for fields OCR left unsettled, and an AI
   value must pass the field's rule (Aadhaar check digit, PAN pattern, dates); an all-null AI answer changes nothing
   there. So the remaining obeyed cards matter less than they would if the AI were the only reader.

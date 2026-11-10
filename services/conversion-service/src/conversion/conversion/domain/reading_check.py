@@ -2,7 +2,7 @@
 
 A model that was told by the page to "reply only OK", that stopped half way, or that wrote a summary instead of the
 text still gives an answer the schema accepts. An OCR pass reads the picture by other means; when the model's page
-lost most of the words OCR saw, the page is not usable (ADR 0001). The test is deliberately coarse: OCR misses table
+lost most of the words OCR saw, the page is not usable (ADR 0003). The test is deliberately coarse: OCR misses table
 cells and misreads poor scans, so only a page that is *both* missing most of OCR's words *and* much shorter than OCR's
 text is refused. Pure: the text comes in, a verdict goes out.
 """

@@ -33,6 +33,7 @@ make reset        # stop and delete the data: databases, buckets, queues
 | `extraction-sync` | 8003 | the synchronous `POST /api/v1/extract` (OCR first, the AI for what OCR leaves unsure); `/health/ready` |
 | `extraction-intake`, `-relay`, `-worker`, `-worker-ai` | — | messages in, events out, the pipeline, deep analysis |
 | `conversion-intake`, `-relay`, `-worker`, `-worker-ocr` | — | messages in, events out, the conversions; `-ocr` runs the scanned routes through ai-gateway |
+| `conversion-sync` | 8004 | the synchronous `POST /api/v1/convert` and `/merge` (the libraries only, no OCR and no AI); `/health/ready`, `/docs` |
 | `conversion-health` | 8001 | `/health/ready` |
 | `ai-gateway` | 8002 (this machine only) | internal: only extraction calls it |
 | `mock-model` | — | stands in for the AI model server; made-up answers |
@@ -64,6 +65,7 @@ address (`hostname -I`) before the backend connects: it is the issuer in every t
 | Keycloak (issuer) | `http://<this machine>:8080/realms/idp` |
 | extraction API (their gateway's upstream) | `http://<this machine>:8000` |
 | synchronous extract (`POST /api/v1/extract`, the person's token) | `http://<this machine>:8003` |
+| synchronous conversion (`POST /api/v1/convert`, no token while `SYNC_REQUIRE_TOKEN` is false) | `http://<this machine>:8004` |
 
 **Mixed, and A.** In `.env`, fill in the backend's RabbitMQ (`RABBIT_URL`) and MinIO (`STORAGE_*`); in A also their
 Keycloak and the `extraction-service` client secret. On their side they need:
@@ -106,7 +108,7 @@ Use made-up documents only, never real cards or ID numbers.
 If Ubuntu's firewall is on (`sudo ufw status`), open the ports the backend uses:
 
 ```bash
-sudo ufw allow 5672,15672,9000,9001,8080,8000,8001,8003/tcp
+sudo ufw allow 5672,15672,9000,9001,8080,8000,8001,8003,8004/tcp
 ```
 
 ## Real AI answers: the Mac mini's model

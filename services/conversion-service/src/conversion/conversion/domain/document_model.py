@@ -1,8 +1,8 @@
 """The document model: the data hub every format is read into and written out of (IDP-03 ch. 3.4).
 
 A document is pages; a page holds blocks in reading order; a block is text (heading, paragraph, list item or
-caption) or a table. Cells are text: typing numbers is the writer's job (``cell_values``), so nothing is
-reinterpreted on the way through. Page positions and images arrive with the PDF readers (step 3c-3).
+caption), a table or a picture. Cells are text: typing numbers is the writer's job (``cell_values``), so nothing is
+reinterpreted on the way through. Sheet writers keep the tables and leave the rest.
 """
 
 from collections.abc import Iterable, Sequence
@@ -76,7 +76,21 @@ class Table:
         return self.rows[self.header_rows :]
 
 
-type Block = TextBlock | Table
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Picture:
+    """An image on the page: PNG or JPEG bytes, and the width it was shown at, in points."""
+
+    data: bytes
+    width_pt: float
+
+    def __post_init__(self) -> None:
+        if not self.data:
+            raise InvalidDocumentModelError("a picture needs its image")
+        if self.width_pt <= 0:
+            raise InvalidDocumentModelError("a picture needs a width")
+
+
+type Block = TextBlock | Table | Picture
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

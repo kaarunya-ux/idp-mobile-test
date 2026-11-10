@@ -262,3 +262,15 @@ def test_reads_scanned_pages_without_the_check_when_it_is_switched_off() -> None
     converter = build_converter_registry(_configured(enabled=False)).get(Converter.OCR_TO_MODEL)
 
     assert converter._check is None
+
+
+def test_registers_the_ocr_first_reader_without_loading_its_models_when_ocr_layout_is_chosen(tmp_path: Path) -> None:
+    configured = Settings.model_validate(
+        {
+            "ai_gateway": {"url": "http://ai-gateway:8002", "page_reader": "ocr_layout"},
+            "service_auth": {"token_url": "http://keycloak:8080/realms/idp/token", "client_secret": "test-secret"},
+            "ocr": {"models_dir": str(tmp_path / "no-models"), "models_file": str(tmp_path / "no-models.yaml")},
+        }
+    )
+
+    assert build_converter_registry(configured).get(Converter.OCR_TO_MODEL)  # the models load on the first page

@@ -3,8 +3,10 @@ as in the Java services (MSV-05)."""
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
+
+_PERCENT_LIMIT = 100.5  # a box drawn to the page's edge may round a little past it
 
 
 class _Body(BaseModel):
@@ -35,6 +37,26 @@ class QuickExtractResponse(_Body):
     prompt_version: str | None
 
 
+class CustomBoxBody(BaseModel):
+    """Where the user drew the box around the value on the sample: percent of the page (0 to 100), its top-left
+    corner and its size, as the template designer stores it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    page: int = Field(1, ge=1, le=1, description="1: the fields are read on the first page")
+    x: float = Field(ge=0, lt=100, description="left edge, percent of the page's width")
+    y: float = Field(ge=0, lt=100, description="top edge, percent of the page's height")
+    w: float = Field(gt=0, le=100, description="width, percent of the page's width")
+    h: float = Field(gt=0, le=100, description="height, percent of the page's height")
+
+    @model_validator(mode="after")
+    def _inside_the_page(self) -> "CustomBoxBody":
+        if self.x + self.w > _PERCENT_LIMIT or self.y + self.h > _PERCENT_LIMIT:
+            message = "the box must lie inside the page"
+            raise ValueError(message)
+        return self
+
+
 class CustomFieldBody(BaseModel):
     """One key of a custom template, as the backend sends it in ``fields`` (ADR 0013)."""
 
@@ -43,3 +65,4 @@ class CustomFieldBody(BaseModel):
     key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$", description="lower snake_case, e.g. 'card_number'")
     label: str = Field(min_length=1, max_length=120, description="as printed on the document, e.g. 'Card No'")
     type: Literal["text", "date", "number"] = "text"
+    box: CustomBoxBody | None = Field(None, description="drawn around the value; without it, found by its label")

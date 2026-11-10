@@ -21,7 +21,7 @@ dependencies = [
 # img2pdf: lossless images -> PDF, named in IDP-03 ch. 3.4; approved for this project 2026-10-21 (build log entry 3).
 workers = [
     "pillow>=10.4",
-    "pytesseract>=0.3.10",  # Apache-2.0, on the approved list (ch. 22.3): a second reading of scanned pages (ADR 0001)
+    "pytesseract>=0.3.10",  # Apache-2.0, on the approved list (ch. 22.3): a second reading of scanned pages (ADR 0003)
     "pypdfium2>=4.30",
     "img2pdf>=0.5",
     "openpyxl>=3.1",
@@ -34,6 +34,14 @@ workers = [
     "boto3>=1.35",
     "faststream[rabbit,cli]>=0.5",  # cli: the `faststream run` command the intake image starts with
     "httpx>=0.27",  # on the approved list: the scanned routes call ai-gateway's page-read (and Keycloak for the token)
+    # The OCR-first reading of scanned pages (ADR 0001): idp_ocr_engines runs PP-OCR. All three are on the approved
+    # list (standard ch. 22.3, "CV / OCR / ML"), as in extraction-service
+    "numpy>=2.0",
+    "onnxruntime>=1.19",
+    "opencv-python-headless>=4.10",
+    # POST /api/v1/convert (ADR 0002), as in extraction-service: uploads and the person's token
+    "python-multipart>=0.0.9",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [dependency-groups]
@@ -57,7 +65,10 @@ requires = ["uv_build>=0.8,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "conversion"
+# idp_ocr_engines: a copy of extraction-service's OCR library (IDP-03 ch. 1 `idp-ocr-engines`), unchanged, for the
+# OCR-first reading of scanned pages (ADR 0001). Each service builds its image from its own folder, so the copy lives
+# here until the shared idp-py-platform package exists; it imports nothing from either service.
+module-name = ["conversion", "idp_ocr_engines"]
 
 # --- Lint and format (standard ch. 22.1) -------------------------------------
 [tool.ruff]
@@ -97,6 +108,11 @@ mypy_path = "src"
 module = ["pypdfium2", "pypdfium2.*", "img2pdf", "pytesseract"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# onnxruntime ships no type information. Only idp_ocr_engines.session touches it, and it hands typed values back.
+module = ["onnxruntime", "onnxruntime.*"]
+ignore_missing_imports = true
+
 # --- Tests (standard ch. 21) --------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -114,7 +130,7 @@ markers = [
 # infrastructure -> domain is allowed (adapters implement domain ports); the reverse is not. Only bootstrap.py
 # (the composition root) imports from every layer.
 [tool.importlinter]
-root_package = "conversion"
+root_packages = ["conversion", "idp_ocr_engines"]
 include_external_packages = true
 exclude_type_checking_imports = true  # imports under TYPE_CHECKING never run
 
@@ -140,7 +156,15 @@ forbidden_modules = [
 name = "Layers inside the conversion feature"
 type = "layers"
 containers = ["conversion.conversion"]
-layers = ["application", "domain"]
+layers = ["api", "application", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "The HTTP route knows the use case, not the adapters"
+type = "forbidden"
+source_modules = ["conversion.conversion.api"]
+forbidden_modules = [
+    "conversion.conversion.infrastructure", "conversion.bootstrap", "PIL", "pypdfium2", "pdfplumber", "httpx", "idp_ocr_engines",
+]
 
 [[tool.importlinter.contracts]]
 name = "Application depends on ports, not adapters"
@@ -157,8 +181,14 @@ type = "forbidden"
 source_modules = ["conversion.health"]
 forbidden_modules = [
     "conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf", "pytesseract", "openpyxl", "docx",
-    "pptx", "pdfplumber", "pikepdf", "celery", "faststream", "boto3",
+    "pptx", "pdfplumber", "pikepdf", "celery", "faststream", "boto3", "idp_ocr_engines", "numpy", "cv2", "onnxruntime",
 ]
+
+[[tool.importlinter.contracts]]
+name = "idp_ocr_engines does not depend on the service (a copy of extraction's, to lift into idp-py-platform)"
+type = "forbidden"
+source_modules = ["idp_ocr_engines"]
+forbidden_modules = ["conversion"]
 
 [[tool.importlinter.contracts]]
 name = "Runtime code imports no dev-only packages (type stubs are for TYPE_CHECKING blocks)"

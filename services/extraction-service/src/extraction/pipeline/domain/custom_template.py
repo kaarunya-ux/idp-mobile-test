@@ -1,10 +1,12 @@
 """A custom template: the keys a user defined for a document we have no template for (ADR 0013).
 
-The backend sends the keys with each request (``key``, the label printed on the document, and a type); this builds a
-template from them for that one request, and nothing is stored. Each field is read by its label, wherever it is on
-the page (``FieldDefinition.value_after``): the text after the label on its line, or the line below. Both OCR engines
-must agree, as for any field; what they don't settle goes to the AI with the labels. Every key is required, so a key
-OCR can't find is asked of the AI rather than left empty.
+The backend sends the keys with each request (``key``, the label printed on the document, a type, and the box the
+user drew around the value on the sample, if any); this builds a template from them for that one request, and nothing
+is stored. A key with a box is read inside it (``FieldDefinition.clip_to_box``); one without, or whose box holds
+nothing, is read by its label, wherever it is on the page (``FieldDefinition.value_after``): the text after the label
+on its line up to a column gap, or the line below. Both OCR engines must agree, as for any field; what they don't
+settle goes to the AI with the labels. Every key is required, so a key OCR can't find is asked of the AI rather than
+left empty.
 """
 
 import re
@@ -30,6 +32,8 @@ CUSTOM_DOCUMENT_TYPE = "CUSTOM"
 MAX_FIELDS = 50  # ai-gateway reads at most 50 fields in one call
 
 _WHOLE_PAGE = Box(x=0.0, y=0.0, width=1.0, height=1.0)
+_DRAWN_MARGIN_X = 0.005  # page fraction added left and right of a drawn box: a hand-drawn edge is not exact
+_DRAWN_MARGIN_Y = 0.01  # and above and below it: a value's line is often drawn a little high or low
 _SEPARATORS = r"[\s.:/_\-'\u2019]*"  # between a label's words: spaces, dots, colons, slashes, dashes, apostrophes
 _LATEST_DATE = date(2100, 12, 31)  # a custom date may be an expiry date, ahead of today
 _DATE = r"([0-9]{1,2}\s?[/.\-]\s?[0-9]{1,2}\s?[/.\-]\s?[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})"
@@ -47,6 +51,7 @@ class CustomField:
     key: str  # lower snake_case, unique in the request
     label: str  # as printed on the document, as the user typed it
     type: CustomType = CustomType.TEXT
+    box: Box | None = None  # drawn around the value on the sample's first page; None: found by its label
 
 
 def custom_template(fields: Sequence[CustomField]) -> TemplateDefinition:
@@ -78,8 +83,9 @@ def _definition(found: CustomField) -> FieldDefinition:
         key=found.key,
         label=found.label,
         type=FieldType.TEXT,
-        box=_WHOLE_PAGE,
+        box=_WHOLE_PAGE if found.box is None else _with_margin(found.box),
         value_after=label_pattern(found.label),
+        clip_to_box=found.box is not None,
         rule=RuleSpec(id="custom-text", kind=RuleKind.REGEX, pattern=r".{1,400}"),
         normalize=(Normalizer.COLLAPSE_SPACES,),
         accept=Accept(mode=AcceptMode.SIMILARITY),
@@ -110,3 +116,10 @@ def _definition(found: CustomField) -> FieldDefinition:
             accept=Accept(),
         )
     return text
+
+
+def _with_margin(box: Box) -> Box:
+    left, top = max(0.0, box.x - _DRAWN_MARGIN_X), max(0.0, box.y - _DRAWN_MARGIN_Y)
+    right = min(1.0, box.x + box.width + _DRAWN_MARGIN_X)
+    bottom = min(1.0, box.y + box.height + _DRAWN_MARGIN_Y)
+    return Box(x=left, y=top, width=right - left, height=bottom - top)

@@ -25,6 +25,7 @@ class ModelTimeouts(BaseModel):
     page_analysis: timedelta = Field(timedelta(seconds=90), ge=timedelta(seconds=1), le=timedelta(minutes=10))
     template_suggest: timedelta = Field(timedelta(seconds=90), ge=timedelta(seconds=1), le=timedelta(minutes=10))
     page_read: timedelta = Field(timedelta(seconds=180), ge=timedelta(seconds=1), le=timedelta(minutes=15))
+    page_layout: timedelta = Field(timedelta(seconds=120), ge=timedelta(seconds=1), le=timedelta(minutes=15))
     generic_read: timedelta = Field(timedelta(seconds=40), ge=timedelta(seconds=1), le=timedelta(minutes=5))
     connect: timedelta = Field(timedelta(seconds=2), ge=timedelta(milliseconds=100), le=timedelta(seconds=30))
 

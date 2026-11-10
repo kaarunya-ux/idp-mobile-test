@@ -155,7 +155,7 @@ def test_draws_a_huge_scanned_page_no_larger_than_the_long_side_limit(tmp_path: 
     assert max(reader.read[0][2]) == pytest.approx(2048, abs=1)  # not 6112
 
 
-# --- the independent reading of each page (ADR 0001) ---------------------------------------------------------------
+# --- the independent reading of each page (ADR 0003) ---------------------------------------------------------------
 
 _FULL_PAGE = (
     "We are pleased to confirm the order placed by your office on the fourth of March for forty cartons of "

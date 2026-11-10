@@ -1096,3 +1096,203 @@ another, about 15 s each (the model writes about 400 tokens a page at about 30 t
 
 The 3-page scanned PDF to Word, the model warm: one page at a time 44.3 s, four at a time 25.2 s. Tests for the order,
 the concurrency and the long-side cap; the reader tests send the picture inline.
+
+## Entry 13: OCR-first reading of scanned pages, behind a switch (2026-11-05)
+
+**Goal:** a scanned page in seconds, with text no model wrote. OCR reads the page here; ai-gateway's page-layout says
+how the lines are laid out. Decisions: ADR 0001 (`services/conversion-service/docs/adr/`).
+
+### What we did
+
+- `src/idp_ocr_engines`: extraction's OCR library, copied unchanged; `models.yaml` with its PP-OCRv6 small detector
+  and recogniser (same checksums). `numpy`, `onnxruntime`, `opencv-python-headless` in the `workers` extra; import
+  contracts keep the library free of service code and the health server free of all of it.
+- `domain/page_layout.py`: the page from OCR's numbered lines and the model's blocks; lines the model left out stay,
+  where they sit; without the model, OCR's blocks as paragraphs.
+- `OcrLayoutPageReader`: OCR (models loaded on the first page), then page-layout; ai-gateway unavailable or over the
+  cap: OCR's paragraphs; OCR unable to run: the model-first reader.
+- `AI_GATEWAY__PAGE_READER = model | ocr_layout` (default `model`), `OCR__MODELS_DIR`, `OCR__MODELS_FILE`,
+  `OCR__THREADS`. Worker image: `libglib2.0-0` and `models.yaml`. Local stack: the OCR worker mounts the models
+  folder; `CONVERSION_PAGE_READER=ocr_layout` turns it on.
+- `GatewayPageReader`'s call to ai-gateway is now a function both readers use (same error mapping).
+
+### Check it
+
+13 new tests (the page rebuild, the reader's fallbacks, the wiring without loading models). The 3-page scan with the
+old ai-gateway (page-layout answered 404, so the fallback ran): 5.5 s, 210 words (model-first: 25.2 s, 212 words), the
+three tables flattened to paragraphs. With page-layout on the 35B: 26.8 s warm (104 s cold), the same structure as
+model-first (3 tables of the same shapes, 12 paragraphs against 11, 210 words against 212).
+
+Where a page's time goes (the 35B, its prompt cache off): reading the picture about 23 s, writing the layout 9 to 14 s
+(270 to 410 tokens at 30 a second). Without the picture, the 35B answered the same layout on all three pages, in 12 to
+18 s a page instead of 36 to 42 s. A 1024 px picture made it loop until its token limit.
+
+## Entry 14: Digital PDF to Word, paragraphs, browser tables and lists read properly (2026-11-05)
+
+**Goal:** an 8-page report printed from a browser (`docs/python-services-integration-readiness.pdf`) converted in
+1.3 s with every word, but as 378 paragraphs (312 cut mid-sentence) and no tables. No OCR and no AI: rules only.
+
+### What we did
+
+- Text set a few points off its line (inline code, 3.1 pt lower) stays in its line (`_SAME_LINE_PT`, 4); it had cut
+  every sentence with code in two.
+- Tables drawn with only a rule under each row (`pdf_ruled_tables`): each rule is one segment per cell, so the
+  joints are the column edges; two or more rules with the same joints make a table; the header and the last row reach
+  as far as the text runs on. A rule drawn twice counts once.
+- A small drawn dot or square just left of a line is a bullet; a list item's level is where its marker starts, among
+  the page's list indents (numbered headings left out).
+- Running headers and footers (same text, numbers aside, in the top or bottom 5% of half the pages or more) left out.
+- A word broken at a hyphen across lines is joined without a space.
+
+### Check it
+
+7 new tests (the ruled table with a doubled rule, one rule alone stays text, lowered text, drawn bullets with
+levels, running header and footer, the hyphen). The report: 1.5 s, 83 paragraphs and 15 tables, list levels as
+printed, every word of the PDF except the running header and footer. Not handled yet: a table that continues on the
+next page comes out as two tables, the header repeated.
+
+## Entry 15: POST /api/v1/convert, a file converted over HTTP with the libraries only (2026-11-06)
+
+**Goal:** the backend chooses per file: a small file over HTTP, the rest as a job. Decisions: ADR 0002.
+
+### What we did
+
+- `conversion-sync` (port 8004, the worker image), `conversion/api/routes.py`, `ConvertNowService`: `file`, `target` and
+  optional `options` in, the converted file out, one ZIP when a conversion makes several files.
+- The libraries only: a scan or photo to a document answers `CNV-422-SYNC-001`, and the process is built without
+  ai-gateway whatever the environment says. It first let scans through to the AI; the team lead corrected that.
+- Each conversion runs in a spawned worker process; one that dies is replaced. Limits answer `CNV-413-FILE-001` and
+  `CNV-429-BUSY-001`, both meaning "send it as a job".
+- `detect_format`: the type from the content. `DomainError` survives pickling. `core/security.py` and
+  `core/problem_details.py`, copied from extraction. The job's ZIP step moved to `packaging.py`, shared with the job.
+- Local stack: the service, and a step in `make check`.
+
+### Check it
+
+The 8-page digital PDF over real HTTP on this laptop (not yet in Docker): DOCX 1.7 s, XLSX 1.4 s, CSV 1.4 s, PPTX 1.1 s,
+PNG 1.0 s and JPEG 0.3 s (ZIPs of 8 images). The scanned PDF to DOCX, XLSX or CSV: refused in under 10 ms with
+AI settings on, no call to ai-gateway. 8 requests at once: 4 converted, 4 answered 429. No temp folder left.
+Known limits are in the ADR: no virus scan on this route, no timeout on PDF reading, and CSV holds only a PDF's first table.
+
+## Entry 16: Every library conversion over HTTP, several files, merge, and a warm LibreOffice (2026-11-06)
+
+**Goal:** finish all conversions on the HTTP lane before OCR + AI and RabbitMQ testing. Several files accepted; the
+backend decides how much to send.
+
+### What we did
+
+- All 36 library conversions run through `POST /api/v1/convert`; the 6 that read a photo answer `CNV-422-SYNC-001`.
+- Several `file` fields: images to a PDF or deck combine into one file, anything else comes back as one ZIP. New
+  `POST /api/v1/merge`, sharing `merging.py` with the `PDF_MERGE` job.
+- The 20 MB and 20 page limits are gone: wide ceilings only, as on the queued way.
+- A spare LibreOffice per worker process (`OFFICE__KEEP_WARM`, this process only): about 3 s to about 0.4 s.
+- The document model has pictures: PDF to Word and PowerPoint to Word kept none before. A PDF's are drawn at 150 DPI,
+  leaving out marks under 24 pt and a picture covering 90% of the page. Not on a rotated page yet.
+- Two bugs seen only by looking at the outputs: body text on a wide-margin page came out centred, and numbered list items
+  got a bullet as well as their number.
+
+### Check it
+
+Real HTTP on this laptop, made-up documents and the 8-page report, not in Docker yet: every conversion under 1.4 s
+(PDF to Word 1.35 s, Word to PDF 0.40 s, PowerPoint to PDF 0.35 s). Requests too quick for a spare take the ordinary run,
+about 1.5 s. Stopping the server left no spare and no temp folder.
+
+In Docker, the 36 conversions (median of 3, requests 1.2 s apart): PDF to Word 1.47 s, Word to PDF 0.23 s, PowerPoint to
+PDF 0.32 s, nothing over 1.5 s. The spares work there: 383 MB for the 4. The first run also showed about 6 zombie processes
+left per Office document, as uvicorn was PID 1 and reaps nothing, so the worker image now runs under `tini`.
+
+## Entry 17: A photo to Word, Excel or CSV over HTTP, read by the 35B (2026-11-07)
+
+**Goal:** the backend can test every image conversion over HTTP. The owner asked for the photo routes on the HTTP lane;
+scanned PDFs stay on the job path.
+
+### What we did
+
+- `conversion-sync` now has the scanned reader when ai-gateway is configured, the same one the `ocr` worker uses
+  (`AI_GATEWAY__PAGE_READER`, `model` by default: page-read on the 35B). A photo (PNG, JPEG) to Word, Excel or CSV is
+  read while the caller waits; the picture goes inside the call, nothing is stored.
+- The AI calls are counted on the caller's account: the token's `account_id`, or `SYNC__DEFAULT_ACCOUNT_ID` for a
+  tokenless request (compose: the test account extraction's quick-extract uses). No account answers `CNV-403-AUTH-001`
+  (`NoAccountError`, an existing code).
+- A scanned PDF to a document still answers `CNV-422-SYNC-001`: many pages, minutes of reading. So does a photo when
+  ai-gateway isn't configured, as before.
+- Compose: `conversion-sync` gets ai-gateway's address, the `conversion-service` login and the models volume.
+- ADR 0002, decision 3 and 8 changed.
+
+### Check it
+
+`make check-unit` lint, types and 8 import contracts green; 580 unit tests pass, plus the known Hindi-font test that
+passes only in Docker. Integration tests not run (no Docker access from here).
+
+Real HTTP on this laptop against the running ai-gateway and the 35B, a made-up invoice photo (title, two text lines, a
+4-row table): Word 20.8 s (first call, with the service login), Excel 11.8 s, CSV 11.9 s. Every word and every table cell
+came back right. The photo made into a PDF, then to Word: `CNV-422-SYNC-001`. PNG to PDF 0.02 s and Word to PDF 0.53 s,
+unchanged.
+
+### Risk
+
+A photo holds one of the `SYNC__MAX_CONCURRENT` (4) slots for 10 to 40 s, so four photos at once make library requests
+answer 429 until one finishes.
+
+## Entry 18: A scanned PDF to Word, Excel or CSV over HTTP, up to 5 pages (2026-11-07)
+
+**Goal:** finish the scanned side of the HTTP lane, so every conversion can be tested there.
+
+### What we did
+
+- A scanned PDF to Word, Excel or CSV is read on `conversion-sync` by the same reader as a photo (entry 17), 4 pages at
+  a time, counted on the caller's account.
+- `SYNC__MAX_READ_PAGES` (5, compose `SYNC_MAX_READ_PAGES`): a scan with more pages to read answers `CNV-422-SYNC-001`
+  at once, and the detail says how many pages it has. A `pageRange` counts, so pages 1 to 5 of a long scan are read.
+- `NeedsReadingError` takes its detail; the default is unchanged. It still crosses the worker process (test added).
+- ADR 0002 decision 3 changed again, and its consequences name the mixed PDF limit.
+
+### Check it
+
+Lint, types, 8 import contracts green; 582 unit tests pass, plus the known Hindi-font test. `convert_now.py` and
+`routes.py` at 100% coverage.
+
+Real HTTP on this laptop against the running ai-gateway and the 35B, made-up scans (no text layer):
+
+| Input | Target | Time | Result |
+|---|---|---|---|
+| 3 pages | Word | 85 s first (model cold), 17 s again | headings, paragraphs, bullets, both tables right |
+| 3 pages | Excel | 19 s | one sheet per table, every cell right |
+| 3 pages | CSV | 18 s | first table (CSV holds one) |
+| 6 pages | Word | 0.01 s | `CNV-422-SYNC-001`, "6 pages to read, and up to 5" |
+| 6 pages, `pageRange` 1-2 | Word | 15 s | read |
+
+### Still open
+
+A PDF with text on some pages and scans on others is taken as digital, on HTTP and on jobs: its scanned pages' text
+is lost. Next: decide page by page.
+
+## Entry 19: OCR-first without the page picture, measured against the other two ways (2026-11-10)
+
+**Goal:** see whether OCR-first gets faster when page-layout gets only the OCR lines (5 days ago, uncached, a page took
+36 to 42 s with the picture and 12 to 18 s without).
+
+### What we did
+
+- `AI_GATEWAY__LAYOUT_SENDS_PAGE` (default `true`, nothing changes): `false` sends page-layout the lines alone.
+  ai-gateway's `page` became optional for it (ai-gateway build log, entry 10).
+
+### Check it
+
+My own `conversion-sync` on this laptop, the live ai-gateway, the 35B on the Mac mini (now `10.0.3.13`, 4 slots, 16k
+each); the made-up photo and 3-page scan; the model warmed first.
+
+| Way | Photo to Word | 3-page scan to Word | Scan to Excel | Model time per page |
+|---|---|---|---|---|
+| 35B reads the picture (default) | 13.5 s | 26.3 s | 23.4 s | 17 to 26 s |
+| OCR, then the 35B with the picture | 14.1 s | 26.2 s | 25.3 s | 13 to 20 s |
+| OCR, then the 35B, lines only | 13.5 s | 25.0 s | 24.7 s | 13 to 24 s |
+
+The same headings, paragraphs, bullets and both tables every way. The OCR ways keep OCR's mistakes: missing spaces
+("working daysof", "within10days", "No:TEST-001") and the printed bullet twice (the "•" in the text and the list
+style). The picture is no longer what costs the time on this server: the answer is.
+
+**Decision:** stay on `model` (the default). OCR-first stays behind the switch; ADR 0001 stays Proposed.
+
+Also seen: the first page-read after the model sat idle took over 180 s and answered 503 (`AIG-503-MODEL-001`); the
+first 3-page scan after a start takes 85 to 97 s, then every call is normal.

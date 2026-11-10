@@ -171,6 +171,7 @@ def _field(data: object, path: str, problems: _Problems) -> FieldDefinition | No
             language=str(raw.get("language", "en")),
             accept=_accept(_object(raw.get("accept", {}), f"{path}.accept", problems), f"{path}.accept", problems),
             mask=_mask(raw.get("mask"), f"{path}.mask", problems),
+            clip_to_box=False,  # a designed template's boxes are where to look, not drawn tight around the value
             **hints,
         )
     except (ValueError, TypeError) as exc:

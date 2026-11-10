@@ -92,8 +92,10 @@ class FieldDefinition:
     words below it and not left of it are read, which keeps the address apart from text in other columns or cards.
     ``language`` is the ISO 639-1 code an engine must read to read this field; other engines skip it.
     ``value_after`` is a regular expression for the field's printed label, for a field defined only by its label (a
-    custom template's key): the value is the text after the label on its line, or else the line just below it, and
-    nothing is read when the label is not on the page (no guessing from the rest of the page).
+    custom template's key): the value is the text after the label on its line up to a column gap, or else the line
+    just below it, and nothing is read when the label is not on the page (no guessing from the rest of the page).
+    ``clip_to_box`` says the box was drawn around the value itself (a custom key with a box): only the words inside it
+    are read, a piece crossing its edge keeping only its words inside, and when it holds none, ``value_after``.
     """
 
     key: str
@@ -112,6 +114,7 @@ class FieldDefinition:
     keep: str | None = None
     starts_at: str | None = None
     value_after: str | None = None
+    clip_to_box: bool = False
     language: str = "en"
     accept: Accept = field(default_factory=Accept)
     mask: Mask | None = None
