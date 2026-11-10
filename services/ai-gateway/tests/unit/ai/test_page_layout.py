@@ -43,6 +43,17 @@ async def test_returns_the_blocks_by_line_number_on_the_page_model_with_the_line
     assert answer.provenance.prompt_version == "page-layout.v1"
 
 
+async def test_lays_out_the_lines_alone_without_an_image_when_no_page_is_sent() -> None:
+    model = FakeModel(json.dumps({"blocks": [{"kind": "paragraph", "lines": [0, 1, 2]}]}))
+
+    answer = await _service(model).read(caller(), None, LINES)
+
+    assert line_numbers(answer.value) == [0, 1, 2]
+    request = model.requests[0]
+    assert list(request.images) == []
+    assert "There is no image this time" in request.text
+
+
 async def test_fails_after_one_repair_when_the_model_names_a_line_that_is_not_on_the_page() -> None:
     wrong = json.dumps({"blocks": [{"kind": "paragraph", "lines": [0, 99]}]})
     model = FakeModel(wrong, wrong)

@@ -130,6 +130,8 @@ class AiGatewaySettings(BaseModel):
     # "ocr_layout", OCR reads the text on this machine and the page model only says how the lines are laid out
     # (page-layout), by their numbers. "model" until the two are compared on real scans
     page_reader: Literal["model", "ocr_layout"] = "model"
+    # ocr_layout: send the page picture with the OCR lines. false: the lines alone, a page in 12 to 18 s not 36 to 42
+    layout_sends_page: bool = True
 
 
 class OcrSettings(BaseModel):

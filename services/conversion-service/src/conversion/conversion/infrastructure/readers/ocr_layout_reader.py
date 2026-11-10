@@ -53,7 +53,9 @@ class OcrLayoutPageReader:
         tokens: ServiceTokenProvider,
         *,
         fallback: PageReaderPort,
+        sends_page: bool = True,
     ) -> None:
+        self._sends_page = sends_page  # the page picture with the lines; without it the model reads only the lines
         self._load_ocr = ocr  # loaded on the first page: only the worker that reads scans holds the models
         self._ocr: OcrEnginePort | None = None
         self._loading = threading.Lock()
@@ -89,9 +91,8 @@ class OcrLayoutPageReader:
         return [word for word in self._ocr.read_page(page, LANGUAGES).words if word.text.strip()]
 
     def _layout(self, image: Path, words: Sequence[OcrWord], context: StepContext) -> list[Layout]:
-        body = {
+        body: dict[str, Any] = {
             "accountId": str(context.account_id),
-            "page": {"data": base64.b64encode(image.read_bytes()).decode()},
             "lines": [
                 {
                     "n": n,
@@ -101,6 +102,8 @@ class OcrLayoutPageReader:
                 for n, word in enumerate(words, 1)
             ],
         }
+        if self._sends_page:
+            body["page"] = {"data": base64.b64encode(image.read_bytes()).decode()}
         answer = post(self._client, self._tokens, PAGE_LAYOUT, body)
         try:
             return [_laid_out(block) for block in answer["blocks"]]

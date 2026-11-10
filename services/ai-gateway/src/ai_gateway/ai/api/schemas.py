@@ -271,7 +271,7 @@ class OcrLineBody(_Body):
 
 
 class PageLayoutRequest(CallerBody):
-    page: ImageRefBody
+    page: ImageRefBody | None = None  # without it, the model lays the page out from the lines and their boxes alone
     lines: list[OcrLineBody] = Field(min_length=1, max_length=2000)
 
     @field_validator("lines")

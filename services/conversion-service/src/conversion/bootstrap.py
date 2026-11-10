@@ -112,7 +112,9 @@ def _scanned_reader(settings: Settings) -> list[ModelFirstOcrConverter]:
     )
     reader: PageReaderPort = GatewayPageReader(client, tokens)
     if gateway.page_reader == "ocr_layout":
-        reader = OcrLayoutPageReader(partial(_ocr_engine, settings.ocr), client, tokens, fallback=reader)
+        reader = OcrLayoutPageReader(
+            partial(_ocr_engine, settings.ocr), client, tokens, fallback=reader, sends_page=gateway.layout_sends_page
+        )
     return [
         ModelFirstOcrConverter(
             reader,

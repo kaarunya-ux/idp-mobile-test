@@ -138,5 +138,6 @@ async def generic_read(body: GenericReadRequest, principal: Service, service: Do
 )
 async def page_layout(body: PageLayoutRequest, principal: Service, service: LayoutReader) -> PageLayoutResponse:
     lines = [(line.n, line.text, line.box) for line in body.lines]
-    answer = await service.read(mappers.caller_of(body, principal), mappers.image_ref(body.page), lines)
+    page = mappers.image_ref(body.page) if body.page is not None else None
+    answer = await service.read(mappers.caller_of(body, principal), page, lines)
     return mappers.to_page_layout_response(answer)

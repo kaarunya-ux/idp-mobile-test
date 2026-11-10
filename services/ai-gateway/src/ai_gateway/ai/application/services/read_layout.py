@@ -39,15 +39,20 @@ class ReadLayoutService:
         self._max_side_px = max_side_px
 
     async def read(
-        self, caller: Caller, page: ImageRef, lines: Sequence[tuple[int, str, tuple[float, float, float, float]]]
+        self,
+        caller: Caller,
+        page: ImageRef | None,
+        lines: Sequence[tuple[int, str, tuple[float, float, float, float]]],
     ) -> Answer[PageLayoutAnswer]:
-        """``lines`` are (number, text, (x, y, width, height)) from OCR."""
+        """``lines`` are (number, text, (x, y, width, height)) from OCR. Without ``page`` the model sees no image and
+        lays the page out from where the lines sit: a fraction of the time (the image is most of the input)."""
         prompt = self._prompts.get(PROMPT)
-        images = await self._images.load([page], stack=False, max_side_px=self._max_side_px)
+        images = await self._images.load([page], stack=False, max_side_px=self._max_side_px) if page else []
         known = {number for number, _, _ in lines}
         listed = [{"n": n, "text": text, "box": [round(v, 3) for v in box]} for n, text, box in lines]
         text = (
             'Lay out this page. Its OCR lines are in the data block "lines". Answer with a JSON object: "blocks".\n'
+            + ("" if page else "There is no image this time: judge from where each line sits and its height.\n")
             + data_block("lines", listed)
         )
         request = ModelRequest(

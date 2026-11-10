@@ -213,3 +213,13 @@ First run against the 35B: every page-layout call answered 503. llama-server ref
 parse grammar"): it can't build a grammar from a list of more than 1000 items, and a block's `lines` allowed 2000. A
 block now takes at most 1000 lines (a page still sends up to 2000), and a test checks every answer schema for lists
 over 1000.
+
+## Entry 10: page-layout without the page picture (2026-11-10)
+
+**What:** `page` is optional on `POST /internal/v1/ai/page-layout`. Without it the model gets the OCR lines and their
+boxes only, and the request says so ("There is no image this time"). The prompt file is unchanged (`page-layout.v1`).
+
+**Why:** to measure conversion's OCR-first reading without the picture. Measured: no faster on the 35B as it runs now,
+and no better (conversion build log, entry 19). A request with `page` works as before.
+
+**Check it:** 143 unit tests pass; lint, types, 7 import contracts.

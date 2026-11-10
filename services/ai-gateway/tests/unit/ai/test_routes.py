@@ -316,6 +316,16 @@ def test_returns_a_pages_structure_by_line_number(client: TestClient, model: Fak
     assert (table["kind"], table["hasHeader"], table["rows"]) == ("table", True, [[[1], [2]], [[3], []]])
 
 
+def test_lays_out_a_page_from_its_lines_alone_when_no_page_is_sent(client: TestClient, model: FakeModel) -> None:
+    model.answers.append(json.dumps({"blocks": [{"kind": "paragraph", "lines": [0]}]}))
+    body = {"accountId": str(ACCOUNT), "lines": [{"n": 0, "text": "A", "box": [0.1, 0.1, 0.3, 0.04]}]}
+
+    response = client.post("/internal/v1/ai/page-layout", json=body)
+
+    assert response.status_code == 200
+    assert response.json()["blocks"][0]["lines"] == [0]
+
+
 def test_answers_400_when_page_layout_lines_repeat_a_number(client: TestClient) -> None:
     lines = [{"n": 0, "text": "A", "box": [0, 0, 0.1, 0.1]}, {"n": 0, "text": "B", "box": [0, 0.2, 0.1, 0.1]}]
     body = {"accountId": str(ACCOUNT), "page": {"data": base64.b64encode(b"jpeg").decode()}, "lines": lines}

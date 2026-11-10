@@ -1266,3 +1266,33 @@ Real HTTP on this laptop against the running ai-gateway and the 35B, made-up sca
 
 A PDF with text on some pages and scans on others is taken as digital, on HTTP and on jobs: its scanned pages' text
 is lost. Next: decide page by page.
+
+## Entry 19: OCR-first without the page picture, measured against the other two ways (2026-11-10)
+
+**Goal:** see whether OCR-first gets faster when page-layout gets only the OCR lines (5 days ago, uncached, a page took
+36 to 42 s with the picture and 12 to 18 s without).
+
+### What we did
+
+- `AI_GATEWAY__LAYOUT_SENDS_PAGE` (default `true`, nothing changes): `false` sends page-layout the lines alone.
+  ai-gateway's `page` became optional for it (ai-gateway build log, entry 10).
+
+### Check it
+
+My own `conversion-sync` on this laptop, the live ai-gateway, the 35B on the Mac mini (now `10.0.3.13`, 4 slots, 16k
+each); the made-up photo and 3-page scan; the model warmed first.
+
+| Way | Photo to Word | 3-page scan to Word | Scan to Excel | Model time per page |
+|---|---|---|---|---|
+| 35B reads the picture (default) | 13.5 s | 26.3 s | 23.4 s | 17 to 26 s |
+| OCR, then the 35B with the picture | 14.1 s | 26.2 s | 25.3 s | 13 to 20 s |
+| OCR, then the 35B, lines only | 13.5 s | 25.0 s | 24.7 s | 13 to 24 s |
+
+The same headings, paragraphs, bullets and both tables every way. The OCR ways keep OCR's mistakes: missing spaces
+("working daysof", "within10days", "No:TEST-001") and the printed bullet twice (the "•" in the text and the list
+style). The picture is no longer what costs the time on this server: the answer is.
+
+**Decision:** stay on `model` (the default). OCR-first stays behind the switch; ADR 0001 stays Proposed.
+
+Also seen: the first page-read after the model sat idle took over 180 s and answered 503 (`AIG-503-MODEL-001`); the
+first 3-page scan after a start takes 85 to 97 s, then every call is normal.

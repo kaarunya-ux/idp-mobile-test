@@ -91,7 +91,7 @@ class FallbackReader:
 
 
 def _reader(
-    answer: httpx.Response, ocr: FakeOcr | None = None
+    answer: httpx.Response, ocr: FakeOcr | None = None, *, sends_page: bool = True
 ) -> tuple[OcrLayoutPageReader, list[httpx.Request], FallbackReader, list[int]]:
     sent: list[httpx.Request] = []
     loads: list[int] = []
@@ -107,7 +107,7 @@ def _reader(
 
     client = httpx.Client(base_url="http://ai-gateway:8002", transport=httpx.MockTransport(handler))
     fallback = FallbackReader()
-    return OcrLayoutPageReader(load, client, Tokens(), fallback=fallback), sent, fallback, loads
+    return OcrLayoutPageReader(load, client, Tokens(), fallback=fallback, sends_page=sends_page), sent, fallback, loads
 
 
 def _picture(tmp_path: Path) -> Path:
@@ -135,6 +135,17 @@ def test_lays_out_ocrs_text_by_the_line_numbers_page_layout_answers(tmp_path: Pa
         Table(rows=(("Item", "Amount"),), header_rows=1),
     )
     assert fallback.pages == []
+
+
+def test_sends_only_the_lines_when_the_page_picture_is_switched_off(tmp_path: Path) -> None:
+    reader, sent, _, _ = _reader(httpx.Response(200, json=LAYOUT), sends_page=False)
+
+    page = reader.read_page(_picture(tmp_path), 1, CONTEXT)
+
+    body = json.loads(sent[0].content)
+    assert "page" not in body
+    assert len(body["lines"]) == 5
+    assert len(page.blocks) == 3
 
 
 def test_loads_the_ocr_models_once_when_reading_several_pages(tmp_path: Path) -> None:
