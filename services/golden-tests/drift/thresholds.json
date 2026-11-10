@@ -1,0 +1,48 @@
+{
+  "_comment": "Per environment (prompt drift strategy 14, ML-07). Dev is shared and noisy; pre-prod and prod are strict because pre-prod should match prod. Ratios compare a run with the same environment's own baseline, never with another environment's. quality_drop_max is a drop in a 0 to 1 quality mean. Change a value only with an evaluation report, and record it in CHANGES.md. The \"logs\" block is for logwatch.py: min_calls is how many calls a window needs before it is judged; the shares are of calls or pages in the window. prompt_worse_share_delta is how many percentage points more repaired or refused answers a new prompt version may have than the one before.",
+  "dev": {
+    "latency_ratio_max": 2.0,
+    "tokens_ratio_max": 1.5,
+    "quality_drop_max": 0.05,
+    "logs": {
+      "min_calls": 5,
+      "latency_ratio_max": 2.0,
+      "tokens_ratio_max": 1.5,
+      "repaired_share_max": 0.25,
+      "refusal_share_max": 0.2,
+      "shape_low_share_max": 0.3,
+      "rejected_share_max": 0.2,
+      "prompt_worse_share_delta": 0.15
+    }
+  },
+  "preprod": {
+    "latency_ratio_max": 1.2,
+    "tokens_ratio_max": 1.15,
+    "quality_drop_max": 0.01,
+    "logs": {
+      "min_calls": 20,
+      "latency_ratio_max": 1.2,
+      "tokens_ratio_max": 1.15,
+      "repaired_share_max": 0.05,
+      "refusal_share_max": 0.02,
+      "shape_low_share_max": 0.1,
+      "rejected_share_max": 0.02,
+      "prompt_worse_share_delta": 0.05
+    }
+  },
+  "prod": {
+    "latency_ratio_max": 1.2,
+    "tokens_ratio_max": 1.15,
+    "quality_drop_max": 0.01,
+    "logs": {
+      "min_calls": 20,
+      "latency_ratio_max": 1.2,
+      "tokens_ratio_max": 1.15,
+      "repaired_share_max": 0.05,
+      "refusal_share_max": 0.02,
+      "shape_low_share_max": 0.1,
+      "rejected_share_max": 0.02,
+      "prompt_worse_share_delta": 0.05
+    }
+  }
+}

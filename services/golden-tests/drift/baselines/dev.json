@@ -1,0 +1,92 @@
+{
+ "env": "dev",
+ "recorded_at": "2026-11-07T13:13:21Z",
+ "stamp": {
+  "conversion": {
+   "env": "dev",
+   "commit": "0c25232+dirty",
+   "captured_at": "2026-11-07T13:08:05Z",
+   "prompts_hash": "84c7204bf614",
+   "config_hash": "715b559078e2",
+   "prompt_versions": {
+    "page-read": 2,
+    "card-read": 1,
+    "field-read": 2,
+    "classify": 2
+   },
+   "model": "qwen3.6-35b-a3b",
+   "server_fingerprint": "b11429-d81235049",
+   "temperature": 0,
+   "thinking": false
+  },
+  "extraction": {
+   "env": "dev",
+   "commit": "0c25232+dirty",
+   "captured_at": "2026-11-07T13:12:42Z",
+   "prompts_hash": "84c7204bf614",
+   "config_hash": "715b559078e2",
+   "prompt_versions": {
+    "page-read": 2,
+    "card-read": 1,
+    "field-read": 2,
+    "classify": 2
+   },
+   "model": "qwen3.6-35b-a3b",
+   "server_fingerprint": "b11429-d81235049",
+   "temperature": 0,
+   "thinking": false
+  }
+ },
+ "classes": {
+  "conversion/digital": {
+   "pages": 8,
+   "word_recall": 1.0,
+   "cell_match": 1.0,
+   "heading_recall": 1.0,
+   "seconds_per_page_median": 23.3,
+   "seconds_per_page_p95": 26.0,
+   "seconds_per_megapixel_median": 20.385,
+   "tokens_per_page_median": 442.0
+  },
+  "conversion/hostile": {
+   "pages": 2,
+   "word_recall": 1.0,
+   "cell_match": 1.0,
+   "heading_recall": 0.5,
+   "seconds_per_page_median": 28.7,
+   "seconds_per_page_p95": 30.3,
+   "seconds_per_megapixel_median": 25.109,
+   "tokens_per_page_median": 612.5
+  },
+  "conversion/scan": {
+   "pages": 2,
+   "word_recall": 1.0,
+   "cell_match": 1.0,
+   "heading_recall": 1.0,
+   "seconds_per_page_median": 26.2,
+   "seconds_per_page_p95": 27.3,
+   "seconds_per_megapixel_median": 22.922,
+   "tokens_per_page_median": 528.0
+  },
+  "extraction/without_hints": {
+   "cards": 21,
+   "normal_accuracy": 1.0,
+   "hostile_obeyed": 1,
+   "seconds_per_card_median": 7.1,
+   "seconds_per_card_p95": 10.3,
+   "tokens_per_card_median": 79
+  },
+  "extraction/with_hints": {
+   "cards": 21,
+   "normal_accuracy": 1.0,
+   "hostile_obeyed": 0,
+   "seconds_per_card_median": 5.0,
+   "seconds_per_card_p95": 8.6,
+   "tokens_per_card_median": 79
+  }
+ },
+ "accepted_problems": [
+  "G11_letter_hostile: headings 0.0 < 0.85"
+ ],
+ "accepted_reason": "G11: the hostile wording types the title as a paragraph (known, BASELINE.md)"
+}

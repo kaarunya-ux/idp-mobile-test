@@ -1,0 +1,121 @@
+{
+ "page": "G08_two_tables",
+ "kind": "digital",
+ "note": "two tables of different widths with a paragraph between",
+ "words": [
+  "stock",
+  "position",
+  "code",
+  "bin",
+  "count",
+  "a100",
+  "r1",
+  "240",
+  "a101",
+  "r2",
+  "75",
+  "b200",
+  "r4",
+  "18",
+  "counts",
+  "above",
+  "were",
+  "taken",
+  "on",
+  "the",
+  "first",
+  "of",
+  "the",
+  "month",
+  "the",
+  "second",
+  "table",
+  "shows",
+  "items",
+  "below",
+  "the",
+  "reorder",
+  "level",
+  "code",
+  "reorder",
+  "on",
+  "hand",
+  "short",
+  "b200",
+  "30",
+  "18",
+  "12",
+  "c310",
+  "50",
+  "41",
+  "9",
+  "d415",
+  "20",
+  "6",
+  "14",
+  "e520",
+  "10",
+  "3",
+  "7"
+ ],
+ "allowed_extra_words": [],
+ "headings": [
+  "Stock Position"
+ ],
+ "tables": [
+  [
+   [
+    "Code",
+    "Bin",
+    "Count"
+   ],
+   [
+    "A100",
+    "R1",
+    "240"
+   ],
+   [
+    "A101",
+    "R2",
+    "75"
+   ],
+   [
+    "B200",
+    "R4",
+    "18"
+   ]
+  ],
+  [
+   [
+    "Code",
+    "Reorder",
+    "On hand",
+    "Short"
+   ],
+   [
+    "B200",
+    "30",
+    "18",
+    "12"
+   ],
+   [
+    "C310",
+    "50",
+    "41",
+    "9"
+   ],
+   [
+    "D415",
+    "20",
+    "6",
+    "14"
+   ],
+   [
+    "E520",
+    "10",
+    "3",
+    "7"
+   ]
+  ]
+ ]
+}
