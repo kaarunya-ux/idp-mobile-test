@@ -27,6 +27,7 @@ from conversion.conversion.application.services.run_job import (
     PreviewHandler,
 )
 from conversion.conversion.domain.ports import ObjectStoragePort, UnitOfWorkFactory
+from conversion.conversion.domain.reading_check import ReadingCheckPolicy
 from conversion.conversion.domain.route_planner import RoutePlanner
 from conversion.conversion.domain.values import JobType, ThumbnailSpec
 from conversion.conversion.infrastructure.converters.docx_to_model import PythonDocxReader
@@ -35,7 +36,7 @@ from conversion.conversion.infrastructure.converters.images_to_pdf import Img2Pd
 from conversion.conversion.infrastructure.converters.model_to_docx import PythonDocxWriter
 from conversion.conversion.infrastructure.converters.model_to_pptx import PythonPptxWriter
 from conversion.conversion.infrastructure.converters.model_to_sheets import CsvModelWriter, OpenpyxlModelWriter
-from conversion.conversion.infrastructure.converters.ocr_to_model import ModelFirstOcrConverter
+from conversion.conversion.infrastructure.converters.ocr_to_model import ModelFirstOcrConverter, ReadingCheck
 from conversion.conversion.infrastructure.converters.office_to_pdf import LibreOfficePdfConverter
 from conversion.conversion.infrastructure.converters.pdf_merge import PikepdfMerger
 from conversion.conversion.infrastructure.converters.pdf_to_images import PdfiumPageRenderer
@@ -43,6 +44,7 @@ from conversion.conversion.infrastructure.converters.pdf_to_model import Pdfplum
 from conversion.conversion.infrastructure.converters.pptx_from_images import PptxImageSlides
 from conversion.conversion.infrastructure.converters.pptx_to_model import PythonPptxReader
 from conversion.conversion.infrastructure.converters.sheet_to_model import SheetReader
+from conversion.conversion.infrastructure.converters.tesseract_text import TesseractTextRecognizer, tesseract_available
 from conversion.conversion.infrastructure.converters.thumbnails import PillowThumbnailer
 from conversion.conversion.infrastructure.converters.xlsx_csv import OpenpyxlCsvConverter
 from conversion.conversion.infrastructure.export.exporter import ResultExporter
@@ -57,7 +59,7 @@ from conversion.conversion.infrastructure.secrets import RsaSecrets
 from conversion.conversion.infrastructure.storage import S3ObjectStorage
 from conversion.conversion.infrastructure.tasks import CeleryTaskQueue
 from conversion.core.clock import Clock, SystemClock
-from conversion.core.config import Settings, StorageSettings
+from conversion.core.config import MissingSettingsError, Settings, StorageSettings
 from conversion.core.db import SessionFactory, create_db_engine, create_session_factory
 from conversion.core.outbox import OutboxRelay
 from conversion.core.service_auth import ServiceTokenProvider
@@ -111,8 +113,28 @@ def _scanned_reader(settings: Settings) -> list[ModelFirstOcrConverter]:
             max_pages=gateway.max_pages,
             concurrency=gateway.page_concurrency,
             max_pixels=settings.limits.max_image_pixels,
+            reading_check=_reading_check(settings),
         )
     ]
+
+
+def _reading_check(settings: Settings) -> ReadingCheck | None:
+    """OCR as a second reading of each scanned page. Stops the process when it is on and Tesseract is missing: a
+    protection that silently turns itself off is worse than a worker that does not start."""
+    check = settings.reading_check
+    if not check.enabled:
+        return None
+    if not tesseract_available():
+        raise MissingSettingsError(
+            "READING_CHECK__ENABLED is true but the tesseract program is not installed; install it, "
+            "or set READING_CHECK__ENABLED=false to read scanned pages without the check."
+        )
+    return ReadingCheck(
+        recognizer=TesseractTextRecognizer(check.languages, check.timeout.total_seconds()),
+        policy=ReadingCheckPolicy(
+            min_share=check.min_share, max_length_ratio=check.max_length_ratio, min_ocr_words=check.min_ocr_words
+        ),
+    )
 
 
 def build_convert_file_service(settings: Settings, storage: ObjectStoragePort | None = None) -> ConvertFileService:

@@ -123,6 +123,19 @@ class AiGatewaySettings(BaseModel):
     page_concurrency: int = Field(4, ge=1, le=32)
 
 
+class ReadingCheckSettings(BaseModel):
+    """A second reading of each scanned page by OCR (Tesseract), to refuse a model reading that lost the page: a page
+    that obeyed a printed "reply only OK", stopped half way or summarised. See ADR 0001 for how the thresholds were
+    chosen. Needs ``tesseract`` in the worker image; set ``enabled`` false to run without it."""
+
+    enabled: bool = True
+    languages: str = Field("eng", pattern=r"^[a-z_]{3,12}(\+[a-z_]{3,12})*$")  # Tesseract language codes, e.g. eng+hin
+    timeout: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
+    min_share: float = Field(0.5, gt=0.0, le=1.0)  # the share of OCR's words the model's page must hold ...
+    max_length_ratio: float = Field(0.6, gt=0.0, le=1.0)  # ... unless it is at least this long, against OCR's text
+    min_ocr_words: int = Field(10, ge=1, le=1000)  # fewer OCR words than this: nothing to compare, the page passes
+
+
 class ServiceAuthSettings(BaseModel):
     """This service's own client-credentials login, for calls to ai-gateway (SEC-07)."""
 
@@ -131,6 +144,12 @@ class ServiceAuthSettings(BaseModel):
     client_secret: SecretStr
     audience: str | None = Field("ai-gateway", max_length=128)
     timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(seconds=1), le=timedelta(minutes=1))
+
+
+class BuildSettings(BaseModel):
+    """Which build is running, for the stamp on every log line. The image build sets ``BUILD__COMMIT``."""
+
+    commit: str = Field("unknown", min_length=1, max_length=64)
 
 
 class MissingSettingsError(RuntimeError):
@@ -145,6 +164,7 @@ class Settings(BaseSettings):
     service_name: str = Field("conversion-service", min_length=1, max_length=64)
     environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    build: BuildSettings = Field(default_factory=BuildSettings)
     limits: LimitsSettings = Field(default_factory=LimitsSettings)
     office: OfficeSettings = Field(default_factory=OfficeSettings)
     preview: PreviewSettings = Field(default_factory=PreviewSettings)
@@ -152,6 +172,7 @@ class Settings(BaseSettings):
     crypto: CryptoSettings = Field(default_factory=CryptoSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
+    reading_check: ReadingCheckSettings = Field(default_factory=ReadingCheckSettings)
     service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
     # No defaults: credentials never live in code (CFG-03). Only the processes that use a group require it, so the
     # health server and unit tests run without them; ``require_*`` stops a worker at startup instead.

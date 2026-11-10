@@ -43,10 +43,12 @@ USER 10001
 CMD ["faststream", "run", "conversion.consumers:create_app", "--factory"]
 
 FROM runtime AS worker
-# LibreOffice for Office -> PDF; Noto fonts so Devanagari and other scripts never render as boxes (IDP-03 ch. 3.4).
+# LibreOffice for Office -> PDF; Noto fonts so Devanagari and other scripts never render as boxes (IDP-03 ch. 3.4);
+# Tesseract (English and Hindi) for the second reading that checks the model's scanned pages (ADR 0001).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-core fonts-noto-extra \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build-workers /app /app
 # LibreOffice writes its profile under HOME; the app user's home is writable, the image isn't.

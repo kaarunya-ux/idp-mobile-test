@@ -21,6 +21,7 @@ dependencies = [
 # img2pdf: lossless images -> PDF, named in IDP-03 ch. 3.4; approved for this project 2026-10-21 (build log entry 3).
 workers = [
     "pillow>=10.4",
+    "pytesseract>=0.3.10",  # Apache-2.0, on the approved list (ch. 22.3): a second reading of scanned pages (ADR 0001)
     "pypdfium2>=4.30",
     "img2pdf>=0.5",
     "openpyxl>=3.1",
@@ -91,9 +92,9 @@ plugins = ["pydantic.mypy"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-# pypdfium2 and img2pdf ship no type information. Each is used by exactly one adapter, which turns their
+# pypdfium2, img2pdf and pytesseract ship no type information. Each is used by exactly one adapter, which turns their
 # untyped results into typed values before returning them (PY-01: Any only at an untyped boundary).
-module = ["pypdfium2", "pypdfium2.*", "img2pdf"]
+module = ["pypdfium2", "pypdfium2.*", "img2pdf", "pytesseract"]
 ignore_missing_imports = true
 
 # --- Tests (standard ch. 21) --------------------------------------------------
@@ -130,8 +131,8 @@ source_modules = ["conversion.conversion.domain"]
 forbidden_modules = [
     "fastapi", "pydantic", "pydantic_settings", "sqlalchemy", "httpx", "celery", "faststream", "redis",
     "boto3", "structlog", "uvicorn", "conversion.core.config", "conversion.core.logging",
-    "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber", "pikepdf", "conversion.conversion.infrastructure",
-    "cryptography", "pdfminer",
+    "PIL", "pypdfium2", "img2pdf", "pytesseract", "openpyxl", "docx", "pptx", "pdfplumber", "pikepdf",
+    "conversion.conversion.infrastructure", "cryptography", "pdfminer",
     "botocore", "aio_pika", "psycopg", "alembic", "conversion.core.db", "conversion.core.outbox",
 ]
 
@@ -146,8 +147,8 @@ name = "Application depends on ports, not adapters"
 type = "forbidden"
 source_modules = ["conversion.conversion.application"]
 forbidden_modules = [
-    "conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx", "pdfplumber", "pikepdf",
-    "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3", "botocore", "cryptography", "pdfminer",
+    "conversion.conversion.infrastructure", "PIL", "pypdfium2", "img2pdf", "pytesseract", "openpyxl", "docx", "pptx",
+    "pdfplumber", "pikepdf", "sqlalchemy", "psycopg", "celery", "faststream", "aio_pika", "boto3", "botocore", "cryptography", "pdfminer",
 ]
 
 [[tool.importlinter.contracts]]
@@ -155,8 +156,8 @@ name = "Health server stays slim (no converter libraries in its image)"
 type = "forbidden"
 source_modules = ["conversion.health"]
 forbidden_modules = [
-    "conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf", "openpyxl", "docx", "pptx",
-    "pdfplumber", "pikepdf", "celery", "faststream", "boto3",
+    "conversion.conversion", "conversion.bootstrap", "PIL", "pypdfium2", "img2pdf", "pytesseract", "openpyxl", "docx",
+    "pptx", "pdfplumber", "pikepdf", "celery", "faststream", "boto3",
 ]
 
 [[tool.importlinter.contracts]]

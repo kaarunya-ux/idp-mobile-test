@@ -13,22 +13,38 @@ The model writes most of each page's time; the page model serves several pages a
 import tempfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
+import structlog
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from conversion.conversion.domain.document_model import DocumentModel
-from conversion.conversion.domain.exceptions import LimitExceededError, OcrNotAvailableError, UnreadableImageError
-from conversion.conversion.domain.ports import PageReaderPort, StepRequest, StepResult
+from conversion.conversion.domain.document_model import DocumentModel, Page
+from conversion.conversion.domain.exceptions import (
+    AiUnavailableError,
+    LimitExceededError,
+    OcrNotAvailableError,
+    UnreadableImageError,
+)
+from conversion.conversion.domain.ports import PageReaderPort, StepContext, StepRequest, StepResult, TextRecognizerPort
+from conversion.conversion.domain.reading_check import ReadingCheckPolicy, check_reading
 from conversion.conversion.domain.route import Converter
 from conversion.conversion.infrastructure.converters.pdf_to_images import POINTS_PER_INCH, open_pdf
 from conversion.conversion.infrastructure.model_file import model_path, write_model
 
 _PDF_MAGIC = b"%PDF"
+log = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReadingCheck:
+    """A second reading of every page by OCR, and when the model's page disagrees with it (ADR 0001)."""
+
+    recognizer: TextRecognizerPort
+    policy: ReadingCheckPolicy
 
 
 class ModelFirstOcrConverter:
-    # every collaborator is a port or a number
     def __init__(
         self,
         reader: PageReaderPort,
@@ -38,8 +54,10 @@ class ModelFirstOcrConverter:
         max_pixels: int,
         render_max_side_px: int = 8192,
         concurrency: int = 1,
+        reading_check: ReadingCheck | None = None,
     ) -> None:
         self._reader = reader
+        self._check = reading_check
         self._render_max_side_px = render_max_side_px
         self._concurrency = concurrency
         self._render_dpi = render_dpi
@@ -59,13 +77,30 @@ class ModelFirstOcrConverter:
             with ThreadPoolExecutor(max_workers=max(1, min(self._concurrency, len(pictures)))) as pool:
                 pages = tuple(
                     pool.map(
-                        lambda numbered: self._reader.read_page(numbered[1], numbered[0], context),
+                        lambda numbered: self._read_checked(numbered[1], numbered[0], context),
                         enumerate(pictures, 1),
                     )
                 )
         output = model_path(request.output_dir, request.inputs[0])
         write_model(DocumentModel(pages=pages), output)
         return StepResult(outputs=(output,), page_count=len(pages))
+
+    def _read_checked(self, picture: Path, number: int, context: StepContext) -> Page:
+        """The model's page, refused when OCR's reading of the same picture shows the model lost most of it."""
+        page = self._reader.read_page(picture, number, context)
+        if self._check is None:
+            return page
+        result = check_reading(page, self._check.recognizer.read_text(picture), self._check.policy)
+        if result.disagrees:
+            log.warning(
+                "page_reading_rejected",
+                page=number,
+                ocr_words=result.ocr_words,
+                page_words=result.page_words,
+                share=round(result.share, 3),
+            )
+            raise AiUnavailableError  # an unusable answer, like one the schema refuses; never the page's text
+        return page
 
     def _pictures(self, request: StepRequest, folder: Path) -> Iterator[Path]:
         count = 0

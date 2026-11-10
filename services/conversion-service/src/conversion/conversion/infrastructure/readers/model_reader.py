@@ -37,10 +37,12 @@ class GatewayPageReader:
         picture = base64.b64encode(image.read_bytes()).decode()
         answer = self._post({"accountId": str(context.account_id), "page": {"data": picture}})
         try:
-            return to_page(answer["blocks"])
+            page = to_page(answer["blocks"])
         except (KeyError, TypeError) as exc:
             log.warning("page_read_answer_unreadable", page=number)
             raise AiUnavailableError from exc
+        _log_reading(answer, number, len(page.blocks))
+        return page
 
     def _post(self, body: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -66,6 +68,25 @@ class GatewayPageReader:
         if not isinstance(answer, dict):
             raise AiUnavailableError
         return answer
+
+
+def _log_reading(answer: dict[str, Any], number: int, block_count: int) -> None:
+    """One line per page read: which model and prompt version read it, how long it took and how many tokens it used.
+    Comparing these lines over time shows a change in the model server or the prompt (ML-04). Never the page text
+    (OBS-04, LLM-06)."""
+    tokens = answer.get("tokens")
+    analysis = answer.get("analysis")  # the model's own count of the page's blocks, against the blocks it wrote
+    log.info(
+        "page_read",
+        page=number,
+        model=answer.get("model"),
+        prompt_version=answer.get("promptVersion"),
+        latency_ms=answer.get("latencyMs"),
+        tokens_in=tokens.get("in") if isinstance(tokens, dict) else None,
+        tokens_out=tokens.get("out") if isinstance(tokens, dict) else None,
+        blocks=block_count,
+        blocks_counted=analysis.get("nBlocks") if isinstance(analysis, dict) else None,
+    )
 
 
 def to_page(blocks: list[dict[str, Any]]) -> Page:

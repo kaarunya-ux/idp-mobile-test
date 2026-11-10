@@ -14,6 +14,7 @@ import structlog
 from fastapi import FastAPI, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from conversion.core.build_info import build_stamp
 from conversion.core.config import get_settings
 from conversion.core.logging import configure_logging
 
@@ -32,7 +33,7 @@ class HealthResponse(BaseModel):
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    configure_logging(settings.logging)
+    configure_logging(settings.logging, build_stamp(settings))
     log.info("health_server_started", service=settings.service_name, environment=settings.environment)
     yield
     log.info("health_server_stopped", service=settings.service_name)

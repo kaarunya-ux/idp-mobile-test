@@ -77,6 +77,7 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `ENVIRONMENT` | `local` | `local`, `dev`, `test`, `staging`, `prod` | Where the process runs |
 | `LOGGING__LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | Lowest level written |
 | `LOGGING__FORMAT` | `json` | `json`, `console` | `console` for readable local logs; JSON everywhere else |
+| `BUILD__COMMIT` | `unknown` | | The git commit of the image; the image build sets it. every log line carries `env` (from `ENVIRONMENT`), `service_version`, `commit` and `config_hash`: a short hash of the settings that change behaviour (not URLs, credentials, concurrency or timeouts), so a promoted build has the same hash in every environment |
 | `LIMITS__MAX_PAGES` | `1000` | 1–10,000 | PDFs with more pages are refused (`CNV-422-LIMIT-001`) |
 | `LIMITS__MAX_IMAGE_PIXELS` | `180000000` | 1M–1G | Images with more pixels are refused, which stops decompression bombs |
 | `LIMITS__MAX_RENDER_SIDE_PX` | `5000` | 500–20,000 | Rendered pages are scaled down so the longest side fits |
@@ -105,6 +106,9 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `AI_GATEWAY__URL` | — (off) | `http://ai-gateway:8002` | The scanned routes (scan or photo to Word, Excel or CSV) read pages through ai-gateway's `page-read`. Unset: they answer `CNV-422-ROUTE-001` |
 | `AI_GATEWAY__TIMEOUT` / `__RENDER_DPI` / `__MAX_PAGES` | `240` s / `200` / `50` | | Per page; the DPI a scanned PDF page is drawn at; pages read per document |
 | `AI_GATEWAY__RENDER_MAX_SIDE_PX` / `__PAGE_CONCURRENCY` | `2048` / `4` | 512–8192 / 1–32 | A drawn page's long side is capped (ai-gateway shrinks pages to 2048 px anyway); pages read at the same time (the page model's parallel slots). The page picture goes inside the page-read call: the scanned routes use no storage for it |
+| `READING_CHECK__ENABLED` | `true` | `false` | A second reading of each scanned page by Tesseract: a page the model reads with most of OCR's words missing, and much shorter than OCR's text, is refused (`CNV-503-AI-001`, retryable). On, the worker needs the `tesseract` program (the worker image has it) and stops at start-up without it. ADR 0001 |
+| `READING_CHECK__MIN_SHARE` / `__MAX_LENGTH_RATIO` / `__MIN_OCR_WORDS` | `0.5` / `0.6` / `10` | 0–1 / 0–1 / 1–1000 | The page is refused only when it holds less than `MIN_SHARE` of OCR's words **and** has fewer than `MAX_LENGTH_RATIO` times OCR's word count; a page where OCR read fewer than `MIN_OCR_WORDS` is not checked |
+| `READING_CHECK__LANGUAGES` / `__TIMEOUT` | `eng` / `30` s | `eng+hin` | Tesseract languages (installed: English, Hindi) and the time one page may take; a timeout skips the check for that page |
 | `SERVICE_AUTH__TOKEN_URL` / `__CLIENT_SECRET` / `__CLIENT_ID` / `__AUDIENCE` | — / — / `conversion-service` / `ai-gateway` | | Keycloak client credentials for ai-gateway; needed with `AI_GATEWAY__URL` |
 | `PREVIEW__MAX_SIDE_PX` | `400` | 64–2000 | Longest side of a page thumbnail; an A4 page comes out 283 × 400 |
 | `PREVIEW__JPEG_QUALITY` | `75` | 30–95 | JPEG quality of thumbnails |

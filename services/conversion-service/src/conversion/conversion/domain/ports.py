@@ -75,6 +75,15 @@ class PageReaderPort(Protocol):
         ...
 
 
+class TextRecognizerPort(Protocol):
+    """Reads the text of a page picture by OCR, independently of the model, to check the model's reading
+    (``reading_check``)."""
+
+    def read_text(self, image: Path) -> str:
+        """The text OCR found, or an empty string when it could not read the picture (no check is made then)."""
+        ...
+
+
 class ConverterLookupPort(Protocol):
     """Finds the implementation for a kind of step."""
 

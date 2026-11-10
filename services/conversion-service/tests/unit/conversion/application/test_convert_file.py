@@ -20,7 +20,7 @@ from conversion.conversion.domain.ports import StepContext, StepRequest, StepRes
 from conversion.conversion.domain.route import OCR_CONVERTERS, Converter, Fidelity, Route, Step
 from conversion.conversion.domain.route_planner import RoutePlanner, RouteVariant
 from conversion.conversion.infrastructure.registry import ConverterNotRegisteredError, ConverterRegistry
-from conversion.core.config import Settings
+from conversion.core.config import MissingSettingsError, Settings
 
 MakeImage = Callable[..., Path]
 MakePdf = Callable[..., Path]
@@ -219,9 +219,46 @@ def test_registers_the_scanned_reader_only_when_the_gateway_and_its_login_are_co
         {
             "ai_gateway": {"url": "http://ai-gateway:8002"},
             "service_auth": {"token_url": "http://keycloak:8080/realms/idp/token", "client_secret": "test-secret"},
+            "reading_check": {"enabled": False},  # this test is about registration; the check has its own tests below
         }
     )
 
     with pytest.raises(ConverterNotRegisteredError):
         plain.get(Converter.OCR_TO_MODEL)
     assert build_converter_registry(configured).get(Converter.OCR_TO_MODEL)  # no storage needed: pages go inline
+
+
+def _configured(**reading_check: object) -> Settings:
+    return Settings.model_validate(
+        {
+            "ai_gateway": {"url": "http://ai-gateway:8002"},
+            "service_auth": {"token_url": "http://keycloak:8080/realms/idp/token", "client_secret": "test-secret"},
+            "reading_check": reading_check,
+        }
+    )
+
+
+def test_stops_the_worker_when_the_reading_check_is_on_and_tesseract_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("conversion.bootstrap.tesseract_available", lambda: False)
+
+    with pytest.raises(MissingSettingsError, match="READING_CHECK__ENABLED"):
+        build_converter_registry(_configured())
+
+
+def test_turns_the_reading_check_on_for_the_scanned_route_when_tesseract_is_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("conversion.bootstrap.tesseract_available", lambda: True)
+
+    converter = build_converter_registry(_configured(min_share=0.4)).get(Converter.OCR_TO_MODEL)
+
+    assert converter._check is not None
+    assert converter._check.policy.min_share == 0.4
+
+
+def test_reads_scanned_pages_without_the_check_when_it_is_switched_off() -> None:
+    converter = build_converter_registry(_configured(enabled=False)).get(Converter.OCR_TO_MODEL)
+
+    assert converter._check is None
