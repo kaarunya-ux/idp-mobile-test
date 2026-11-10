@@ -104,21 +104,21 @@ def test_cuts_a_date_out_of_the_text_after_its_label_and_accepts_a_future_expiry
 
 
 def test_stops_the_value_after_a_label_at_the_next_columns_text() -> None:
-    words = [word("GSTIN: 32AABBA7890B1ZB", 0.05, 0.3, width=0.3), word("Transport ID 24ABSFS0321B2ZL", 0.55, 0.3)]
+    words = [word("GSTIN: 32AAAAA0000A1ZA", 0.05, 0.3, width=0.3), word("Transport ID 24BBBBB1111B2ZB", 0.55, 0.3)]
 
     reading = read_field(_field("GSTIN"), words, Box(x=0, y=0, width=1, height=1), today=TODAY)
 
     assert reading is not None
-    assert reading.text == "32AABBA7890B1ZB"
+    assert reading.text == "32AAAAA0000A1ZA"
 
 
 def test_stops_a_value_right_of_its_label_at_the_next_column() -> None:
-    words = [word("M/S", 0.05, 0.3, width=0.04), word("Shiv Test Works", 0.15, 0.3), word("Challan No 33", 0.6, 0.3)]
+    words = [word("M/S", 0.05, 0.3, width=0.04), word("Demo Test Works", 0.15, 0.3), word("Challan No 33", 0.6, 0.3)]
 
     reading = read_field(_field("M/S"), words, Box(x=0, y=0, width=1, height=1), today=TODAY)
 
     assert reading is not None
-    assert reading.text == "Shiv Test Works"
+    assert reading.text == "Demo Test Works"
 
 
 def _drawn(label: str, box: Box):  # type: ignore[no-untyped-def]  # a FieldDefinition
@@ -127,13 +127,13 @@ def _drawn(label: str, box: Box):  # type: ignore[no-untyped-def]  # a FieldDefi
 
 def test_reads_only_the_words_inside_a_box_drawn_around_the_value() -> None:
     # one piece holds the label, the value and the next column's text, as an engine may read a row
-    words = [word("M/S Shiv Test Works Challan No 33", 0.05, 0.3, width=0.66)]
-    definition = _drawn("M/S", Box(x=0.11, y=0.3, width=0.32, height=0.04))  # "Shiv Test Works"
+    words = [word("M/S Demo Test Works Challan No 33", 0.05, 0.3, width=0.66)]
+    definition = _drawn("M/S", Box(x=0.11, y=0.3, width=0.32, height=0.04))  # "Demo Test Works"
 
     reading = read_field(definition, words, definition.box, today=TODAY)
 
     assert reading is not None
-    assert reading.text == "Shiv Test Works"
+    assert reading.text == "Demo Test Works"
 
 
 @pytest.mark.parametrize(

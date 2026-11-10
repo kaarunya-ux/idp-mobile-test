@@ -36,7 +36,7 @@ class ErrorCode(StrEnum):
     FILE_TOO_LARGE = "CNV-413-FILE-001"  # over the synchronous route's size or pages: send it as a job
     FILE_TYPE_UNSUPPORTED = "CNV-415-FILE-001"  # the content is none of the formats this service reads
     BUSY = "CNV-429-BUSY-001"  # every synchronous slot is taken: send it as a job
-    NEEDS_READING = "CNV-422-SYNC-001"  # a scan or photo to a document needs OCR or the AI: send it as a job
+    NEEDS_READING = "CNV-422-SYNC-001"  # a scan over SYNC__MAX_READ_PAGES, or no reader in this build: send it as a job
 
     @property
     def http_status(self) -> int:
