@@ -1,7 +1,8 @@
 """Error codes this service reports, in the shared format ``<AREA>-<HTTP>-<TOPIC>-<NNN>`` (ERR-05, IDP-00 ch. 7.4).
 
-Worker errors reach users through the job item's ``error.code`` in a ``WorkFailed`` message, not as HTTP
-responses (IDP-00 ch. 7.4). Never reuse or change a released code; only add new ones, as they are needed.
+Worker errors reach users through the job item's ``error.code`` in a ``WorkFailed`` message; on the synchronous route
+(ADR 0002) the same codes are HTTP problem details. Never reuse or change a released code; only add new ones, as they
+are needed.
 The full list this service will use is in IDP-03 ch. 3.8.
 """
 
@@ -28,6 +29,14 @@ class ErrorCode(StrEnum):
         "CNV-503-AI-001"  # new: a scanned route got no answer from ai-gateway (busy, model down); retryable
     )
     AI_LIMIT_REACHED = "CNV-429-AI-001"  # new: the account has used its AI calls for today (ai-gateway's cap)
+    # new, POST /api/v1/convert (ADR 0002)
+    REQUEST_INVALID = "CNV-400-REQUEST-001"  # a missing or malformed form field
+    UNAUTHENTICATED = "CNV-401-AUTH-001"  # no valid bearer token (SEC-01)
+    FORBIDDEN = "CNV-403-AUTH-001"  # the token lacks the permission or an account (SEC-03)
+    FILE_TOO_LARGE = "CNV-413-FILE-001"  # over the synchronous route's size or pages: send it as a job
+    FILE_TYPE_UNSUPPORTED = "CNV-415-FILE-001"  # the content is none of the formats this service reads
+    BUSY = "CNV-429-BUSY-001"  # every synchronous slot is taken: send it as a job
+    NEEDS_READING = "CNV-422-SYNC-001"  # a scan over SYNC__MAX_READ_PAGES, or no reader in this build: send it as a job
 
     @property
     def http_status(self) -> int:

@@ -8,7 +8,6 @@ retry, call ``fail``.
 """
 
 import tempfile
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -18,14 +17,14 @@ from uuid import UUID
 import structlog
 
 from conversion.conversion.application.commands import ProcessItemCommand
+from conversion.conversion.application.services.packaging import format_of_file, package_outputs
 from conversion.conversion.application.services.run_job import JobInput, JobRunner
 from conversion.conversion.domain.events import ConversionEvent
-from conversion.conversion.domain.exceptions import InvalidOptionError
 from conversion.conversion.domain.formats import ZIP_CONTENT_TYPE, Format
 from conversion.conversion.domain.models import ConversionItem, ConversionRequest
-from conversion.conversion.domain.options import JobOptions, parse_job_options
+from conversion.conversion.domain.options import parse_job_options
 from conversion.conversion.domain.ports import FileInspectorPort, ObjectStoragePort, UnitOfWorkFactory
-from conversion.conversion.domain.values import JobType, ObjectRef, OutputMode, Stage, StoredOutput
+from conversion.conversion.domain.values import JobType, ObjectRef, Stage, StoredOutput
 from conversion.core.clock import Clock
 from conversion.core.errors import DomainError
 
@@ -121,7 +120,7 @@ class ProcessConversionService:
                 )
             )
             self._progress(request, Stage.PACKAGE, PACKAGE_STARTS_AT)
-            files = _package(result.files, options, folder / "zip")
+            files = package_outputs(result.files, options.output, folder / "zip")
             outputs = tuple(self._upload(file, request) for file in files)
         return outputs, result.page_count
 
@@ -136,7 +135,7 @@ class ProcessConversionService:
         return tuple(paths)
 
     def _upload(self, file: Path, request: ConversionRequest) -> StoredOutput:
-        file_format = _format_of(file)
+        file_format = format_of_file(file)
         content_type = file_format.content_type if file_format else ZIP_CONTENT_TYPE
         ref = ObjectRef(bucket=self._buckets.for_job(request.job_type), key=request.output_key(file.name))
         uploaded = self._storage.upload(file, ref, content_type)
@@ -159,22 +158,3 @@ class ProcessConversionService:
             if event is not None:
                 unit.add_event(event)
             unit.commit()
-
-
-def _package(files: tuple[Path, ...], options: JobOptions, folder: Path) -> tuple[Path, ...]:
-    """Apply the ``output`` option: files as they are, one file only, or one ZIP of all of them."""
-    if options.output is OutputMode.ZIP and len(files) > 1:
-        folder.mkdir()
-        archive = folder / f"{files[0].stem.split('-page-')[0]}.zip"
-        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-            for file in files:
-                bundle.write(file, arcname=file.name)
-        return (archive,)
-    if options.output is OutputMode.SINGLE and len(files) > 1:
-        raise InvalidOptionError("output", f"is SINGLE, but this conversion makes {len(files)} files; use ZIP")
-    return files
-
-
-def _format_of(file: Path) -> Format | None:
-    suffix = file.suffix.lower()
-    return next((member for member in Format if member.suffix == suffix), None)

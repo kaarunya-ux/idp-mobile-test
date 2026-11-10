@@ -98,7 +98,7 @@ def _bodies(blocks: tuple[Block, ...]) -> Iterator[_Body]:
                 yield tuple(text)
                 text = []
             yield from _table_parts(block)
-        else:
+        elif isinstance(block, TextBlock):  # sheets are all that reach this writer: they have no pictures
             text.append(block)
             if len(text) == TEXT_BLOCKS_PER_SLIDE:
                 yield tuple(text)

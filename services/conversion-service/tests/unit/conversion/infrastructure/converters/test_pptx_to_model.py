@@ -3,8 +3,10 @@
 from collections.abc import Callable
 from pathlib import Path
 
+import docx
 import pptx
 import pytest
+from PIL import Image
 from pptx.chart.data import CategoryChartData, XyChartData
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.enum.text import PP_ALIGN
@@ -13,13 +15,16 @@ from pptx.presentation import Presentation
 from pptx.slide import Slide
 from pptx.util import Inches
 
+from conversion.bootstrap import build_convert_file_service
+from conversion.conversion.application.commands import ConvertFileCommand
 from conversion.conversion.domain.document_model import Alignment, DocumentModel, Table, TextBlock, TextKind
 from conversion.conversion.domain.exceptions import UnreadableDocumentError
-from conversion.conversion.domain.formats import Representation
+from conversion.conversion.domain.formats import Format, Representation
 from conversion.conversion.domain.ports import StepRequest
 from conversion.conversion.domain.route import Converter
 from conversion.conversion.infrastructure.converters.pptx_to_model import PythonPptxReader
 from conversion.conversion.infrastructure.model_file import read_model
+from conversion.core.config import Settings
 
 R = Representation
 MakeRequest = Callable[..., StepRequest]
@@ -177,3 +182,18 @@ def test_reports_cnv_422_file_001_when_the_file_is_not_a_deck(tmp_path: Path, ma
 
     with pytest.raises(UnreadableDocumentError):
         PythonPptxReader().convert(make_request(Converter.PPTX_TO_MODEL, R.PPTX, R.DOCUMENT_MODEL, [fake]))
+
+
+def test_reads_a_slides_picture_and_writes_it_into_the_word_file(tmp_path: Path) -> None:
+    picture = tmp_path / "made-up.png"
+    Image.new("RGB", (40, 20), "red").save(picture)
+    deck = pptx.Presentation()
+    deck.slides.add_slide(deck.slide_layouts[5]).shapes.add_picture(str(picture), 914_400, 914_400, width=1_270_000)
+    source = tmp_path / "deck.pptx"
+    deck.save(str(source))
+
+    result = build_convert_file_service(Settings(_env_file=None)).convert(
+        ConvertFileCommand(source=Format.PPTX, target=Format.DOCX, inputs=(source,), output_dir=tmp_path / "out")
+    )
+
+    assert len(docx.Document(str(result.outputs[0])).inline_shapes) == 1

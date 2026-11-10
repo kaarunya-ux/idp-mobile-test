@@ -7,6 +7,8 @@ The only module allowed to import from every layer. Each entry point (``consumer
 import os
 import socket
 from datetime import timedelta
+from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import boto3
@@ -17,6 +19,7 @@ from faststream.rabbit import RabbitBroker
 
 from conversion.conversion.application.services.accept_conversion import AcceptConversionService
 from conversion.conversion.application.services.convert_file import ConvertFileService
+from conversion.conversion.application.services.convert_now import ConvertNowService
 from conversion.conversion.application.services.edit_pdf import EditHandler
 from conversion.conversion.application.services.export_results import ExportHandler
 from conversion.conversion.application.services.process_conversion import OutputBuckets, ProcessConversionService
@@ -26,7 +29,7 @@ from conversion.conversion.application.services.run_job import (
     MergeHandler,
     PreviewHandler,
 )
-from conversion.conversion.domain.ports import ObjectStoragePort, UnitOfWorkFactory
+from conversion.conversion.domain.ports import ObjectStoragePort, PageReaderPort, UnitOfWorkFactory
 from conversion.conversion.domain.route_planner import RoutePlanner
 from conversion.conversion.domain.values import JobType, ThumbnailSpec
 from conversion.conversion.infrastructure.converters.docx_to_model import PythonDocxReader
@@ -52,15 +55,20 @@ from conversion.conversion.infrastructure.messaging.publisher import RabbitEvent
 from conversion.conversion.infrastructure.pdfedit.editor import PikepdfEditor
 from conversion.conversion.infrastructure.persistence.repository import SqlUnitOfWork
 from conversion.conversion.infrastructure.readers.model_reader import GatewayPageReader
+from conversion.conversion.infrastructure.readers.ocr_layout_reader import OcrLayoutPageReader
 from conversion.conversion.infrastructure.registry import ConverterRegistry
 from conversion.conversion.infrastructure.secrets import RsaSecrets
 from conversion.conversion.infrastructure.storage import S3ObjectStorage
 from conversion.conversion.infrastructure.tasks import CeleryTaskQueue
 from conversion.core.clock import Clock, SystemClock
-from conversion.core.config import Settings, StorageSettings
+from conversion.core.config import OcrSettings, Settings, StorageSettings
 from conversion.core.db import SessionFactory, create_db_engine, create_session_factory
 from conversion.core.outbox import OutboxRelay
 from conversion.core.service_auth import ServiceTokenProvider
+from idp_ocr_engines.engines.ppocr import PpOcrEngine, PpOcrModels
+from idp_ocr_engines.limits import RuntimeLimits
+from idp_ocr_engines.port import OcrEnginePort
+from idp_ocr_engines.registry import ModelRegistry
 
 if TYPE_CHECKING:  # boto3-stubs is a dev dependency: type hints only, not in the images
     from mypy_boto3_s3 import S3Client
@@ -77,7 +85,7 @@ def build_converter_registry(settings: Settings, storage: ObjectStoragePort | No
             PdfiumPageRenderer(max_pages=limits.max_pages, max_side_px=limits.max_render_side_px),
             Img2PdfImageWrapper(max_pixels=limits.max_image_pixels),
             PptxImageSlides(max_pixels=limits.max_image_pixels),
-            LibreOfficePdfConverter(binary=office.binary, timeout=office.timeout),
+            LibreOfficePdfConverter(binary=office.binary, timeout=office.timeout, keep_warm=office.keep_warm),
             OpenpyxlCsvConverter(),
             PythonDocxReader(),
             SheetReader(),
@@ -92,8 +100,8 @@ def build_converter_registry(settings: Settings, storage: ObjectStoragePort | No
 
 
 def _scanned_reader(settings: Settings) -> list[ModelFirstOcrConverter]:
-    """The scanned routes' reader: ai-gateway and this service's login to it. No storage: each page picture goes
-    inside the page-read call."""
+    """The scanned routes' reader: ai-gateway and this service's login to it, model-first or OCR-first
+    (``AI_GATEWAY__PAGE_READER``, ADR 0001). No storage: each page picture goes inside the call."""
     gateway, auth = settings.ai_gateway, settings.service_auth
     if gateway.url is None or auth is None:
         return []
@@ -102,7 +110,11 @@ def _scanned_reader(settings: Settings) -> list[ModelFirstOcrConverter]:
     client = httpx.Client(
         base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
     )
-    reader = GatewayPageReader(client, tokens)
+    reader: PageReaderPort = GatewayPageReader(client, tokens)
+    if gateway.page_reader == "ocr_layout":
+        reader = OcrLayoutPageReader(
+            partial(_ocr_engine, settings.ocr), client, tokens, fallback=reader, sends_page=gateway.layout_sends_page
+        )
     return [
         ModelFirstOcrConverter(
             reader,
@@ -115,8 +127,38 @@ def _scanned_reader(settings: Settings) -> list[ModelFirstOcrConverter]:
     ]
 
 
+def _ocr_engine(ocr: OcrSettings) -> OcrEnginePort:
+    """Extraction's engine A (PP-OCRv6 small), its checksums verified as it loads (ML-01)."""
+    return PpOcrEngine.from_registry(
+        engine_id="ocr-a",
+        registry=ModelRegistry.from_file(Path(ocr.models_file)),
+        models_dir=ocr.models_dir,
+        models=PpOcrModels(detector="ppocrv6-small-det", recognizer="ppocrv6-small-rec"),
+        limits=RuntimeLimits(threads=ocr.threads),
+    )
+
+
 def build_convert_file_service(settings: Settings, storage: ObjectStoragePort | None = None) -> ConvertFileService:
     return ConvertFileService(RoutePlanner(), build_converter_registry(settings, storage))
+
+
+def build_convert_now_service(settings: Settings) -> ConvertNowService:
+    """The synchronous route's use case (ADR 0002): the libraries, and the scanned reader for scans and photos when
+    ai-gateway is configured (each picture goes inside the call); no storage and no database."""
+    warm = settings.model_copy(update={"office": settings.office.model_copy(update={"keep_warm": True})})
+    return ConvertNowService(
+        RoutePlanner(),
+        build_convert_file_service(warm),
+        PdfiumFileInspector(),
+        PikepdfMerger(max_pages=settings.limits.max_pages),
+        reads=_scanned_reader_configured(settings),
+        max_read_pages=settings.sync.max_read_pages,
+    )
+
+
+def _scanned_reader_configured(settings: Settings) -> bool:
+    """As ``_scanned_reader`` decides: ai-gateway and this service's login to it."""
+    return settings.ai_gateway.url is not None and settings.service_auth is not None
 
 
 def build_job_runner(settings: Settings, storage: ObjectStoragePort) -> JobRunner:

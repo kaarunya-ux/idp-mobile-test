@@ -1,4 +1,4 @@
-"""Structured logging to stdout through structlog (standard OBS-01, OBS-02).
+"""Structured logging to stdout through structlog, and the correlation id bound at the edge (OBS-01 to OBS-03).
 
 Log an event name plus key-values, never an f-string::
 
@@ -8,12 +8,20 @@ Standard-library and Uvicorn loggers are routed through the same renderer, so ev
 """
 
 import logging
+import re
 import sys
 
 import structlog
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from structlog.types import Processor
 
 from conversion.core.config import LoggingSettings
+from conversion.core.ids import new_id
+
+CORRELATION_ID_HEADER = "X-Correlation-Id"
+CORRELATION_ID_KEY = "correlation_id"
+_VALID_CORRELATION_ID = re.compile(r"[A-Za-z0-9-]{1,64}")  # the format the gateway creates (IDP-01 ch. 2.7)
 
 _SERVER_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
@@ -51,3 +59,36 @@ def configure_logging(settings: LoggingSettings) -> None:
         server_logger = logging.getLogger(name)
         server_logger.handlers = []
         server_logger.propagate = True
+
+
+def get_correlation_id() -> str | None:
+    """The correlation id of the request being handled, or ``None`` outside a request."""
+    value = structlog.contextvars.get_contextvars().get(CORRELATION_ID_KEY)
+    return value if isinstance(value, str) else None
+
+
+class CorrelationIdMiddleware:
+    """Keep the caller's ``X-Correlation-Id`` (or make one), bind it to every log line and echo it back.
+
+    The gateway creates the id when a client sends none (IDP-00 ch. 7.3); a missing or malformed one is replaced
+    here so that logs and problem details always carry a usable id.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        incoming = Headers(scope=scope).get(CORRELATION_ID_HEADER, "")
+        correlation_id = incoming if _VALID_CORRELATION_ID.fullmatch(incoming) else str(new_id())
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(**{CORRELATION_ID_KEY: correlation_id})
+
+        async def send_with_correlation_id(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)[CORRELATION_ID_HEADER] = correlation_id
+            await send(message)
+
+        await self._app(scope, receive, send_with_correlation_id)

@@ -23,6 +23,7 @@ from typing import Protocol
 
 from conversion.conversion.application.commands import ConvertFileCommand
 from conversion.conversion.application.services.convert_file import ConvertFileService
+from conversion.conversion.application.services.merging import merge_into_pdf
 from conversion.conversion.domain.exceptions import OcrNotAvailableError
 from conversion.conversion.domain.formats import Format
 from conversion.conversion.domain.models import ConversionRequest
@@ -100,23 +101,10 @@ class MergeHandler:
         self._merger = merger
 
     def run(self, job: JobInput) -> JobOutput:
-        pdfs: list[Path] = []
-        for number, (path, source) in enumerate(zip(job.files, job.request.inputs, strict=True), start=1):
-            if source.format is Format.PDF:
-                pdfs.append(path)
-                continue
-            image_pdf = self._converter.convert(
-                ConvertFileCommand(
-                    source=source.format,
-                    target=Format.PDF,
-                    inputs=(path,),
-                    output_dir=job.work_dir / f"image-{number}",
-                    ocr=OcrMode.OFF,
-                )
-            )
-            pdfs.extend(image_pdf.outputs)
+        files = [(path, source.format) for path, source in zip(job.files, job.request.inputs, strict=True)]
         output = job.output_dir / MERGED_FILE_NAME
-        return JobOutput(files=(output,), page_count=self._merger.merge(pdfs, output))
+        pages = merge_into_pdf(files, self._converter, self._merger, work_dir=job.work_dir, output=output)
+        return JobOutput(files=(output,), page_count=pages)
 
 
 class PreviewHandler:

@@ -1,5 +1,6 @@
 """Model -> Word, XLSX and CSV: styles, header rows, typed sheets, table choice and size limits."""
 
+import io
 from collections.abc import Callable
 from pathlib import Path
 
@@ -8,12 +9,14 @@ import openpyxl
 import pytest
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import RGBColor
+from docx.shared import Pt, RGBColor
+from PIL import Image
 
 from conversion.conversion.domain.document_model import (
     Alignment,
     DocumentModel,
     Page,
+    Picture,
     Table,
     TextBlock,
     TextKind,
@@ -167,3 +170,46 @@ def test_reports_a_clear_error_when_the_named_page_is_missing_or_has_no_table(
 
     with pytest.raises(error):
         _write(CsvModelWriter(), Converter.MODEL_TO_CSV, R.CSV, _model_file(tmp_path, model), make_request, sheet=sheet)
+
+
+def test_writes_a_numbered_list_item_without_a_bullet_because_its_text_carries_the_number(
+    tmp_path: Path, make_request: MakeRequest
+) -> None:
+    model = DocumentModel(
+        pages=(
+            Page(
+                blocks=(
+                    TextBlock(text="1. First step", kind=TextKind.LIST_ITEM),
+                    TextBlock(text="2. Nested step", kind=TextKind.LIST_ITEM, level=2),
+                    TextBlock(text="A plain point", kind=TextKind.LIST_ITEM),
+                )
+            ),
+        )
+    )
+
+    document = docx.Document(str(_docx(tmp_path, model, make_request)))
+
+    assert [(p.style.name, p.text) for p in document.paragraphs] == [
+        ("List", "1. First step"),
+        ("List 2", "2. Nested step"),
+        ("List Bullet", "A plain point"),
+    ]
+
+
+def test_writes_a_picture_no_wider_than_the_text(tmp_path: Path, make_request: MakeRequest) -> None:
+    stream = io.BytesIO()
+    Image.new("RGB", (20, 10), "red").save(stream, format="PNG")
+    model = DocumentModel(
+        pages=(
+            Page(
+                blocks=(Picture(data=stream.getvalue(), width_pt=100), Picture(data=stream.getvalue(), width_pt=5000))
+            ),
+        )
+    )
+
+    document = docx.Document(str(_docx(tmp_path, model, make_request)))
+
+    small, wide = document.inline_shapes
+    section = document.sections[0]
+    assert small.width == Pt(100)
+    assert wide.width == section.page_width - section.left_margin - section.right_margin

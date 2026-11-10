@@ -66,8 +66,8 @@ class ConverterPort(Protocol):
 class PageReaderPort(Protocol):
     """Reads one page picture (a scanned page, or a photo) into the document model's blocks, for the scanned routes.
 
-    The model-first reader asks ai-gateway's ``page-read`` (Sumukh's approach). An OCR reader can sit behind the same
-    port later, and the route then picks one; neither knows about the other.
+    The model-first reader asks ai-gateway's ``page-read`` (Sumukh's approach); the OCR-first reader reads the text
+    with OCR and asks ``page-layout`` how it is laid out (ADR 0001). ``AI_GATEWAY__PAGE_READER`` picks one.
     """
 
     def read_page(self, image: Path, number: int, context: StepContext) -> Page:
@@ -102,6 +102,10 @@ class ObjectStoragePort(Protocol):
 
 
 class FileInspectorPort(Protocol):
+    def detect_format(self, path: Path) -> Format | None:
+        """The file's real format from its content, never its name (FIL-03); ``None`` when it is none we read."""
+        ...
+
     def is_scanned_pdf(self, path: Path) -> bool:
         """``True`` when the PDF has no text layer, so its text can only be read with OCR (IDP-03 ch. 3.4)."""
         ...

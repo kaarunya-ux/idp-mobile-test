@@ -217,3 +217,45 @@ class GenericReadAnswer(_Answer):
                 "fields": fields,
             }
         )
+
+
+# --- page-layout: a page's structure over OCR's numbered lines (conversion's OCR-first reading, ADR 0006) ----------
+
+# one block's lines: llama-server can't build its grammar from a list of more than 1000 items ("failed to parse
+# grammar", measured on the 35B); a page still sends up to 2000 lines, in several blocks
+_MAX_BLOCK_LINES = 1000
+
+
+class LayoutTextBlock(_Answer):
+    kind: Literal["heading", "paragraph", "list", "caption"]
+    lines: list[int] = Field(max_length=_MAX_BLOCK_LINES)  # OCR line numbers, in reading order
+    align: Literal["left", "center", "right"] = "left"
+    size: Literal["large", "normal", "small"] = "normal"
+    bold: bool = False
+
+
+class LayoutTableBlock(_Answer):
+    kind: Literal["table"]
+    has_header: bool = False
+    rows: list[list[list[int]]] = Field(max_length=_MAX_TABLE_ROWS)  # rows of cells; a cell is its line numbers
+
+
+class PageLayoutAnswer(_Answer):
+    blocks: list[Annotated[LayoutTextBlock | LayoutTableBlock, Field(discriminator="kind")]] = Field(
+        max_length=_MAX_BLOCKS
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _kind_when_missing(cls, data: Any) -> Any:
+        """A block without its ``kind`` is a table when it has rows, else a paragraph (a host that enforces no schema
+        lets a small model leave it out, as for page-read)."""
+        if not isinstance(data, dict) or not isinstance(data.get("blocks"), list):
+            return data
+        blocks = [
+            {**block, "kind": "table" if "rows" in block else "paragraph"}
+            if isinstance(block, dict) and "kind" not in block
+            else block
+            for block in data["blocks"]
+        ]
+        return {**data, "blocks": blocks}

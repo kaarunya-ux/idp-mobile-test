@@ -18,6 +18,7 @@ from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_layout import ReadLayoutService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
 from ai_gateway.ai.domain.models import ModelRole, Plan, Task
@@ -46,6 +47,7 @@ class AiServices:
     suggest: SuggestTemplateService
     read_page: ReadPageService
     read_document: ReadDocumentService
+    read_layout: ReadLayoutService
 
 
 @dataclass(slots=True, kw_only=True)
@@ -100,6 +102,7 @@ def build(settings: Settings, clock: Clock) -> Container:
             Task.PAGE_ANALYSIS: model.timeouts.page_analysis.total_seconds(),
             Task.TEMPLATE_SUGGEST: model.timeouts.template_suggest.total_seconds(),
             Task.PAGE_READ: model.timeouts.page_read.total_seconds(),
+            Task.PAGE_LAYOUT: model.timeouts.page_layout.total_seconds(),
             Task.GENERIC_READ: model.timeouts.generic_read.total_seconds(),
         },
     )
@@ -119,6 +122,9 @@ def build(settings: Settings, clock: Clock) -> Container:
             runner=runner, images=images, prompts=prompts, max_side_px=model.page_read_max_side_px
         ),
         read_document=ReadDocumentService(runner=runner, images=images, prompts=prompts),
+        read_layout=ReadLayoutService(
+            runner=runner, images=images, prompts=prompts, max_side_px=model.page_read_max_side_px
+        ),
     )
     return Container(ai=services, http=http, redis=redis, page_http=page_http)
 

@@ -1,9 +1,11 @@
 """The scanned-PDF check that sends a file to OCR, and the page counts reported as usage."""
 
+import zipfile
 from pathlib import Path
 
 import pikepdf
 import pptx
+import pytest
 from pikepdf import Dictionary, Name
 
 from conversion.conversion.domain.formats import Format
@@ -44,3 +46,41 @@ def test_counts_pages_of_pdfs_slides_and_images_but_not_sheets(tmp_path: Path) -
     assert inspector.count_pages(deck, Format.PPTX) == 2
     assert inspector.count_pages(tmp_path / "x.png", Format.PNG) == 1
     assert inspector.count_pages(tmp_path / "x.csv", Format.CSV) is None
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (b"%PDF-1.7 made up", Format.PDF),
+        (b"\xff\xd8\xff\xe0 made up", Format.JPEG),
+        (b"\x89PNG\r\n\x1a\n made up", Format.PNG),
+        (b"name,amount\nTest A,12.50\n", Format.CSV),
+        (b"", None),
+        (b"\x00\x01\x02 binary", None),
+        (b"PK\x03\x04 not really a zip", None),
+    ],
+)
+def test_detects_the_format_from_the_content_whatever_the_file_is_called(
+    tmp_path: Path, content: bytes, expected: Format | None
+) -> None:
+    path = tmp_path / "report.docx"  # a name that lies
+    path.write_bytes(content)
+
+    assert PdfiumFileInspector().detect_format(path) is expected
+
+
+@pytest.mark.parametrize(
+    ("part", "expected"),
+    [
+        ("word/document.xml", Format.DOCX),
+        ("xl/workbook.xml", Format.XLSX),
+        ("ppt/presentation.xml", Format.PPTX),
+        ("something/else.xml", None),
+    ],
+)
+def test_detects_an_office_file_by_the_main_part_in_its_zip(tmp_path: Path, part: str, expected: Format | None) -> None:
+    path = tmp_path / "upload"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(part, "<made-up/>")
+
+    assert PdfiumFileInspector().detect_format(path) is expected

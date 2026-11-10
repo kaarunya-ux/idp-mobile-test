@@ -186,3 +186,55 @@ class AiLimitReachedError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("Converting scanned documents is limited per day; this account has reached today's limit.")
+
+
+class FileTooLargeError(DomainError):
+    """Over the synchronous route's size or pages (ADR 0002). Reported as ``CNV-413-FILE-001``: send it as a job."""
+
+    code = ErrorCode.FILE_TOO_LARGE
+    title = "Too large to convert while waiting"
+
+
+class FileTypeUnsupportedError(DomainError):
+    """The content is none of the formats this service reads (FIL-03). Reported as ``CNV-415-FILE-001``."""
+
+    code = ErrorCode.FILE_TYPE_UNSUPPORTED
+    title = "File type not supported"
+
+    def __init__(self) -> None:
+        super().__init__("The file is not a PDF, Word, Excel, PowerPoint, CSV, PNG or JPEG file.")
+
+
+class BusyError(DomainError):
+    """Every synchronous slot is taken (ADR 0002). Reported as ``CNV-429-BUSY-001``: send it as a job."""
+
+    code = ErrorCode.BUSY
+    title = "Busy"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("Conversion is busy right now. Send the file as a job instead.")
+
+
+class NeedsReadingError(DomainError):
+    """The synchronous route reads a scan or photo only when this build has a reader, and a scan only up to
+    ``SYNC__MAX_READ_PAGES`` pages (ADR 0002). Reported as ``CNV-422-SYNC-001``: send it as a job."""
+
+    code = ErrorCode.NEEDS_READING
+    title = "Needs a job"
+
+    def __init__(
+        self, detail: str = "This is a scan or a picture, so its text has to be read. Send it as a job instead."
+    ) -> None:
+        super().__init__(detail)
+
+
+class NoAccountError(DomainError):
+    """A photo's reading is counted on an account (ai-gateway's daily limit), and the token has none: platform staff,
+    or a user still onboarding. Reported as ``CNV-403-AUTH-001``."""
+
+    code = ErrorCode.FORBIDDEN
+    title = "Not allowed"
+
+    def __init__(self) -> None:
+        super().__init__("Reading a picture's text needs a signed-in account.")

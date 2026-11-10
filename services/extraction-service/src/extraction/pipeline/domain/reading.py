@@ -19,6 +19,7 @@ _COLUMN_GAP = 0.04  # page fraction of empty space that separates two columns on
 _LINE_TOLERANCE = 0.6  # pieces whose centres are this many text heights apart or less share a line
 _CAPTION_MARGIN = 0.03  # page fraction a block may reach left of its caption
 _BELOW_MIN = 0.5  # a line "below a label" starts at least this many label heights under the label's top
+_WHOLE_PAGE = Box(x=0.0, y=0.0, width=1.0, height=1.0)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -74,6 +75,11 @@ def read_field(
     Words inside any ``skip`` box (text already read as another field) are left out. ``page_aspect`` is the page's
     width over height in pixels, used to tell sideways text from a short caption.
     """
+    if definition.clip_to_box:
+        reading = _in_drawn_box(definition, words, box, skip=skip, today=today)
+        if reading is not None or definition.value_after is None:
+            return reading
+        box = _WHOLE_PAGE  # the drawn box holds nothing: the value after its label, wherever it is
     inside = [w for w in words if _inside(w.box, box) and not any(_inside(w.box, hidden) for hidden in skip)]
     if definition.value_after is not None:
         return _after_label(definition, inside, today=today)
@@ -91,12 +97,57 @@ def read_field(
     if not inside:
         return None
     candidates = [*lines, inside] if len(lines) > 1 else lines
+    return _best(definition, candidates, today=today)
+
+
+def _best(definition: FieldDefinition, candidates: Sequence[Sequence[OcrWord]], *, today: date) -> Reading | None:
+    """The first group whose text satisfies the field's rule, else the one the engine was surest of."""
     readings = [reading for group in candidates if (reading := _candidate(definition, group)) is not None]
     for reading in readings:
         normalized = normalize_value(reading.text, definition.normalize, pattern=definition.rule.pattern)
         if apply_rule(definition.rule, normalized, today=today).passed:
             return reading
     return max(readings, key=lambda reading: reading.confidence, default=None)
+
+
+def _in_drawn_box(
+    definition: FieldDefinition, words: Sequence[OcrWord], box: Box, *, skip: Sequence[Box], today: date
+) -> Reading | None:
+    """The text inside a box drawn around the value: all its lines together, top to bottom, else one line. A piece
+    crossing the box's edge keeps only its words inside it, so neither the label before the value nor the next
+    column's text after it is read."""
+    kept = [
+        clipped
+        for word in words
+        if not any(_inside(word.box, hidden) for hidden in skip) and (clipped := _clipped(word, box)) is not None
+    ]
+    lines = _visual_lines(kept)
+    if not lines:
+        return None
+    every = [word for line in lines for word in line]
+    return _best(definition, [every, *lines] if len(lines) > 1 else lines, today=today)
+
+
+def _clipped(word: OcrWord, box: Box) -> OcrWord | None:
+    """The part of ``word`` inside ``box``: none unless its middle is within the box's height, then its words whose
+    middle is within the box's width, each letter taken as equally wide (an engine gives one box per piece). A word
+    ends at a space or after a colon, as a label runs into its value with no space ("ID:24AB")."""
+    _, middle = _centre(word.box)
+    if not box.y <= middle <= box.y + box.height:
+        return None
+    step = word.box.width / max(len(word.text), 1)
+    spans = [
+        (found.start(), found.end())
+        for found in re.finditer(r"[^\s:]+:?|:", word.text)
+        if box.x <= word.box.x + step * (found.start() + found.end()) / 2 <= box.x + box.width
+    ]
+    if not spans:
+        return None
+    start, end = spans[0][0], spans[-1][1]
+    if (start, end) == (0, len(word.text)):
+        return word
+    part = Box(x=word.box.x + step * start, y=word.box.y, width=step * (end - start), height=word.box.height)
+    return replace(word, text=word.text[start:end], box=part)
 
 
 def _is_sideways(box: Box, page_aspect: float) -> bool:
@@ -157,11 +208,17 @@ def _after_label(definition: FieldDefinition, words: list[OcrWord], *, today: da
     _, label_y = _centre(piece.box)
     line_height = piece.box.height
     on_line = (w for w in words if w is not piece and abs(_centre(w.box)[1] - label_y) <= line_height / 2)
-    same_line = [replace(piece, text=rest)] if rest else []
-    same_line += sorted((w for w in on_line if w.box.x >= piece.box.x), key=lambda w: w.box.x)
+    right = sorted((w for w in on_line if w.box.x >= piece.box.x), key=lambda w: w.box.x)
+    # from where the value starts (after the label, or the first piece right of it, however far) up to the first
+    # column gap: text beyond it is the next column's, not this value's
+    if rest:
+        same_line = [replace(piece, text=rest), *_split_at_gaps([piece, *right])[0][1:]]
+    else:
+        same_line = _split_at_gaps(right)[0] if right else []
     lower = piece.box.y + line_height * _BELOW_MIN
     left = piece.box.x - _CAPTION_MARGIN
-    next_line = _nearest_line([w for w in words if w.box.y >= lower and _centre(w.box)[0] >= left])
+    below = _nearest_line([w for w in words if w.box.y >= lower and _centre(w.box)[0] >= left])
+    next_line = _split_at_gaps(below)[0] if below else []
     for group in (same_line, next_line):
         if not group:
             continue

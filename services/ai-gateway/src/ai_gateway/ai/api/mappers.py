@@ -15,9 +15,11 @@ from ai_gateway.ai.api.schemas import (
     GenericReadResponse,
     GenericTableBody,
     ImageRefBody,
+    LayoutBlockBody,
     PageAnalysisBody,
     PageAnalysisResponse,
     PageBlockBody,
+    PageLayoutResponse,
     PageReadResponse,
     SuggestedColumnBody,
     SuggestedFieldBody,
@@ -29,7 +31,9 @@ from ai_gateway.ai.application.answer_models import (
     ClassifyAnswer,
     GenericReadAnswer,
     GenericTable,
+    LayoutTableBlock,
     PageAnalysisAnswer,
+    PageLayoutAnswer,
     PageReadAnswer,
     PageTableBlock,
     TemplateSuggestAnswer,
@@ -138,3 +142,13 @@ def to_generic_read_response(answer: Answer[GenericReadAnswer]) -> GenericReadRe
         fields=fields,
         **_provenance(answer.provenance),
     )
+
+
+def to_page_layout_response(answer: Answer[PageLayoutAnswer]) -> PageLayoutResponse:
+    blocks = [
+        LayoutBlockBody(kind=b.kind, has_header=b.has_header, rows=b.rows)
+        if isinstance(b, LayoutTableBlock)
+        else LayoutBlockBody(kind=b.kind, lines=b.lines, align=b.align, size=b.size, bold=b.bold)
+        for b in answer.value.blocks
+    ]
+    return PageLayoutResponse(blocks=blocks, **_provenance(answer.provenance))

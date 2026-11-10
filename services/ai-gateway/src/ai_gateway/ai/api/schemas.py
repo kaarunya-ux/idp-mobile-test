@@ -260,3 +260,39 @@ class GenericReadResponse(_ProvenanceBody):
     document_type: str | None  # a lower snake_case code such as "aadhaar", or null when the model couldn't tell
     document_confidence: float | None
     fields: list[GenericFieldBody]
+
+
+class OcrLineBody(_Body):
+    """One line an OCR engine read: its number (unique on the page), its text and where it is."""
+
+    n: int = Field(ge=0, le=100_000)
+    text: str = Field(min_length=1, max_length=500)
+    box: Box  # x, y, width, height as fractions of the page
+
+
+class PageLayoutRequest(CallerBody):
+    page: ImageRefBody | None = None  # without it, the model lays the page out from the lines and their boxes alone
+    lines: list[OcrLineBody] = Field(min_length=1, max_length=2000)
+
+    @field_validator("lines")
+    @classmethod
+    def _unique_numbers(cls, lines: list[OcrLineBody]) -> list[OcrLineBody]:
+        if len({line.n for line in lines}) != len(lines):
+            raise ValueError("line numbers must be unique")
+        return lines
+
+
+class LayoutBlockBody(_Body):
+    """A text block (``kind``, ``lines``, ``align``, ``size``, ``bold``) or a table (``hasHeader``, ``rows``)."""
+
+    kind: str
+    lines: list[int] | None = None
+    align: str | None = None
+    size: str | None = None
+    bold: bool | None = None
+    has_header: bool | None = None
+    rows: list[list[list[int]]] | None = None
+
+
+class PageLayoutResponse(_ProvenanceBody):
+    blocks: list[LayoutBlockBody]

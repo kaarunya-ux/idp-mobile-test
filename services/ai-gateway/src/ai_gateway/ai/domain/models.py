@@ -13,6 +13,7 @@ class Task(StrEnum):
     PAGE_ANALYSIS = "page-analysis"
     TEMPLATE_SUGGEST = "template-suggest"
     PAGE_READ = "page-read"  # a whole page as blocks, for conversion-service's scanned routes
+    PAGE_LAYOUT = "page-layout"  # a page's structure over OCR's lines, for conversion's OCR-first reading
     GENERIC_READ = "generic-read"  # any document, every field it shows: extraction's synchronous path (ADR 0003)
 
 

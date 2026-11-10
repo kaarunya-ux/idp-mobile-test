@@ -6,7 +6,9 @@ Every environment variable is listed in README.md (CFG-05). Nested groups use a 
 
 from datetime import timedelta
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -53,6 +55,9 @@ class OfficeSettings(BaseModel):
 
     binary: str = Field("soffice", min_length=1, max_length=255)
     timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=5), le=timedelta(minutes=10))
+    # one LibreOffice kept started ahead of each document, per process: about 0.3 s a document instead of 3 s, for about
+    # 100 MB. On for the synchronous route (ADR 0002), where someone is waiting; not worth it for queued jobs
+    keep_warm: bool = False
 
 
 class DatabaseSettings(BaseModel):
@@ -121,6 +126,58 @@ class AiGatewaySettings(BaseModel):
     # pages read at the same time: the page model's parallel slots (llama-server -np 4). One at a time, a 3-page scan
     # took 47 s on the 35B; all three at once, 26 s
     page_concurrency: int = Field(4, ge=1, le=32)
+    # how a page is read (ADR 0001): "model", the page model writes the page's text and its layout (page-read);
+    # "ocr_layout", OCR reads the text on this machine and the page model only says how the lines are laid out
+    # (page-layout), by their numbers. "model" until the two are compared on real scans
+    page_reader: Literal["model", "ocr_layout"] = "model"
+    # ocr_layout: send the page picture with the OCR lines. false: the lines alone, a page in 12 to 18 s not 36 to 42
+    layout_sends_page: bool = True
+
+
+class OcrSettings(BaseModel):
+    """The OCR models for ``AI_GATEWAY__PAGE_READER=ocr_layout`` (ML-01, ML-06): extraction's PP-OCRv6 small, on the
+    CPU. Loaded on a worker's first scanned page, not at startup, so the other workers never hold them."""
+
+    models_dir: Path = Path("models")
+    models_file: Path = Path("models.yaml")
+    # pages are read four at a time (AI_GATEWAY__PAGE_CONCURRENCY), so more threads per page only fight over the
+    # cores; 2 is extraction's measured setting
+    threads: int = Field(2, ge=1, le=64)
+
+
+class SyncSettings(BaseModel):
+    """``POST /api/v1/convert`` and ``/merge`` of the ``conversion-sync`` process (ADR 0002): files converted while the
+    caller waits, by the libraries, and a scan or photo to a document read through ai-gateway. The backend chooses
+    between this and the queued way and decides how much to send, so these are only the ceilings that protect the
+    machine (FIL-05); pages are limited by ``LIMITS__MAX_PAGES``, as on the queued way."""
+
+    max_file_size: ByteSize = ByteSize(200 * 1024 * 1024)  # each file, as STORAGE__MAX_INPUT_SIZE on the queued way
+    max_total_size: ByteSize = ByteSize(1024 * 1024 * 1024)  # all of one request's files together
+    max_files: int = Field(200, ge=1, le=200)  # as MAX_INPUTS on the queued way
+    max_concurrent: int = Field(4, ge=1, le=32)  # worker processes; one more request is told busy (429) at once
+    # false lets a request in without a token (integration testing, as extraction's ADR 0011). A request that does send
+    # a token is still checked
+    require_token: bool = True
+    # a scanned PDF with more pages to read goes as a job (CNV-422-SYNC-001): the model reads about 4 pages each 15 s
+    max_read_pages: int = Field(5, ge=1, le=50)
+    # the account a tokenless request's reading is counted on; without one, a scan or photo answers CNV-403-AUTH-001
+    default_account_id: UUID | None = None
+
+
+class IssuerSettings(BaseModel):
+    """One token issuer the route trusts (IDP-01 ch. 2)."""
+
+    issuer: HttpUrl  # the token's iss claim, exactly
+    jwks_url: HttpUrl
+
+
+class AuthSettings(BaseModel):
+    """Bearer token verification (SEC-01). Without issuers, every token is refused."""
+
+    issuers: list[IssuerSettings] = Field(default_factory=list, max_length=5)
+    audience: str = Field("idp-api", min_length=1, max_length=128)  # IDP-01: aud=idp-api
+    jwks_cache: timedelta = Field(timedelta(minutes=10), ge=timedelta(minutes=1), le=timedelta(hours=24))
+    leeway: timedelta = Field(timedelta(seconds=30), ge=timedelta(0), le=timedelta(minutes=5))  # clock skew
 
 
 class ServiceAuthSettings(BaseModel):
@@ -152,6 +209,9 @@ class Settings(BaseSettings):
     crypto: CryptoSettings = Field(default_factory=CryptoSettings)
     outbox: OutboxSettings = Field(default_factory=OutboxSettings)
     ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
+    sync: SyncSettings = Field(default_factory=SyncSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
     service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
     # No defaults: credentials never live in code (CFG-03). Only the processes that use a group require it, so the
     # health server and unit tests run without them; ``require_*`` stops a worker at startup instead.

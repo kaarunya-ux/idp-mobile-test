@@ -1,6 +1,7 @@
 # 13. Custom templates: the keys come with each request; we store nothing
 
-Status: Accepted · Date: 2026-11-04 · Deciders: Python team lead (Prakyath), with the backend team
+Status: Accepted · Date: 2026-11-04, amended 2026-11-07 (boxes) · Deciders: Python team lead (Prakyath), with the
+backend team
 
 ## Context
 
@@ -12,15 +13,21 @@ them with each request.
 ## Decision
 
 1. **The backend sends the keys with each request** (`POST /api/v1/extract/custom`, multipart `file`, optional `back`,
-   and `fields`: a JSON list of `{key, label, type}`, type `text`, `date` or `number`, 1 to 50 keys). We store nothing;
-   no shared database (DB-01: never read another service's tables).
-2. **OCR first, by label.** A template is built from the keys for that request: each field is found by its label
-   where the label opens a piece of text, and its value is the text after the label on its line, or the line below.
-   When the label isn't on the page, OCR reads nothing for it (it never guesses from the rest of the page). Both
-   engines must agree, as for any field; dates and numbers are checked as such.
-3. **The AI for what OCR leaves unsure**, in one call, with the labels; the usual limit of ten unsure fields (a sign of
+   and `fields`: a JSON list of `{key, label, type, box}`, type `text`, `date` or `number`, 1 to 50 keys). We store
+   nothing; no shared database (DB-01: never read another service's tables).
+2. **OCR first, inside the box when there is one.** `box` (optional, added 2026-11-07) is the rectangle the user drew
+   around the value on the sample, as the template designer stores it: `{page, x, y, w, h}` in percent of the page,
+   top-left corner and size; `page` is 1, as fields are read on the first page. A key with a box is read from the
+   words inside it, widened by 0.5% of the page left and right and 1% above and below; a piece of text crossing the
+   box's edge keeps only its words inside, so the label before the value and the next column after it are left out.
+3. **By label, when there is no box or the box holds nothing** (the document printed elsewhere than the sample): the
+   field is found by its label where the label opens a piece of text, and its value is the text after the label on
+   its line up to the first column gap (4% of the page's width), or the line below. When the label isn't on the page,
+   OCR reads nothing for it (it never guesses from the rest of the page). Both engines must agree, as for any field;
+   dates and numbers are checked as such.
+4. **The AI for what OCR leaves unsure**, in one call, with the labels; the usual limit of ten unsure fields (a sign of
    a bad photo on a standard card) does not apply, since an unprinted label is normal on a custom document.
-4. **Standard documents stay ours** (PAN, Aadhaar, DL: our templates in our database, identified by their keywords):
+5. **Standard documents stay ours** (PAN, Aadhaar, DL: our templates in our database, identified by their keywords):
    the backend sends only the file.
 
 ## Consequences
@@ -31,4 +38,11 @@ them with each request.
 - Dates are checked in numeric formats (dd/MM/yyyy, dd-MM-yyyy, dd.MM.yyyy, yyyy-MM-dd); a date printed with a month
   name goes to the AI.
 - A label printed differently from what the user typed ("USCIS#" for "Card number") is not found by OCR; the AI reads
-  it. Aliases per key would be the next step, if needed.
+  it, and may pick the wrong value (a made-up invoice: the buyer's phone for "Seller phone"). A box avoids both: that
+  key was read right by OCR alone.
+- Until 2026-11-07 the value was the rest of the label's line, so on a two-column document it ran into the next column
+  ("GSTIN 32A... Transport ID 24B..."), at 99% confidence: both engines read the same wrong text. The column gap and
+  the box fix that; confidence still says the engines agree, not that the value is the right one.
+- Not yet: lining a page up with the sample by its printed words (the designer's `fixedWords`), which would need
+  where those words sit on the sample, and per-key regex rules. A box on a document printed shifted from the sample
+  falls back to the label.
