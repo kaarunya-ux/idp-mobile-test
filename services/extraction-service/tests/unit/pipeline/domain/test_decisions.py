@@ -2,7 +2,14 @@ from datetime import date
 
 import pytest
 
-from extraction.pipeline.domain.decisions import FieldSource, FieldStatus, Thresholds, apply_mask, decide_field
+from extraction.pipeline.domain.decisions import (
+    FieldSource,
+    FieldStatus,
+    Thresholds,
+    apply_mask,
+    decide_field,
+    decide_with_ai,
+)
 from extraction.pipeline.domain.reading import Reading
 from extraction.pipeline.domain.standard_templates import AADHAAR_CARD, PAN_CARD
 from extraction.pipeline.domain.template import Mask
@@ -95,3 +102,37 @@ def test_aadhaar_number_is_masked_everywhere() -> None:
 def test_masking_keeps_separators_and_the_last_characters() -> None:
     decision = decide(PAN, A=read("ABCPE1234F"), B=read("ABCPE1234F"))
     assert apply_mask(decision, Mask(keep_last=2)).value == "XXXXXXXX4F"
+
+
+AADHAAR = next(f for f in AADHAAR_CARD.fields if f.key == "aadhaar_number")
+AADHAAR_VALID = "2345 6789 1008"  # made up; passes the Verhoeff check digit
+AADHAAR_WRONG_SUM = "2345 6789 1009"  # made up; one digit off
+
+
+def _ocr_left_it_empty(definition):  # type: ignore[no-untyped-def]
+    return decide(definition, A=None, B=None)
+
+
+def test_masks_an_aadhaar_number_in_every_reading_when_the_ai_value_is_accepted() -> None:
+    decided = decide_with_ai(AADHAAR, _ocr_left_it_empty(AADHAAR), AADHAAR_VALID, confidence=0.8, today=TODAY)
+
+    assert decided.status is FieldStatus.ACCEPTED
+    assert decided.value == "XXXX XXXX 1008"
+    assert decided.readings["ai"] == "XXXX XXXX 1008"
+
+
+def test_masks_an_aadhaar_number_the_rule_rejects_when_the_ai_reading_is_kept_for_the_reviewer() -> None:
+    """The PII golden set found the full number in readings["ai"] on this path."""
+    decided = decide_with_ai(AADHAAR, _ocr_left_it_empty(AADHAAR), AADHAAR_WRONG_SUM, confidence=0.8, today=TODAY)
+
+    assert decided.status is FieldStatus.NEEDS_REVIEW
+    assert decided.value is None
+    assert decided.readings["ai"] == "XXXX XXXX 1009"
+    assert "2345 6789" not in str(decided)
+
+
+def test_keeps_a_rejected_value_as_read_when_the_field_has_no_mask_policy() -> None:
+    decided = decide_with_ai(PAN, _ocr_left_it_empty(PAN), "AAPKZ1234L", confidence=0.8, today=TODAY)
+
+    assert decided.status is FieldStatus.NEEDS_REVIEW
+    assert decided.readings["ai"] == "AAPKZ1234L"  # no mask is set for PAN (IDP-00: which cards mask is a decision)

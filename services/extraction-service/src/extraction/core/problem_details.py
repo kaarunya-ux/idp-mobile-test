@@ -18,7 +18,7 @@ from extraction.core.clock import Clock
 from extraction.core.error_codes import ErrorCode
 from extraction.core.errors import DomainError
 from extraction.core.ids import new_id
-from extraction.core.logging import get_correlation_id
+from extraction.core.logging import get_correlation_id, mask_personal_data_in
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 _UNKNOWN_FIELD = "(request)"
@@ -81,7 +81,8 @@ def register_exception_handlers(app: FastAPI, clock: Clock) -> None:
         if not isinstance(exc, RequestValidationError):
             raise exc
         problems = tuple(
-            FieldProblem(field=_describe_location(error["loc"]), message=str(error["msg"])) for error in exc.errors()
+            FieldProblem(field=_describe_location(error["loc"]), message=mask_personal_data_in(str(error["msg"])))
+            for error in exc.errors()
         )
         return respond(
             code=ErrorCode.REQUEST_INVALID,
