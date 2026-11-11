@@ -8,53 +8,38 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 
 | All | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| every field | 588 | 89% | 84% | **58** | 0 | 9 | 0% |
+| every field | 588 | 89% | 84% | **12** | 46 | 9 | 15% |
 
 ## Per field
 
 | Field | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
 | aadhaar_number | 98 | 98% | 98% | **2** | 0 | 0 | 0% |
-| name | 98 | 96% | 95% | **4** | 0 | 0 | 0% |
+| name | 98 | 96% | 95% | **0** | 4 | 0 | 27% |
 | dob | 98 | 99% | 99% | **1** | 0 | 0 | 0% |
 | gender | 98 | 100% | 79% | **0** | 0 | 0 | 0% |
-| pincode | 98 | 81% | 81% | **17** | 0 | 2 | 0% |
-| address | 98 | 58% | 53% | **34** | 0 | 7 | 0% |
+| pincode | 98 | 81% | 81% | **0** | 17 | 2 | 21% |
+| address | 98 | 58% | 53% | **9** | 25 | 7 | 44% |
 
 ## Per defect
 
 | Defect | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| angle (20 cards) | 120 | 90% | 88% | **8** | 0 | 4 | 0% |
-| clean (10 cards) | 60 | 100% | 100% | **0** | 0 | 0 | 0% |
-| crop (16 cards) | 96 | 88% | 83% | **10** | 0 | 2 | 0% |
-| faded (16 cards) | 96 | 94% | 91% | **5** | 0 | 1 | 0% |
-| glare (16 cards) | 96 | 79% | 75% | **15** | 0 | 5 | 0% |
-| lowres (16 cards) | 96 | 93% | 90% | **7** | 0 | 0 | 0% |
-| strong_blur (20 cards) | 120 | 68% | 52% | **38** | 0 | 0 | 0% |
-| table (16 cards) | 96 | 91% | 86% | **9** | 0 | 0 | 0% |
+| angle (20 cards) | 120 | 90% | 88% | **0** | 8 | 4 | 12% |
+| clean (10 cards) | 60 | 100% | 100% | **0** | 0 | 0 | 13% |
+| crop (16 cards) | 96 | 88% | 83% | **4** | 6 | 2 | 11% |
+| faded (16 cards) | 96 | 94% | 91% | **1** | 4 | 1 | 8% |
+| glare (16 cards) | 96 | 79% | 75% | **6** | 9 | 5 | 17% |
+| lowres (16 cards) | 96 | 93% | 90% | **3** | 4 | 0 | 6% |
+| strong_blur (20 cards) | 120 | 68% | 52% | **1** | 37 | 0 | 50% |
+| table (16 cards) | 96 | 91% | 86% | **1** | 8 | 0 | 12% |
 
 ## Wrong and ACCEPTED
 
-58 fields, shown up to 30:
+12 fields, shown up to 30:
 
 | Card | Defects | Field | Read | Printed |
 |---|---|---|---|---|
-| A19 | strong_blur | pincode | 505017 | 505657 |
-| A19 | strong_blur | address | O-1, Sample Nagar, Tootpur, Karnataka 505017 | O-1, Sample Nagar, Testpur, Karnataka 505657 |
-| A20 | strong_blur | address | Block G, 101, Charmor Layout, Sampigeppa, Haryana 990100 | Block O, 101, Clarmor Layout, Samplegarh, Haryana 990100 |
-| A21 | strong_blur | address | 1/10, Dena Colony, Sampleparth, Maryana 342131 | 1/10, Demo Colony, Samplegarh, Haryana 342131 |
-| A22 | strong_blur | address | 101, Clamor Layout, Samplegah, Meryana 677905 | 101, Clarmor Layout, Samplegarh, Haryana 677905 |
-| A23 | strong_blur | pincode | 410004 | 610084 |
-| A23 | strong_blur | address | Plot 10, Dalhousie Park, Delhi, Chandigarh 410004 | Plot 10, Dollclark Park, Dolmahal, Chandigarh 610084 |
-| A24 | strong_blur | address | Plot 18, Dena Colony, Samplepark, Naryana 101021 | Plot 10, Demo Colony, Samplegarh, Haryana 101021 |
-| A25 | strong_blur | pincode | 400099 | 606999 |
-| A25 | strong_blur | address | 88, Demo Colony, Wockabad, Maharashtra 400099 | 88, Demo Colony, Mockabad, Maharashtra 606999 |
-| A26 | strong_blur | pincode | 390015 | 390855 |
-| A26 | strong_blur | address | Plot 10, Charnor Layout, Samplepark, Haryana 390015 | Plot 10, Clarmor Layout, Samplegarh, Haryana 390855 |
-| A35 | glare | address | O-1, Omkar, Testpur, Karnataka 112990 | O-1, Dollclark Park, Testpur, Karnataka 112990 |
-| A36 | glare | name | Kavita Markar | Kamal Clarkar |
-| A37 | glare | name | Marnik Demoi | Marnik Demoji |
 | A37 | glare | address | 0-1, Dollclark Park, Demopet, Chandigarh 549701 | O-1, Dollclark Park, Demopet, Chandigarh 549701 |
 | A38 | glare | aadhaar_number | XXXX XXXX0333 | XXXX XXXX 0333 |
 | A42 | glare | dob | 07/06/1995 | 07/06/1993 |
@@ -63,13 +48,10 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 | A55 | crop | address | O-1, Mock Enclave, Clarpu Karnataka 651370 | O-1, Mock Enclave, Clarpur, Karnataka 651370 |
 | A58 | crop | address | 101, Sample Nagar, Mockaba Maharashtra 769905 | 101, Sample Nagar, Mockabad, Maharashtra 769905 |
 | A61 | table | address | 0-1, Sample Nagar, Demopet, Chandigarh 594311 | O-1, Sample Nagar, Demopet, Chandigarh 594311 |
-| A64 | table | address | Lane 11, Dollclark Park, Testpur, Karnataka | Lane 11, Dollclark Park, Testpur, Karnataka 106921 |
-| A67 | angle, strong_blur | pincode | 400058 | 302898 |
-| A67 | angle, strong_blur | address | O-1, Sample Nagar, Wockhardt, Maharashtra 400058 | O-1, Sample Nagar, Mockabad, Maharashtra 302898 |
-| A69 | angle, glare | name | Karan Fakep. | Karan Fakepatil |
-| A73 | strong_blur, faded | pincode | 144028 | 314028 |
-| A73 | strong_blur, faded | address | O-L. Demo Colony, Demopet, Chandigarh 144028 | O-1, Demo Colony, Demopet, Chandigarh 314028 |
-| A74 | strong_blur, glare | pincode | 570001 | 570886 |
+| A78 | faded, glare | address | Block 0, l0l, Demo Colony, Dolmahal, Chandigarh 108281 | Block O, 101, Demo Colony, Dolmahal, Chandigarh 108281 |
+| A82 | glare, lowres | address | Lane 11, Clarmor Layout, Maharashtra 224836 | Lane 11, Clarmor Layout, Mockabad, Maharashtra 224836 |
+| A85 | lowres, crop | address | Block O, 101, Old Cloth Mark Clarpur, Karnataka 586133 | Block O, 101, Old Cloth Market, Clarpur, Karnataka 586133 |
+| A95 | strong_blur, glare | aadhaar_number | XXXX XXXX5579 | XXXX XXXX 5579 |
 
 ## Cards with a wrong check digit (2)
 
@@ -82,6 +64,6 @@ Right outcome for the Aadhaar number: NEEDS_REVIEW (or no value) and still maske
 | dob | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
 | gender | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
 | pincode | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
-| address | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
+| address | 2 | 100% | 100% | **0** | 0 | 0 | 100% |
 
-Time per card: median 5.6 s, slowest 15.0 s.
+Time per card: median 5.1 s, slowest 9.6 s.

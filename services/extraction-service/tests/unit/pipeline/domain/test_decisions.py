@@ -131,6 +131,29 @@ def test_masks_an_aadhaar_number_the_rule_rejects_when_the_ai_reading_is_kept_fo
     assert "2345 6789" not in str(decided)
 
 
+@pytest.mark.parametrize(
+    ("key", "ai_value"),
+    [("address", "12, Sample Nagar, Testpur, Haryana 123456"), ("pincode", "123456"), ("name", "Asha Demo")],
+)
+def test_needs_review_when_only_the_ai_read_a_field_whose_rule_checks_the_shape(key: str, ai_value: str) -> None:
+    """The Aadhaar accuracy set: on blurred cards the AI guessed addresses and pincodes that passed the rule."""
+    definition = next(f for f in AADHAAR_CARD.fields if f.key == key)
+
+    decided = decide_with_ai(definition, _ocr_left_it_empty(definition), ai_value, confidence=0.8, today=TODAY)
+
+    assert decided.status is FieldStatus.NEEDS_REVIEW
+    assert decided.value == ai_value
+    assert decided.source is FieldSource.AI
+
+
+def test_accepts_an_ai_value_when_the_rule_checks_it() -> None:
+    dob = next(f for f in AADHAAR_CARD.fields if f.key == "dob")
+
+    decided = decide_with_ai(dob, _ocr_left_it_empty(dob), "01/02/1990", confidence=0.8, today=TODAY)
+
+    assert decided.status is FieldStatus.ACCEPTED
+
+
 def test_keeps_a_rejected_value_as_read_when_the_field_has_no_mask_policy() -> None:
     decided = decide_with_ai(PAN, _ocr_left_it_empty(PAN), "AAPKZ1234L", confidence=0.8, today=TODAY)
 
