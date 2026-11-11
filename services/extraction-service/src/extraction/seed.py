@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 import structlog
 from sqlalchemy import select
 
+from extraction.core.build_info import build_stamp
 from extraction.core.config import get_settings
 from extraction.core.db import SessionFactory, create_db_engine, create_session_factory
 from extraction.core.ids import new_id
@@ -124,7 +125,7 @@ def _upgrade(stored: TemplateOrm, template: TemplateDefinition, now: datetime) -
 
 def main() -> None:
     settings = get_settings()
-    configure_logging(settings.logging)
+    configure_logging(settings.logging, build_stamp(settings))
     sessions = create_session_factory(create_db_engine(settings.require_db(), application_name=settings.service_name))
     log.info("seed_finished", added=seed(sessions))
 

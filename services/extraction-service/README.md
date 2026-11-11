@@ -39,6 +39,7 @@ Read once at startup by `extraction.core.config.Settings`; an invalid value stop
 | `ENVIRONMENT` | `local` | `local`, `dev`, `test`, `staging`, `prod` | Where the process runs |
 | `LOGGING__LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | Lowest level written |
 | `LOGGING__FORMAT` | `json` | `json`, `console` | `console` for readable local logs; JSON everywhere else |
+| `BUILD__COMMIT` | `unknown` | | The git commit of the image; the image build sets it. every log line carries `env` (from `ENVIRONMENT`), `service_version`, `commit` and `config_hash`: a short hash of the settings that change behaviour (not URLs, credentials, concurrency or timeouts), so a promoted build has the same hash in every environment |
 | `OCR__MODELS_DIR` | `models` | a directory | Where the OCR model files are; every path in `models.yaml` is relative to it (workers only) |
 | `OCR__MODELS_FILE` | `models.yaml` | a file | The model registry (ML-01) |
 | `OCR__THREADS` | `2` | 1–64 | Threads per engine. Both engines read at once, and two documents can too: more threads only fight over the cores (on 8 cores, 2 threads read a card in 1.2 s, 4 in 2.2 s) |

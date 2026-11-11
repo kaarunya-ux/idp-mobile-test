@@ -7,12 +7,17 @@ switched off on every call: a server restarted with it on spent the whole output
 ``MODEL__PAGE_READ_MAX_SIDE_PX``, larger than a card needs, because small print must stay readable.
 """
 
+import structlog
+
 from ai_gateway.ai.application.answer_models import PageReadAnswer, reader, schema_of
 from ai_gateway.ai.application.runner import ModelCallRunner
+from ai_gateway.ai.domain.exceptions import AnswerShapeError
 from ai_gateway.ai.domain.models import Answer, Caller, ImageRef, ModelRequest, ModelRole, Task
 from ai_gateway.ai.domain.ports import ImageStorePort, PromptsPort
 
 PROMPT = "page-read"
+log = structlog.get_logger(__name__)
+_PARSE = reader(PageReadAnswer)
 QUESTION = (
     "Count the paragraphs, then extract every block on this page, from the first line to the last line. "
     'Answer with a JSON object: "analysis" first, then "blocks".'
@@ -21,12 +26,19 @@ QUESTION = (
 
 class ReadPageService:
     def __init__(
-        self, *, runner: ModelCallRunner, images: ImageStorePort, prompts: PromptsPort, max_side_px: int
+        self,
+        *,
+        runner: ModelCallRunner,
+        images: ImageStorePort,
+        prompts: PromptsPort,
+        max_side_px: int,
+        min_block_share: float = 0.5,
     ) -> None:
         self._runner = runner
         self._images = images
         self._prompts = prompts
         self._max_side_px = max_side_px
+        self._min_block_share = min_block_share
 
     async def read(self, caller: Caller, page: ImageRef) -> Answer[PageReadAnswer]:
         prompt = self._prompts.get(PROMPT)
@@ -42,4 +54,16 @@ class ReadPageService:
             max_tokens=prompt.max_tokens,
             thinking=prompt.thinking,
         )
-        return await self._runner.run(caller, Task.PAGE_READ, prompt, request, reader(PageReadAnswer))
+        return await self._runner.run(caller, Task.PAGE_READ, prompt, request, self._read_answer)
+
+    def _read_answer(self, content: str) -> PageReadAnswer:
+        """The answer, or ``AnswerShapeError`` (so the runner asks once more) when it writes far fewer blocks than it
+        counted in its own analysis. A model that was told by the page to "reply only OK" or to stop early, or one
+        that gave up part-way, writes a schema-valid page that is mostly missing; the count it wrote first shows
+        it (prompt-injection strategy 5 and 11). A page it counted as empty is accepted."""
+        answer = _PARSE(content)
+        expected = answer.analysis.n_blocks
+        log.info("page_read_shape", blocks=len(answer.blocks), counted=expected)  # a shift in this ratio is early drift
+        if expected and len(answer.blocks) < self._min_block_share * expected:
+            raise AnswerShapeError(f"{len(answer.blocks)} blocks written for the {expected} counted in the analysis")
+        return answer

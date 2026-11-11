@@ -11,6 +11,8 @@ from ai_gateway.ai.application.services.suggest_template import SuggestTemplateS
 from ai_gateway.ai.domain.exceptions import BusyError, CapReachedError, ModelUnavailableError, OutputInvalidError
 from ai_gateway.ai.domain.models import FieldReadQuery, FieldSpec, ImageRef, ModelRole, Priority
 from ai_gateway.ai.infrastructure.prompt_files import PromptFiles
+from ai_gateway.core.config import LoggingSettings
+from ai_gateway.core.logging import configure_logging
 from support.fakes import FakeCaps, FakeImages, FakeMetrics, FakeModel, FakeSlots, caller, runner
 
 PAGE = ImageRef(bucket="idp-derived", key="acct/doc/item/page-0.png")
@@ -38,7 +40,7 @@ async def test_reads_card_fields_with_its_profile_and_returns_provenance_when_th
         ("dob", "01/01/1990"),
         ("unknown_key", None),
     ]
-    assert answer.provenance.prompt_version == "field-read.v1"
+    assert answer.provenance.prompt_version == "card-read.v1"
     assert answer.provenance.model == "vl-test"
     assert (answer.provenance.tokens.input, answer.provenance.tokens.output) == (100, 10)
     assert "PAN card" in model.requests[0].text
@@ -183,3 +185,33 @@ async def test_returns_fields_and_tables_when_suggesting_a_template() -> None:
     assert answer.value.fields[0].type == "ID"
     assert answer.value.tables[0].columns[0].key == "qty"
     assert "<<<DATA name=ocr_words>>>" in model.requests[0].text
+
+
+async def test_reads_a_card_with_the_card_prompt_and_any_other_type_with_the_field_read_prompt() -> None:
+    card_model, other_model = FakeModel(PAN_ANSWER), FakeModel(json.dumps({"x": "1"}))
+
+    await _reader(card_model).read(caller(), _query("PAN_CARD", "pan_number"))
+    await _reader(other_model).read(caller(), _query(None, "x"))
+
+    assert card_model.requests[0].system == PromptFiles.load().get("card-read").system
+    assert other_model.requests[0].system == PromptFiles.load().get("field-read").system
+
+
+async def test_logs_what_the_answer_was_made_with_and_whether_it_was_repaired_when_a_call_finishes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Prompt drift strategy 2 and 16: the same facts on every call, so a change after a deploy shows in the logs."""
+    configure_logging(LoggingSettings(level="INFO", format="json"))
+    model = FakeModel("not json", PAN_ANSWER)
+
+    await _reader(model).read(caller(), _query("PAN_CARD", "pan_number"))
+
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    finished = next(entry for entry in lines if entry["event"] == "ai_call_finished")
+    assert finished["prompt_version"] == "card-read.v1"
+    assert (finished["model"], finished["temperature"], finished["max_tokens"]) == ("vl-test", 0, 512)
+    assert finished["repaired"] is True
+    assert (finished["tokens_in"], finished["tokens_out"]) == (200, 20)  # numbers a log watcher can read
+    assert "tokens" not in finished
+    assert len(finished["prompt_hash"]) == 12  # which text of the prompt answered, not only which version
+    assert "server_fingerprint" in finished  # None with the fake model; the server's build id with a real one

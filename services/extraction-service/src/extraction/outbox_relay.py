@@ -12,6 +12,7 @@ import signal
 import structlog
 
 from extraction.bootstrap import build_outbox_relay, build_rabbit_broker, build_session_factory
+from extraction.core.build_info import build_stamp
 from extraction.core.config import Settings, get_settings
 from extraction.core.logging import configure_logging
 
@@ -32,7 +33,7 @@ async def run(settings: Settings, stop: asyncio.Event) -> None:
 
 def main() -> None:
     settings = get_settings()
-    configure_logging(settings.logging)
+    configure_logging(settings.logging, build_stamp(settings))
 
     async def run_until_signalled() -> None:
         stop, loop = asyncio.Event(), asyncio.get_running_loop()

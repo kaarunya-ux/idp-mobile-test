@@ -15,6 +15,7 @@ from prometheus_client import make_asgi_app
 
 from extraction import health
 from extraction.bootstrap import build_quick_extract, build_session_factory
+from extraction.core.build_info import build_stamp
 from extraction.core.clock import Clock, SystemClock
 from extraction.core.config import Settings, get_settings
 from extraction.core.logging import CorrelationIdMiddleware, configure_logging
@@ -29,7 +30,7 @@ log = structlog.get_logger(__name__)
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    configure_logging(settings.logging)
+    configure_logging(settings.logging, build_stamp(settings))
     log.info("sync_api_started", service=settings.service_name, environment=settings.environment)
     yield
     log.info("sync_api_stopped", service=settings.service_name)

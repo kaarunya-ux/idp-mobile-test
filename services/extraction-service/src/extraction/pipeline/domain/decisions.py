@@ -205,7 +205,10 @@ def decide_with_ai(
     normalized = normalize_value(ai_value, definition.normalize, pattern=definition.rule.pattern)
     outcome = apply_rule(definition.rule, normalized, today=today)
     if not outcome.passed:
-        return dataclasses.replace(decision, readings=readings)
+        # kept for the reviewer, but a field with a mask policy shows the masked value here too: a misread Aadhaar
+        # number that fails its check digit must not reach the result in full (F-EX-13; found by the PII golden set)
+        shown = {**decision.readings, "ai": _mask_text(ai_value, definition.mask) if definition.mask else ai_value}
+        return dataclasses.replace(decision, readings=shown)
     accepted = FieldDecision(
         key=definition.key,
         label=definition.label,

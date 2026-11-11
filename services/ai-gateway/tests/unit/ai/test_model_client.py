@@ -136,3 +136,13 @@ async def test_sends_the_page_role_to_its_own_server_and_every_other_role_to_the
 
     assert (main_route.call_count, page_route.call_count) == (1, 1)
     assert json.loads(page_route.calls[0].request.content)["model"] == "qwen3.6-35b-a3b"
+
+
+def test_reads_the_servers_build_id_from_the_reply_when_it_sends_one() -> None:
+    """llama.cpp names its build in ``system_fingerprint``; the gateway logs it so a server change shows as drift."""
+    from ai_gateway.ai.infrastructure.model_client import _reply  # noqa: PLC0415
+
+    body = {"choices": [{"message": {"content": "{}"}}], "system_fingerprint": "b11429-d81235049"}
+
+    assert _reply(httpx.Response(200, json=body), "m").fingerprint == "b11429-d81235049"
+    assert _reply(httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]}), "m").fingerprint is None

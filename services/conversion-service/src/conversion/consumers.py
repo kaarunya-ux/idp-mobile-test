@@ -10,13 +10,14 @@ from faststream import FastStream
 from conversion.bootstrap import build_accept_service, build_rabbit_broker, build_session_factory
 from conversion.conversion.infrastructure.messaging.consumer import declare_topology, register_consumers
 from conversion.conversion.infrastructure.tasks import create_celery_app
+from conversion.core.build_info import build_stamp
 from conversion.core.config import Settings, get_settings
 from conversion.core.logging import configure_logging
 
 
 def create_app(settings: Settings | None = None) -> FastStream:
     settings = settings or get_settings()
-    configure_logging(settings.logging)
+    configure_logging(settings.logging, build_stamp(settings))
     broker = build_rabbit_broker(settings)
     service = build_accept_service(
         settings, build_session_factory(settings), create_celery_app(settings.require_celery())

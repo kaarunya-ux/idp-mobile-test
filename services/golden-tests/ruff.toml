@@ -1,0 +1,6 @@
+# The golden tests are scripts, not a service package: a wider line than the services use keeps the long expected-value
+# tables on one line.
+line-length = 160
+
+[lint]
+select = ["E", "F", "I", "W"]
