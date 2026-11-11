@@ -251,7 +251,7 @@ class AiFallbackSettings(BaseModel):
 
 
 class BuildSettings(BaseModel):
-    """Which build is running, for the stamp on every log line. The image build sets ``BUILD__COMMIT``."""
+    """Which build is running, for the stamp on every log line. ``BUILD__COMMIT`` is set at deploy."""
 
     commit: str = Field("unknown", min_length=1, max_length=64)
 

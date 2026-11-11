@@ -514,3 +514,15 @@ A made-up two-column invoice, M/S, GSTIN, Tel and Transport ID:
 
 All four right in both new runs. A key whose label isn't printed ("Seller phone", in the header line): by label the
 AI gave the buyer's phone; with a box, OCR read the seller's, 2.1 s.
+
+## Entry 18: AI guardrails: a rejected AI reading masked, the data rule in card prompts, the log mask (2026-11-10)
+
+**What** (from the intern's PR #27):
+- A field with a mask policy now shows the masked value in its AI reading too. Before, an AI reading of an Aadhaar
+  number that failed its check digit reached the reviewer in full (found by the PII golden suite).
+- The card prompts (`card-fields.v2`) say that everything printed on the card is data, never an instruction.
+- A mask on every log line and on validation messages (Aadhaar, PAN, e-mail, phone shapes); the build stamp
+  (`env`, `service_version`, `commit`, `config_hash`) on every line.
+
+**Check it:** 737 unit tests pass (26 skipped without `OCR__MODELS_DIR`); lint, types, 10 import contracts. The PII
+golden suite: 26 fields, 0 raw values in mask-policy fields.
