@@ -52,6 +52,7 @@ from extraction.pipeline.infrastructure.metrics import PrometheusPipelineMetrics
 from extraction.pipeline.infrastructure.persistence.designer_store import SqlDesignerWorkStore
 from extraction.pipeline.infrastructure.persistence.repository import SqlUnitOfWork
 from extraction.pipeline.infrastructure.persistence.template_catalog import SqlTemplateCatalog
+from extraction.pipeline.infrastructure.preprocess.card_detector import TwoCards
 from extraction.pipeline.infrastructure.preprocess.opencv_preprocessor import OpenCvPagePreparer
 from extraction.pipeline.infrastructure.preprocess.orientation import DocumentOrientationClassifier
 from extraction.pipeline.infrastructure.quality.opencv_quality_gate import OpenCvQualityAssessor
@@ -109,6 +110,12 @@ class PipelineServices:
             pdf_dpi=settings.limits.pdf_dpi,
             pdf_max_side_px=settings.limits.pdf_max_side_px,
             pdf_picture_min_fraction=settings.limits.pdf_picture_min_fraction,
+            two_cards=TwoCards(
+                min_area_fraction=settings.prepare.min_card_area_fraction,
+                min_size_ratio=settings.prepare.two_cards_min_size_ratio,
+            )
+            if settings.prepare.two_cards_min_size_ratio > 0
+            else None,
         )
         quality = settings.quality
         self._assessor = OpenCvQualityAssessor(

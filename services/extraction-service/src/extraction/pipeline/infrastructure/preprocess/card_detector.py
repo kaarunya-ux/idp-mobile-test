@@ -13,6 +13,8 @@ _SOLIDITY_MIN = 0.85  # how much of the quadrilateral the shape must fill
 _CONTOURS_TRIED = 5
 _CORNER_COUNT = 4
 _CANNY = (30, 100)
+_TWO = 2  # a card's front and back; three or more cards are not split
+_CUT_MARGIN = 0.03  # of the card's longer side, kept around each card cut from a two-card picture
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +23,18 @@ class CardDetection:
 
     corners: NDArray[np.float32] | None
     fills_frame: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TwoCards:
+    """When one picture holds a card's front and back: each card covers at least ``min_area_fraction`` of it, and the
+    smaller is at least ``min_size_ratio`` of the larger."""
+
+    min_area_fraction: float
+    min_size_ratio: float
+
+
+Rect = tuple[int, int, int, int]  # left, top, right, bottom in page pixels
 
 
 def detect_card(rgb: NDArray[np.uint8], *, min_area_fraction: float) -> CardDetection:
@@ -39,6 +53,41 @@ def detect_card(rgb: NDArray[np.uint8], *, min_area_fraction: float) -> CardDete
         if quad is not None:
             return CardDetection(corners=(quad / scale).astype(np.float32), fills_frame=False)
     return CardDetection(corners=None, fills_frame=False)
+
+
+def find_two_cards(rgb: NDArray[np.uint8], rule: TwoCards) -> tuple[Rect, Rect] | None:
+    """The two cards of a picture that holds a card's front and back (one above the other, or side by side), each as
+    a rectangle with a margin, in reading order: the top one first, or the left one when they sit side by side. None
+    when the picture holds one card, or no two separate card-shaped areas of about the same size."""
+    height, width = rgb.shape[:2]
+    scale = min(1.0, _WORK_SIDE / max(height, width))
+    small = _shrink(rgb, scale)
+    area = small.shape[0] * small.shape[1]
+    cards: list[tuple[float, Rect]] = []
+    for contour in _edge_contours(small)[:_CONTOURS_TRIED]:
+        size = cv2.contourArea(contour)
+        if size / area < rule.min_area_fraction:
+            break
+        if size / area <= _FILLS_FRAME_FRACTION and _as_card_quad(contour) is not None:
+            x, y, w, h = cv2.boundingRect(contour)
+            cards.append((size, (x, y, x + w, y + h)))
+    if len(cards) != _TWO or cards[1][0] / cards[0][0] < rule.min_size_ratio or _overlap(cards[0][1], cards[1][1]):
+        return None
+    first, second = sorted((_grown(rect, scale, width, height) for _, rect in cards), key=lambda r: (r[1], r[0]))
+    if second[1] < first[3] - (first[3] - first[1]) // 2:  # side by side: the left one first
+        first, second = sorted((first, second), key=lambda r: r[0])
+    return first, second
+
+
+def _overlap(one: Rect, other: Rect) -> bool:
+    return one[0] < other[2] and other[0] < one[2] and one[1] < other[3] and other[1] < one[3]
+
+
+def _grown(rect: Rect, scale: float, width: int, height: int) -> Rect:
+    """``rect`` in page pixels with a margin, so the card's own edges stay in the cut and it can be straightened."""
+    left, top, right, bottom = (round(value / scale) for value in rect)
+    margin = round(max(right - left, bottom - top) * _CUT_MARGIN)
+    return max(0, left - margin), max(0, top - margin), min(width, right + margin), min(height, bottom + margin)
 
 
 def warp_to_card(rgb: NDArray[np.uint8], corners: NDArray[np.float32]) -> NDArray[np.uint8]:
