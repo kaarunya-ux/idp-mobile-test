@@ -33,6 +33,7 @@ def word(text: str, x: float, y: float, width: float = 0.2) -> OcrWord:
         ("Date of Birth", "DATE OF BIRTH: 01/01/1990", True),
         ("Card No", "Card No.: 123", True),
         ("Card No", "Card Number", False),
+        ("USCIS#", "USCIS#", True),
     ],
 )
 def test_finds_a_label_only_where_it_opens_a_piece_of_text(label: str, text: str, found: bool) -> None:
@@ -101,6 +102,31 @@ def test_cuts_a_date_out_of_the_text_after_its_label_and_accepts_a_future_expiry
 
     assert reading is not None
     assert reading.text == "01/12/2031"
+
+
+@pytest.mark.parametrize("printed", ["20 OCT 2002", "10/26/32", "October 20, 2002", "2002-10-20"])
+def test_reads_a_date_as_printed_whether_the_day_or_the_month_comes_first(printed: str) -> None:
+    reading = read_field(
+        _field("Date of Birth", CustomType.DATE),
+        [word("Date of Birth", 0.4, 0.5), word(printed, 0.4, 0.56)],
+        Box(x=0, y=0, width=1, height=1),
+        today=TODAY,
+    )
+
+    assert reading is not None
+    assert reading.text == printed
+
+
+def test_reads_the_value_and_not_the_end_of_a_label_typed_with_a_hash() -> None:
+    reading = read_field(
+        _field("USCIS#"),
+        [word("USCIS#", 0.4, 0.4), word("000-000-001", 0.4, 0.46)],
+        Box(x=0, y=0, width=1, height=1),
+        today=TODAY,
+    )
+
+    assert reading is not None
+    assert reading.text == "000-000-001"
 
 
 def test_stops_the_value_after_a_label_at_the_next_columns_text() -> None:

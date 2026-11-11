@@ -35,8 +35,7 @@ them with each request.
 - No template storage or sync for custom documents on our side; the backend owns them.
 - A document whose labels are printed is read by OCR alone (a made-up card: four keys in 1.7 s); each unprinted or
   unusual label costs the AI call (about 5 s on the Mac mini's model, one call for all of them).
-- Dates are checked in numeric formats (dd/MM/yyyy, dd-MM-yyyy, dd.MM.yyyy, yyyy-MM-dd); a date printed with a month
-  name goes to the AI.
+- A date is accepted in any printed form and returned as printed (amended 2026-11-11, below).
 - A label printed differently from what the user typed ("USCIS#" for "Card number") is not found by OCR; the AI reads
   it, and may pick the wrong value (a made-up invoice: the buyer's phone for "Seller phone"). A box avoids both: that
   key was read right by OCR alone.
@@ -46,3 +45,15 @@ them with each request.
 - Not yet: lining a page up with the sample by its printed words (the designer's `fixedWords`), which would need
   where those words sit on the sample, and per-key regex rules. A box on a document printed shifted from the sample
   falls back to the label.
+
+## Amendment 2026-11-11: dates as printed
+
+A custom `date` key only accepted numbers with the day first. A date printed with a month name (`20 OCT 2002`) or the
+month first (`10/26/32`) was not found by OCR, and the AI's answer, copied as printed, was refused by the same rule, so
+the key came back empty on every such document. A custom value is returned as printed, never reformatted, so the rule
+now asks only whether the value is a date: numbers with the day, the month or the year first, two- or four-digit years,
+and month names (`rule/printed_date.py`, validator `DATE_AS_PRINTED`). Numbers pass when one reading of them is a real
+calendar date; `31 FEB 2002` and `13/13/2002` still fail. The standard cards keep their strict date rules.
+
+A label typed with closing punctuation (`USCIS#`, `No.`) now takes that punctuation as part of the label, so `#` is no
+longer returned as the value.
