@@ -526,3 +526,18 @@ AI gave the buyer's phone; with a box, OCR read the seller's, 2.1 s.
 
 **Check it:** 737 unit tests pass (26 skipped without `OCR__MODELS_DIR`); lint, types, 10 import contracts. The PII
 golden suite: 26 fields, 0 raw values in mask-policy fields.
+
+## Entry 19: Custom dates read as printed; labels ending in "#" (2026-11-11)
+
+**Problem:** the frontend reported that a custom `date` key (date of birth) was never extracted, whatever the
+document. Reproduced on two US specimen cards: the date is printed `20 OCT 2002`. The custom date rule accepted only
+numbers with the day first, so OCR found nothing, and the AI's answer (`20 OCT 2002`, as printed) was refused by the
+same rule: the key came back empty, `NEEDS_REVIEW`. Sent as `text`, the same key was read. `Card Expires` (`10/26/32`,
+month first, two-digit year) failed the same way, and `USCIS#` returned `#`.
+
+**What:** `rule/printed_date.py`: a date in any printed form passes (day, month or year first; 2- or 4-digit year;
+month names), when one reading is a real date. Custom `date` keys use it (validator `DATE_AS_PRINTED`) and keep their
+spaces (`COLLAPSE_SPACES`, not `STRIP_SPACES`), so the value is returned as printed. A label's closing punctuation
+(`#`, `:`, `.`) is part of the label. Standard cards and stored templates are unchanged. ADR 0013 amended.
+
+**Check it:** 763 unit tests pass (26 new); lint, types, 10 import contracts.

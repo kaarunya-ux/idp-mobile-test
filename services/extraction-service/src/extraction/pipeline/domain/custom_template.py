@@ -12,7 +12,6 @@ left empty.
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import date
 from enum import StrEnum
 
 from extraction.pipeline.domain.template import (
@@ -24,6 +23,7 @@ from extraction.pipeline.domain.template import (
     RuleSpec,
     TemplateDefinition,
 )
+from extraction.rule import PRINTED_DATE
 from extraction.rule.normalizers import Normalizer
 from idp_ocr_engines.model import Box
 
@@ -35,8 +35,8 @@ _WHOLE_PAGE = Box(x=0.0, y=0.0, width=1.0, height=1.0)
 _DRAWN_MARGIN_X = 0.005  # page fraction added left and right of a drawn box: a hand-drawn edge is not exact
 _DRAWN_MARGIN_Y = 0.01  # and above and below it: a value's line is often drawn a little high or low
 _SEPARATORS = r"[\s.:/_\-'\u2019]*"  # between a label's words: spaces, dots, colons, slashes, dashes, apostrophes
-_LATEST_DATE = date(2100, 12, 31)  # a custom date may be an expiry date, ahead of today
-_DATE = r"([0-9]{1,2}\s?[/.\-]\s?[0-9]{1,2}\s?[/.\-]\s?[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})"
+_DATE = f"({PRINTED_DATE})"  # any printed form: the value is returned as printed, so day or month first is no matter
+_LABEL_END = re.compile(r"[#№:.]+$")  # punctuation that ends a label as typed ("USCIS#", "No.") is part of it
 _NUMBER = r"([0-9][0-9 ,./\-]*[0-9]|[0-9])"
 
 
@@ -75,7 +75,9 @@ def label_pattern(label: str) -> str:
     its piece of text, as printed labels do: "Name" is not found inside "Father's Name", nor "Department" at the end
     of the title "INCOME TAX DEPARTMENT"."""
     words = re.findall(r"[^\W_]+", label)
-    return r"(?i)^\W*" + _SEPARATORS.join(re.escape(word) for word in words) + r"(?![^\W_])"
+    end = _LABEL_END.search(label.strip())
+    after = f"(?:{re.escape(end.group())})?" if end else ""
+    return r"(?i)^\W*" + _SEPARATORS.join(re.escape(word) for word in words) + r"(?![^\W_])" + after
 
 
 def _definition(found: CustomField) -> FieldDefinition:
@@ -91,18 +93,13 @@ def _definition(found: CustomField) -> FieldDefinition:
         accept=Accept(mode=AcceptMode.SIMILARITY),
     )
     if found.type is CustomType.DATE:
-        date_rule = RuleSpec(
-            id="custom-date",
-            kind=RuleKind.DATE,
-            formats=("dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy", "yyyy-MM-dd"),
-            latest=_LATEST_DATE,
-        )
+        date_rule = RuleSpec(id="custom-date", kind=RuleKind.CUSTOM, validator="DATE_AS_PRINTED")
         return replace(
             text,
             type=FieldType.DATE,
             extract=_DATE,
             rule=date_rule,
-            normalize=(Normalizer.STRIP_SPACES,),
+            normalize=(Normalizer.COLLAPSE_SPACES,),  # "20 OCT 2002" keeps its spaces, as printed
             accept=Accept(),
         )
     if found.type is CustomType.NUMBER:

@@ -8,11 +8,13 @@ from extraction.rule.normalizers import Normalizer, normalize_value
 from extraction.rule.outcome import RuleOutcome
 from extraction.rule.pan import PAN_RULE_ID, evaluate_pan_number
 from extraction.rule.pattern import evaluate_pattern
+from extraction.rule.printed_date import PRINTED_DATE, evaluate_printed_date
 from extraction.rule.similarity import similarity
 
 __all__ = [
     "AADHAAR_RULE_ID",
     "PAN_RULE_ID",
+    "PRINTED_DATE",
     "Normalizer",
     "RuleOutcome",
     "UnsupportedDefinitionError",
@@ -21,6 +23,7 @@ __all__ = [
     "evaluate_date",
     "evaluate_pan_number",
     "evaluate_pattern",
+    "evaluate_printed_date",
     "is_verhoeff_valid",
     "normalize_value",
     "repair_slash_misread",

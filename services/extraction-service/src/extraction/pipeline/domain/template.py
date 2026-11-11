@@ -49,7 +49,7 @@ class RuleSpec:
     formats: tuple[str, ...] = ()
     earliest: date = date(1900, 1, 1)
     latest: date | None = None
-    validator: str | None = None  # CUSTOM only: "PAN" or "AADHAAR"
+    validator: str | None = None  # CUSTOM only: "PAN", "AADHAAR" or "DATE_AS_PRINTED"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

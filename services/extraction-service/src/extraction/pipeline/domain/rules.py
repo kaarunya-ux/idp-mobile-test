@@ -4,7 +4,13 @@ import re
 from datetime import date
 
 from extraction.pipeline.domain.template import RuleKind, RuleSpec
-from extraction.rule import RuleOutcome, UnsupportedDefinitionError, evaluate_date, evaluate_pattern
+from extraction.rule import (
+    RuleOutcome,
+    UnsupportedDefinitionError,
+    evaluate_date,
+    evaluate_pattern,
+    evaluate_printed_date,
+)
 from extraction.rule.aadhaar import evaluate_aadhaar_number
 from extraction.rule.pan import evaluate_pan_number
 
@@ -19,6 +25,8 @@ def apply_rule(spec: RuleSpec, value: str, *, today: date) -> RuleOutcome:
         return evaluate_date(
             value, rule_id=spec.id, formats=spec.formats, earliest=spec.earliest, latest=spec.latest or today
         )
+    if spec.kind is RuleKind.CUSTOM and spec.validator == "DATE_AS_PRINTED":
+        return evaluate_printed_date(value, rule_id=spec.id)
     if spec.kind is RuleKind.CUSTOM and spec.validator == "PAN":
         return evaluate_pan_number(value)
     if spec.kind is RuleKind.CUSTOM and spec.validator == "AADHAAR":
