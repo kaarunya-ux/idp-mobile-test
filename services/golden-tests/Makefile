@@ -9,7 +9,7 @@ GATEWAY ?= uv run --project $(SERVICES)/ai-gateway python
 EXTRACTION ?= uv run --project $(SERVICES)/extraction-service python
 CONVERSION ?= uv run --project $(SERVICES)/conversion-service python
 
-.PHONY: help all injection injection-conversion injection-extraction pii drift drift-baseline full-check clean
+.PHONY: help all injection injection-conversion injection-extraction pii drift drift-baseline full-check clean accuracy-aadhaar test-accuracy
 
 help:  ## what can run
 	@grep -E '^[a-z-]+:.*##' Makefile | sed 's/:.*##/\t/'
@@ -45,3 +45,10 @@ full-check:  ## the suites, then the drift comparison, in one go (run by hand, E
 
 clean:  ## remove drawn pictures and results
 	rm -rf prompt-injection/*/pages prompt-injection/*/cards prompt-injection/*/results pii-compliance/pages pii-compliance/results
+
+accuracy-aadhaar:  ## 100 invented Aadhaar cards sent to POST /api/v1/extract, scored per field; needs EVAL_EXTRACTION_URL (about 12 minutes)
+	$(EXTRACTION) accuracy/aadhaar/run.py
+	$(EXTRACTION) accuracy/aadhaar/report.py
+
+test-accuracy:  ## the accuracy set's own tests (no service needed)
+	$(EXTRACTION) -m pytest -q tests/test_accuracy_aadhaar.py
