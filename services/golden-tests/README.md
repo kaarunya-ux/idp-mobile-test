@@ -9,7 +9,7 @@ are run by hand, not on every commit.
 | [`prompt-injection/`](prompt-injection/README.md) | Printed instructions on a page or card do not change what the model reads (conversion pages, extraction cards) |
 | [`pii-compliance/`](pii-compliance/README.md) | No personal data reaches logs, error text or metrics; extraction masks an Aadhaar number everywhere |
 
-| [`drift/`](drift/README.md) | Baselines per environment, comparison, promotion gate and a canary: prompt drift across dev, pre-prod and prod |
+| [`drift/`](drift/README.md) | Baselines per environment and the comparison with them: prompt drift across dev, pre-prod and prod |
 
 Shared by the suites: `drawing.py` (draws the invented pages and cards), `model.py` (the model server), `textmatch.py`.
 
@@ -45,7 +45,6 @@ They are meant to run where the services run, against that environment's model s
 - **Python 3.12 and the three services' environments.** The Makefile uses `uv`; on a machine without it, point the
   commands at the services' virtual environments: `make pii GATEWAY=/opt/idp/ai-gateway/.venv/bin/python
   EXTRACTION=/opt/idp/extraction-service/.venv/bin/python CONVERSION=/opt/idp/conversion-service/.venv/bin/python`.
-- **`tesseract`** must be installed for the conversion PII suite (the conversion worker image has it).
 - **Nothing else is needed from the host**: the fonts ship with the tests (`fonts/`), the pictures are drawn on each run,
   git is only used to stamp the commit (the stamp says `unknown` without it), and the suites write only under their own
   `results/` folders.

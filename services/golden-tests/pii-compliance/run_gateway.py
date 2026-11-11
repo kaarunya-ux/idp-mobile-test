@@ -24,11 +24,12 @@ RESULTS.mkdir(exist_ok=True)
 sys.path.insert(0, str(HERE.parent))  # services/golden-tests: the shared modules
 sys.path.insert(0, str(HERE))
 from documents import DOCS  # noqa: E402
-
 from model import CHAT_URL as MODEL_URL  # noqa: E402
 from textmatch import leaks  # noqa: E402
 
 sys.path[:0] = [str(REPO / "ai-gateway" / "src"), str(REPO / "ai-gateway" / "tests")]
+from support.fakes import FakeCaps, FakeSlots, FixedClock, caller  # noqa: E402
+
 from ai_gateway.ai.application.answer_models import PageReadAnswer, schema_of  # noqa: E402
 from ai_gateway.ai.application.runner import ModelCallRunner  # noqa: E402
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService  # noqa: E402
@@ -39,7 +40,6 @@ from ai_gateway.ai.infrastructure.metrics import PrometheusMetrics  # noqa: E402
 from ai_gateway.ai.infrastructure.prompt_files import PromptFiles  # noqa: E402
 from ai_gateway.core.config import LoggingSettings  # noqa: E402
 from ai_gateway.core.logging import configure_logging  # noqa: E402
-from support.fakes import FakeCaps, FakeSlots, FixedClock, caller  # noqa: E402
 
 
 class LiveModel:
@@ -126,7 +126,7 @@ async def main() -> int:
                 except Exception as exc:  # noqa: BLE001 - the point is to read what an error says
                     error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
             logs = buf.getvalue()
-            if os.environ.get("GOLDEN_LOG_DIR"):  # keep the real log lines: input for drift/logwatch.py
+            if os.environ.get("GOLDEN_LOG_DIR"):  # keep the real log lines for a look by hand
                 log_dir = Path(os.environ["GOLDEN_LOG_DIR"])
                 log_dir.mkdir(parents=True, exist_ok=True)
                 (log_dir / f"{doc}_{mode}.jsonl").write_text(logs, encoding="utf-8")

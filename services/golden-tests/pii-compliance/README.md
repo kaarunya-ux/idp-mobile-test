@@ -8,7 +8,7 @@ through the services' real code. The suites then search what the code wrote for 
 |---|---|---|
 | `run_gateway.py` | ai-gateway | Logs (DEBUG level), exception text and Prometheus metrics of a normal, a repaired and a failed read hold no identifier, name, date or address (OBS-04, LLM-06) |
 | `run_extraction.py` | extraction-service | The model's values go through the real decision code; an Aadhaar number is masked everywhere in the decision, also when the rule rejects it (F-EX-13) |
-| `run_conversion.py` | conversion-service | Logs and error text of the scanned-page converter (real Tesseract), for a read and for a refusal |
+| `run_conversion.py` | conversion-service | Logs and error text of the scanned-page converter, for a read and for a refusal |
 
 ```bash
 make pii

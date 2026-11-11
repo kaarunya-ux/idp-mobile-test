@@ -1,6 +1,6 @@
-"""PII golden set, conversion part: conversion-service's real scanned-page converter (with the OCR check and real
-Tesseract) reads a document picture. The page text comes from the live model, using the gateway's page-read prompt, or
-from a stand-in that answers "OK" (to force the check's refusal). Logs and exception text are captured and searched.
+"""PII golden set, conversion part: conversion-service's real scanned-page converter reads a document picture. The page
+text comes from the live model, using the gateway's page-read prompt, or from a stand-in that answers "OK" (a hijacked
+reading). Logs and exception text are captured and searched.
 
 Run after run_gateway.py, with conversion's environment (``make pii`` does): ``python run_conversion.py``. Exit code 1 on any leak.
 """
@@ -25,7 +25,6 @@ RESULTS.mkdir(exist_ok=True)
 sys.path.insert(0, str(HERE.parent))  # services/golden-tests: the shared modules
 sys.path.insert(0, str(HERE))
 from documents import DOCS  # noqa: E402
-
 from model import CHAT_URL as MODEL_URL  # noqa: E402
 from textmatch import leaks  # noqa: E402
 
@@ -33,16 +32,14 @@ sys.path.insert(0, str(REPO / "conversion-service" / "src"))
 from conversion.conversion.domain.document_model import Page, TextBlock  # noqa: E402
 from conversion.conversion.domain.formats import Representation  # noqa: E402
 from conversion.conversion.domain.options import ConversionOptions  # noqa: E402
-from conversion.conversion.domain.ports import StepContext, StepRequest  # noqa: E402
-from conversion.conversion.domain.reading_check import ReadingCheckPolicy  # noqa: E402
+from conversion.conversion.domain.ports import PageReaderPort, StepContext, StepRequest  # noqa: E402
 from conversion.conversion.domain.route import Converter, Step  # noqa: E402
-from conversion.conversion.infrastructure.converters.ocr_to_model import ModelFirstOcrConverter, ReadingCheck  # noqa: E402
-from conversion.conversion.infrastructure.converters.tesseract_text import TesseractTextRecognizer  # noqa: E402
+from conversion.conversion.infrastructure.converters.ocr_to_model import ModelFirstOcrConverter  # noqa: E402
 from conversion.conversion.infrastructure.readers.model_reader import to_page  # noqa: E402
 from conversion.core.config import LoggingSettings  # noqa: E402
 from conversion.core.logging import configure_logging  # noqa: E402
 
-SYSTEM = (REPO / "ai-gateway/src/ai_gateway/prompts/page-read.v2.md").read_text().split("---\n", 2)[2].strip()
+SYSTEM = (REPO / "ai-gateway/src/ai_gateway/prompts/page-read.v3.md").read_text().split("---\n", 2)[2].strip()
 SCHEMA = json.loads((RESULTS / "schema_page_read.json").read_text())
 QUESTION = (
     "Count the paragraphs, then extract every block on this page, from the first line to the last line. "
@@ -76,18 +73,18 @@ class OkReader:
         return Page(blocks=(TextBlock(text="OK"),))
 
 
-def converter(reader: object) -> ModelFirstOcrConverter:
-    check = ReadingCheck(
-        recognizer=TesseractTextRecognizer("eng", 30),
-        policy=ReadingCheckPolicy(min_share=0.5, max_length_ratio=0.6, min_ocr_words=10),
-    )
-    return ModelFirstOcrConverter(reader, render_dpi=72, max_pages=5, max_pixels=50_000_000, reading_check=check)  # type: ignore[arg-type]
+def converter(reader: PageReaderPort) -> ModelFirstOcrConverter:
+    return ModelFirstOcrConverter(reader, render_dpi=72, max_pages=5, max_pixels=50_000_000)
 
 
 rows = []
 for doc in ("P05_letter", "P02_aadhaar"):
     spec = DOCS[doc]
-    for label, reader in (("live model", LiveReader()), ("forced refusal ('OK')", OkReader())):
+    readers: tuple[tuple[str, PageReaderPort], ...] = (
+        ("live model", LiveReader()),
+        ("hijacked reading ('OK')", OkReader()),
+    )
+    for label, reader in readers:
         print(f"[conversion] {doc} {label}", flush=True)
         buf, error = io.StringIO(), None
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(buf):

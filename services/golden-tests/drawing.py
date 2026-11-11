@@ -8,7 +8,6 @@ import random
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
-
 from textmatch import words_of
 
 # The fonts ship with the tests (DejaVu, free licence: fonts/LICENSE-DejaVu.txt), so a picture is the same on a laptop, a

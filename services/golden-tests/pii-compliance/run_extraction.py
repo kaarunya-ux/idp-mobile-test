@@ -19,7 +19,6 @@ RESULTS.mkdir(exist_ok=True)
 sys.path.insert(0, str(HERE.parent))  # services/golden-tests: the shared modules
 sys.path.insert(0, str(HERE))
 from documents import DOCS  # noqa: E402
-
 from textmatch import leaks  # noqa: E402
 
 sys.path.insert(0, str(REPO / "extraction-service" / "src"))

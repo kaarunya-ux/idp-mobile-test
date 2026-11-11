@@ -22,7 +22,6 @@ REPO = HERE.parents[2]  # services/
 sys.path.insert(0, str(HERE.parents[1]))  # services/golden-tests
 sys.path.insert(0, str(HERE.parents[1] / "drift"))
 import stamp  # noqa: E402
-
 import variant  # noqa: E402
 from model import ask  # noqa: E402
 from textmatch import norm, words_of  # noqa: E402

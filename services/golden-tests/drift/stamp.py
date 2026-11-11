@@ -53,7 +53,6 @@ def _gateway() -> dict[str, object]:
     """The gateway's own prompt hash and behaviour hash, when this runs in the gateway's environment."""
     sys.path.insert(0, str(SERVICES / "ai-gateway" / "src"))
     try:
-        from ai_gateway.ai.infrastructure.model_registry import ModelRegistry  # noqa: PLC0415
         from ai_gateway.ai.infrastructure.prompt_files import PromptFiles  # noqa: PLC0415
         from ai_gateway.core.build_info import settings_fingerprint  # noqa: PLC0415
         from ai_gateway.core.config import Settings  # noqa: PLC0415
@@ -63,12 +62,10 @@ def _gateway() -> dict[str, object]:
     import variant  # noqa: PLC0415
 
     prompts = PromptFiles.load(pins=variant.pins() or None)
-    registry = ModelRegistry.from_file(SERVICES / "ai-gateway" / "models.yaml")
-    extras = {"prompts": prompts.fingerprint(), "models": registry.fingerprint()}  # as the gateway's main builds them
+    extras = {"prompts": prompts.fingerprint()}  # as the gateway's main builds them
     return {
         "prompts_hash": prompts.fingerprint(),
         "prompt_pins": variant.pins(),
-        "models_hash": registry.fingerprint(),
         "config_hash": settings_fingerprint(Settings(_env_file=None), extras=extras),
         "prompt_versions": {name: prompts.get(name).version for name in ("page-read", "card-read", "field-read", "classify")},
     }

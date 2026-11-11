@@ -7,7 +7,7 @@ last good state of that environment, and what to roll back to when a later run i
 environment because hardware, quantisation and load differ; compare a run only with its own environment's baseline.
 
 A suite that currently fails refuses to be recorded, unless the failures are named and accepted with a reason; the
-accepted ones are then not counted as new by ``compare.py`` and ``gate.py``.
+accepted ones are then not counted as new by ``compare.py``.
 """
 
 import argparse

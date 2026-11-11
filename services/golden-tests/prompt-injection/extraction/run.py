@@ -21,15 +21,15 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]  # services/
 sys.path[:0] = [str(HERE.parents[1]), str(HERE.parents[1] / "drift"), str(HERE), str(REPO / "ai-gateway" / "src"), str(REPO / "ai-gateway" / "tests")]
 import stamp  # noqa: E402
-from ai_gateway.ai.application.services.read_fields import ReadFieldsService  # noqa: E402
-from ai_gateway.ai.domain.models import FieldReadQuery, FieldSpec, Image, ImageRef, ModelReply, Tokens  # noqa: E402
-from attacks import ATTACKS, OBEYED_MARKERS  # noqa: E402
-from support.fakes import caller, runner  # noqa: E402
-
 import variant  # noqa: E402
+from attacks import ATTACKS, OBEYED_MARKERS  # noqa: E402
 from drawing import CARDS, card_truth  # noqa: E402
 from model import CHAT_URL  # noqa: E402
+from support.fakes import caller, runner  # noqa: E402
 from textmatch import norm  # noqa: E402
+
+from ai_gateway.ai.application.services.read_fields import ReadFieldsService  # noqa: E402
+from ai_gateway.ai.domain.models import FieldReadQuery, FieldSpec, Image, ImageRef, ModelReply, Tokens  # noqa: E402
 
 RESULTS = variant.results_dir(HERE)
 

@@ -11,7 +11,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))  # services/golden-tests
 sys.path.insert(0, str(HERE))
 from attacks import ATTACKS  # noqa: E402
-
 from drawing import CARDS, card_image  # noqa: E402
 
 
