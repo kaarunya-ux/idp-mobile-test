@@ -1,4 +1,4 @@
-"""Sends the 30 invented Aadhaar cards to ``POST /api/v1/extract`` and scores every field (correct, wrong, empty, review).
+"""Sends the 100 invented Aadhaar cards to ``POST /api/v1/extract`` and scores every field (correct, wrong ACCEPTED, wrong NEEDS_REVIEW, missing).
 
     EVAL_EXTRACTION_URL=http://host:8003 python accuracy/aadhaar/run.py [--only A01,A02]
 
@@ -65,6 +65,7 @@ def main() -> int:
                     "group": spec.group,
                     "font": spec.font,
                     "effects": list(spec.effects),
+                    "truth": spec.truth(),
                     "http": status,
                     "document_type": (body or {}).get("documentType"),
                     "read_by": (body or {}).get("readBy"),
@@ -72,7 +73,7 @@ def main() -> int:
                     "fields": fields,
                 }
             )
-            sys.stdout.write(f"{spec.card_id} {spec.group:14} http {status} " + " ".join(f"{k}={v['outcome']}" for k, v in fields.items()) + "\n")
+            sys.stdout.write(f"{spec.card_id} {spec.group:14} http {status} " + " ".join(f"{k[:4]}={v['outcome'][:7]}" for k, v in fields.items()) + "\n")
     (HERE / "results" / "aadhaar_results.json").write_text(json.dumps(rows, indent=1))
     return 0
 

@@ -1,17 +1,21 @@
-"""The 30 invented Aadhaar cards of the accuracy set and the value each field should be read as.
+"""The 100 invented Aadhaar cards of the accuracy set and the value each field should be read as, exactly as printed.
 
 Nothing here is a real person or a real number: names are built from made-up surnames, numbers are random 12-digit
-strings given a Verhoeff check digit. 28 cards carry a valid number and are scored for accuracy; 2 carry a number with
-a wrong check digit and are their own class: the right outcome for them is that the number is not accepted.
+strings given a Verhoeff check digit. Names and addresses are rich in letters OCR confuses (rn/m, cl/d, l/1, O/0).
+98 cards carry a valid number and are scored for accuracy; 2 carry a number with a wrong check digit
+and are their own class: the right outcome for them is that the number is not accepted.
 """
 
 import random
 from dataclasses import dataclass
+from itertools import combinations, cycle, islice
 
 SEED = 20261111
 FIELDS = ("aadhaar_number", "name", "dob", "gender", "pincode", "address")
 FONTS = ("sans", "serif", "mono")
-EFFECTS = ("blur", "rotate", "glare", "lowres")
+EFFECTS = ("angle", "strong_blur", "faded", "glare", "lowres", "crop", "table")  # the picture defects, English text only
+CARDS = 100
+WRONG_CHECKSUM_CARDS = 2
 
 # Verhoeff: the check digit scheme of the Aadhaar number (tables from the published algorithm).
 _D = (
@@ -38,11 +42,20 @@ _P = (
 )
 _INV = (0, 4, 3, 2, 1, 5, 6, 7, 8, 9)
 
-FIRST_NAMES = ("Anil", "Meera", "Rohit", "Sunita", "Karan", "Divya", "Manoj", "Pooja", "Vikas", "Neha", "Arjun", "Kavita", "Sanjay", "Ritu")
-SURNAMES = ("Testrao", "Samplekar", "Demoji", "Mockwal", "Fakepatil", "Dummyani", "Trialkar", "Sandboxe", "Pretendi", "Mockhade")
-AREAS = ("Sample Nagar", "Demo Colony", "Test Layout", "Mock Enclave", "Trial Road", "Dummy Park")
-CITIES = (("Testpur", "Karnataka"), ("Mockabad", "Maharashtra"), ("Samplegarh", "Tamil Nadu"), ("Demopet", "Telangana"))
-GENDERS = ("MALE", "FEMALE")
+FIRST_NAMES = ("Anil", "Meera", "Rohit", "Sunita", "Karan", "Divya", "Clement", "Dilnaz", "Lalit", "Omkar", "Marnik", "Kamal", "Lalita", "Claribel")
+SURNAMES = ("Testrao", "Samplekar", "Demoji", "Mockwal", "Fakepatil", "Clarkar", "Mornani", "Dolwal", "Lomhade", "Marnekar", "Olwani")
+HOUSES = ("10", "1/10", "101", "Plot 10", "O-1", "Block O, 101", "Lane 11", "88")
+AREAS = ("Sample Nagar", "Demo Colony", "Clarmor Layout", "Mock Enclave", "Old Cloth Market", "Lalmor Road", "Dollclark Park")
+CITIES = (
+    ("Testpur", "Karnataka"),
+    ("Clarpur", "Karnataka"),
+    ("Samplegarh", "Haryana"),
+    ("Marnal", "Haryana"),
+    ("Demopet", "Chandigarh"),
+    ("Dolmahal", "Chandigarh"),
+    ("Mockabad", "Maharashtra"),
+)
+GENDERS = ("Male", "Female")
 
 
 def check_digit(digits: str) -> str:
@@ -73,7 +86,7 @@ class CardSpec:
     pincode: str
 
     def truth(self) -> dict[str, str]:
-        """What a correct reading returns, with the number in the masked form the service returns."""
+        """What a correct reading returns: the text as drawn on the card, with the number in its masked form."""
         return {
             "aadhaar_number": "XXXX XXXX " + self.number[-4:],
             "name": self.name,
@@ -85,19 +98,19 @@ class CardSpec:
 
 
 def _plan() -> list[tuple[str, tuple[str, ...]]]:
-    """(font, effects) of the 30 cards, in order: 6 plain, 4 serif, 4 mono, 3 each of blur, rotation, glare and low
-    resolution, 2 with two effects together, then the 2 cards whose number has a wrong check digit."""
-    plan = [("sans", ())] * 6 + [("serif", ())] * 4 + [("mono", ())] * 4
-    plan += [("sans", (e,)) for e in EFFECTS for _ in range(3)]
-    plan += [("sans", ("blur", "rotate")), ("serif", ("glare", "lowres"))]
-    return plan + [("sans", ())] * 2
+    """(font, defects) of the 100 cards: 10 clean controls, 8 cards of each single defect, 32 with two defects, then the
+    2 cards whose number has a wrong check digit."""
+    plan: list[tuple[str, tuple[str, ...]]] = [("sans", ())] * 4 + [("serif", ())] * 3 + [("mono", ())] * 3
+    plan += [(FONTS[n % 3], (e,)) for e in EFFECTS for n in range(8)]
+    plan += [(FONTS[n % 3], pair) for n, pair in enumerate(islice(cycle(combinations(EFFECTS, 2)), 32))]
+    return plan + [("sans", ())] * WRONG_CHECKSUM_CARDS
 
 
 def build_cards() -> list[CardSpec]:
     rng = random.Random(SEED)
     cards: list[CardSpec] = []
     for index, (font, effects) in enumerate(_plan(), start=1):
-        group = "wrong_checksum" if index > 28 else "normal"
+        group = "wrong_checksum" if index > CARDS - WRONG_CHECKSUM_CARDS else "normal"
         digits = str(rng.randint(2, 9)) + "".join(str(rng.randint(0, 9)) for _ in range(10))
         last = check_digit(digits)
         if group == "wrong_checksum":
@@ -110,12 +123,12 @@ def build_cards() -> list[CardSpec]:
                 group=group,
                 font=font,
                 effects=effects,
-                name=f"{rng.choice(FIRST_NAMES)} {rng.choice(SURNAMES)}".upper(),
+                name=f"{rng.choice(FIRST_NAMES)} {rng.choice(SURNAMES)}",
                 dob=f"{rng.randint(1, 28):02d}/{rng.randint(1, 12):02d}/{rng.randint(1950, 2004)}",
                 gender=rng.choice(GENDERS),
                 number=f"{raw[:4]} {raw[4:8]} {raw[8:]}",
-                address=f"{rng.randint(1, 99)}, {rng.choice(AREAS)}, {city}, {state}".upper(),
-                pincode=str(rng.randint(100000, 999999)),
+                address=f"{rng.choice(HOUSES)}, {rng.choice(AREAS)}, {city}, {state}",
+                pincode=str(rng.randint(1, 9)) + "".join(rng.choice("0011234567899") for _ in range(5)),
             )
         )
     return cards

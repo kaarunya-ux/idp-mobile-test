@@ -46,7 +46,7 @@ full-check:  ## the suites, then the drift comparison, in one go (run by hand, E
 clean:  ## remove drawn pictures and results
 	rm -rf prompt-injection/*/pages prompt-injection/*/cards prompt-injection/*/results pii-compliance/pages pii-compliance/results
 
-accuracy-aadhaar:  ## 30 invented Aadhaar cards sent to POST /api/v1/extract, scored per field; needs EVAL_EXTRACTION_URL (about 5 minutes)
+accuracy-aadhaar:  ## 100 invented Aadhaar cards sent to POST /api/v1/extract, scored per field; needs EVAL_EXTRACTION_URL (about 12 minutes)
 	$(EXTRACTION) accuracy/aadhaar/run.py
 	$(EXTRACTION) accuracy/aadhaar/report.py
 

@@ -12,11 +12,11 @@ import score  # noqa: E402
 
 TRUTH = {
     "aadhaar_number": "XXXX XXXX 1008",
-    "name": "ANIL TESTRAO",
+    "name": "Anil Testrao",
     "dob": "05/06/1980",
-    "gender": "MALE",
+    "gender": "Male",
     "pincode": "560001",
-    "address": "12, SAMPLE NAGAR, TESTPUR 560001",
+    "address": "12, Sample Nagar, Testpur 560001",
 }
 
 
@@ -36,11 +36,11 @@ def outcomes(response: dict | None, group: str = "normal") -> dict[str, str]:
 # --- the card set ----------------------------------------------------------------------------------------------------
 
 
-def test_builds_30_cards_28_with_a_valid_number_and_2_with_a_wrong_check_digit() -> None:
+def test_builds_100_cards_98_with_a_valid_number_and_2_with_a_wrong_check_digit() -> None:
     cards = card_set.build_cards()
 
-    assert len(cards) == 30 and len({c.card_id for c in cards}) == 30
-    assert all(card_set.is_valid_number(c.number) for c in cards if c.group == "normal") and sum(c.group == "normal" for c in cards) == 28
+    assert len(cards) == 100 and len({c.card_id for c in cards}) == 100
+    assert all(card_set.is_valid_number(c.number) for c in cards if c.group == "normal") and sum(c.group == "normal" for c in cards) == 98
     assert not any(card_set.is_valid_number(c.number) for c in cards if c.group == "wrong_checksum")
 
 
@@ -49,45 +49,68 @@ def test_builds_the_same_cards_every_time_and_covers_every_font_and_defect() -> 
 
     assert cards == card_set.build_cards()
     assert {c.font for c in cards} == set(card_set.FONTS)
-    assert {e for c in cards for e in c.effects} == set(card_set.EFFECTS)
+    assert all(sum(e in c.effects for c in cards) >= 8 for e in card_set.EFFECTS)
 
 
-def test_draws_the_same_picture_every_time_and_a_smaller_one_for_low_resolution() -> None:
-    plain, lowres = card_set.build_cards()[0], next(c for c in card_set.build_cards() if "lowres" in c.effects)
+def test_uses_the_states_and_the_letters_that_ocr_confuses() -> None:
+    text = " ".join(c.truth()["address"] + c.truth()["name"] for c in card_set.build_cards())
 
-    assert draw.card_picture(plain).tobytes() == draw.card_picture(plain).tobytes()
-    assert draw.card_picture(lowres).size[0] < draw.W and draw.card_picture(plain).size == (draw.W, draw.H)
+    assert all(state in text for state in ("Karnataka", "Haryana", "Chandigarh"))
+    assert all(pair in text for pair in ("rn", "cl", "O-1", "1/10"))
+
+
+def test_draws_the_same_picture_every_time_and_every_defect_changes_it() -> None:
+    cards = card_set.build_cards()
+    plain = cards[0]
+    base = draw.plain_card(plain)
+
+    assert draw.card_picture(plain).tobytes() == draw.card_picture(plain).tobytes() and base.size == (draw.W, draw.H)
+    for defect in card_set.EFFECTS:
+        card = next(c for c in cards if c.effects == (defect,))
+        assert draw.card_picture(card).tobytes() != draw.plain_card(card).tobytes()
+    assert draw.card_picture(next(c for c in cards if c.effects == ("crop",))).size[0] < draw.W
+    assert draw.card_picture(next(c for c in cards if c.effects == ("lowres",))).size[0] < draw.W
 
 
 # --- scoring ---------------------------------------------------------------------------------------------------------
 
 
-def test_scores_every_field_correct_when_the_answer_is_what_was_printed() -> None:
-    assert set(outcomes(answer()).values()) == {"correct"}
+def test_scores_every_field_correct_and_exact_when_the_answer_is_what_was_printed() -> None:
+    cells = score.score_card(TRUTH, answer()).values()
+
+    assert {c["outcome"] for c in cells} == {"correct"} and all(c["exact"] for c in cells)
 
 
-def test_accepts_case_spacing_punctuation_and_date_format_differences() -> None:
-    reply = answer(name=field("name", "Anil  Testrao"), dob=field("dob", "1980-06-05"), address=field("address", "12 Sample Nagar Testpur, 560001"))
+def test_scores_case_and_date_format_differences_correct_but_not_exact() -> None:
+    reply = answer(name=field("name", "ANIL  TESTRAO"), dob=field("dob", "1980-06-05"))
+    cells = score.score_card(TRUTH, reply)
 
-    assert set(outcomes(reply).values()) == {"correct"}
+    assert (cells["name"]["outcome"], cells["dob"]["outcome"]) == ("correct", "correct")
+    assert (cells["name"]["exact"], cells["dob"]["exact"], cells["gender"]["exact"]) == (False, False, True)
 
 
-def test_scores_a_different_value_wrong_a_missing_one_empty_and_a_review_as_review() -> None:
-    reply = answer(name=field("name", "Meera Demoji"), gender=field("gender", None), dob=field("dob", "05/06/1980", "NEEDS_REVIEW"))
+def test_separates_a_wrong_accepted_value_from_a_wrong_one_sent_to_review_and_a_missing_one() -> None:
+    reply = answer(
+        name=field("name", "Meera Demoji"),
+        gender=field("gender", "Female", "NEEDS_REVIEW"),
+        pincode=field("pincode", None),
+        dob=field("dob", "05/06/1980", "NEEDS_REVIEW"),
+    )
+    cells = score.score_card(TRUTH, reply)
 
-    assert (outcomes(reply)["name"], outcomes(reply)["gender"], outcomes(reply)["dob"]) == ("wrong", "empty", "review")
-    assert score.score_card(TRUTH, reply)["dob"]["review_right"] is True
+    assert [cells[k]["outcome"] for k in ("name", "gender", "pincode", "dob")] == ["wrong_accepted", "wrong_review", "missing", "correct"]
+    assert cells["dob"]["reviewed"] is True and cells["name"]["reviewed"] is False  # a right value in review still counts in the review rate
 
 
 def test_scores_the_number_correct_only_in_the_masked_form_with_the_printed_last_four_digits() -> None:
     assert outcomes(answer(aadhaar_number=field("aadhaar_number", "XXXX XXXX 1008")))["aadhaar_number"] == "correct"
-    assert outcomes(answer(aadhaar_number=field("aadhaar_number", "2345 6789 1008")))["aadhaar_number"] == "wrong"  # unmasked
-    assert outcomes(answer(aadhaar_number=field("aadhaar_number", "XXXX XXXX 1009")))["aadhaar_number"] == "wrong"
+    assert outcomes(answer(aadhaar_number=field("aadhaar_number", "2345 6789 1008")))["aadhaar_number"] == "wrong_accepted"  # unmasked
+    assert outcomes(answer(aadhaar_number=field("aadhaar_number", "XXXX XXXX 1009")))["aadhaar_number"] == "wrong_accepted"
 
 
-def test_leaves_every_field_empty_when_there_is_no_answer_or_another_document_type() -> None:
-    assert set(outcomes(None).values()) == {"empty"}
-    assert set(outcomes({"documentType": "pan_card", "fields": answer()["fields"]}).values()) == {"empty"}
+def test_leaves_every_field_missing_when_there_is_no_answer_or_another_document_type() -> None:
+    assert set(outcomes(None).values()) == {"missing"}
+    assert set(outcomes({"documentType": "pan_card", "fields": answer()["fields"]}).values()) == {"missing"}
 
 
 def test_scores_a_wrong_check_digit_number_correct_when_not_accepted_and_still_masked() -> None:
@@ -95,17 +118,27 @@ def test_scores_a_wrong_check_digit_number_correct_when_not_accepted_and_still_m
     accepted = answer(aadhaar_number=field("aadhaar_number", "XXXX XXXX 1009"))
     unmasked = answer(aadhaar_number=field("aadhaar_number", "2345 6789 1009", "NEEDS_REVIEW"))
 
-    assert [outcomes(r, "wrong_checksum")["aadhaar_number"] for r in (held, accepted, unmasked)] == ["correct", "wrong", "wrong"]
+    assert [outcomes(r, "wrong_checksum")["aadhaar_number"] for r in (held, accepted, unmasked)] == ["correct", "wrong_accepted", "wrong_review"]
 
 
 # --- the report ------------------------------------------------------------------------------------------------------
 
 
-def test_reports_counts_per_field_and_keeps_the_wrong_check_digit_cards_apart() -> None:
-    def row(group: str, response: dict) -> dict:
-        return {"card": "A", "group": group, "font": "sans", "effects": [], "seconds": 5.0, "fields": score.score_card(TRUTH, response, group)}
+def test_reports_per_field_and_per_defect_shows_wrong_accepted_apart_and_keeps_the_wrong_check_digit_cards_out() -> None:
+    def row(group: str, response: dict, effects: list[str]) -> dict:
+        return {
+            "card": "A1",
+            "group": group,
+            "font": "sans",
+            "effects": effects,
+            "truth": TRUTH,
+            "seconds": 5.0,
+            "fields": score.score_card(TRUTH, response, group),
+        }
 
-    text = report.build([row("normal", answer()), row("normal", answer(name=field("name", "Other Person"))), row("wrong_checksum", answer())])
+    wrong = answer(name=field("name", "Other Person"))
+    text = report.build([row("normal", answer(), []), row("normal", wrong, ["crop"]), row("wrong_checksum", answer(), [])])
 
-    assert "| name | 2 | 1 | 1 | 0 | 0 (0) | 50% |" in text
-    assert "Cards with a wrong check digit (1)" in text
+    assert "| name | 2 | 50% | 50% | **1** | 0 | 0 | 0% |" in text
+    assert "| crop (1 cards) | 6 | 83% | 83% | **1** | 0 | 0 | 0% |" in text
+    assert "| A1 | crop | name | Other Person | Anil Testrao |" in text and "Cards with a wrong check digit (1)" in text
