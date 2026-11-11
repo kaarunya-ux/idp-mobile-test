@@ -10,11 +10,12 @@ from celery.signals import worker_init, worker_process_init
 
 from conversion.bootstrap import build_process_service, build_session_factory
 from conversion.conversion.infrastructure import tasks
+from conversion.core.build_info import build_stamp
 from conversion.core.config import get_settings
 from conversion.core.logging import configure_logging
 
 settings = get_settings()
-configure_logging(settings.logging)
+configure_logging(settings.logging, build_stamp(settings))
 celery_app = tasks.create_celery_app(settings.require_celery())
 
 

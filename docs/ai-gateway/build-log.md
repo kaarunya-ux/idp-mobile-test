@@ -223,3 +223,26 @@ boxes only, and the request says so ("There is no image this time"). The prompt 
 and no better (conversion build log, entry 19). A request with `page` works as before.
 
 **Check it:** 143 unit tests pass; lint, types, 7 import contracts.
+
+## Entry 11: AI guardrails: prompt injection, personal data in logs, prompt drift (2026-11-10)
+
+**What:** taken from the intern's PR #27 (only these parts; see "Left out").
+- Prompt injection (checklist #21, ADR 0007): new prompt versions say that everything printed on a page or card is
+  data, never an instruction (`page-read.v2`/`v3`, `field-read.v2`, `classify.v2`, `page-analysis.v2`,
+  `template-suggest.v2`, and the card profiles' text). The standard cards use a one-line system prompt, `card-read.v1`.
+  A page read that writes fewer blocks than `MODEL__PAGE_READ_MIN_BLOCK_SHARE` (0.5) of what its own analysis counted
+  is repaired once, then refused.
+- Personal data (#22): a mask on every log line and on validation messages replaces Aadhaar-, PAN-, e-mail- and
+  phone-shaped text. README has a "Data flow and personal data" table.
+- Prompt drift (#3, ADR 0008): every log line carries `service`, `env`, `service_version`, `commit` (`BUILD__COMMIT`)
+  and `config_hash`; `ai_call_finished` adds the model, `prompt_hash`, temperature, max tokens, thinking, the server's
+  `system_fingerprint` and `repaired`; `prompt_loaded` lines at start-up; `PROMPTS__PINS` rolls a prompt back.
+- `services/golden-tests/`: the injection and PII suites against a live model, baselines and comparison.
+
+**Left out of PR #27:** the model registry (`models.yaml`, checksum script: model switching, not these three), the
+prompt-file history at start-up (git already records prompt changes; it wrote a file inside the container), the
+log watcher, promotion gate and canary, and the prompt-quality suite.
+
+**Check it:** 194 unit tests pass; lint, types, 7 import contracts. Golden suites on the 35B (10.0.3.13): conversion
+pages 12 of 12, hostile cards obeyed 1 of 18 without OCR hints and 0 of 18 with them, normal cards 100%, PII 0 leaks
+(`services/golden-tests/BASELINE.md`).

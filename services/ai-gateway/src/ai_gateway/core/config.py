@@ -56,6 +56,9 @@ class ModelSettings(BaseModel):
     timeouts: ModelTimeouts = Field(default_factory=ModelTimeouts)
     max_image_side_px: int = Field(1280, ge=256, le=4096)  # IDP-03 ch. 4.3
     page_read_max_side_px: int = Field(2048, ge=256, le=4096)  # whole pages: small print needs more pixels than a card
+    # a page read is refused (and asked for once more) when it writes fewer blocks than this share of the number its own
+    # analysis counted: a hijacked or cut-off reading looks like that (ML-07: a threshold lives in settings)
+    page_read_min_block_share: float = Field(0.5, ge=0.1, le=1.0)
     min_image_side_px: int = Field(768, ge=0, le=2048)  # smaller card pictures are enlarged (the web app's MIN_EDGE)
     max_image_bytes: ByteSize = ByteSize(20 * 1024 * 1024)  # larger page images are refused (AIG-422-INPUT-001)
     send_schema: bool = True  # false for mlx_vlm.server, whose schema enforcement corrupts the first value
@@ -121,6 +124,26 @@ class AuthSettings(BaseModel):
     leeway: timedelta = Field(timedelta(seconds=30), ge=timedelta(0), le=timedelta(minutes=5))
 
 
+class PromptSettings(BaseModel):
+    """Which version of a prompt to use. By default the highest; a pin fixes a prompt at an older version, which is the
+    rollback when a new version turns out worse: ``PROMPTS__PINS='{"page-read": 2}'`` and a restart (ADR 0008)."""
+
+    pins: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("pins")
+    @classmethod
+    def _versions_start_at_one(cls, pins: dict[str, int]) -> dict[str, int]:
+        if any(version < 1 for version in pins.values()):
+            raise ValueError("a prompt version is a whole number from 1")
+        return pins
+
+
+class BuildSettings(BaseModel):
+    """Which build is running, for the stamp on every log line. ``BUILD__COMMIT`` is set at deploy."""
+
+    commit: str = Field("unknown", min_length=1, max_length=64)
+
+
 class MissingSettingsError(RuntimeError):
     """The process started without settings it needs."""
 
@@ -131,7 +154,9 @@ class Settings(BaseSettings):
     service_name: str = Field("ai-gateway", min_length=1, max_length=64)
     environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    build: BuildSettings = Field(default_factory=BuildSettings)
     model: ModelSettings = Field(default_factory=ModelSettings)
+    prompts: PromptSettings = Field(default_factory=PromptSettings)
     queue: QueueSettings = Field(default_factory=QueueSettings)
     caps: CapsSettings = Field(default_factory=CapsSettings)
     breaker: BreakerSettings = Field(default_factory=BreakerSettings)

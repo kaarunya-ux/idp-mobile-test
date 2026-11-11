@@ -250,6 +250,12 @@ class AiFallbackSettings(BaseModel):
     confidence: float = Field(0.9, gt=0, le=1)  # given to an AI value that passes the field's rule (ML-07)
 
 
+class BuildSettings(BaseModel):
+    """Which build is running, for the stamp on every log line. ``BUILD__COMMIT`` is set at deploy."""
+
+    commit: str = Field("unknown", min_length=1, max_length=64)
+
+
 class MissingSettingsError(RuntimeError):
     """A process started without settings it needs, for example a worker without ``DB__URL``."""
 
@@ -262,6 +268,7 @@ class Settings(BaseSettings):
     service_name: str = Field("extraction-service", min_length=1, max_length=64)
     environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    build: BuildSettings = Field(default_factory=BuildSettings)
     ocr: OcrSettings = Field(default_factory=OcrSettings)
     quality: QualitySettings = Field(default_factory=QualitySettings)
     limits: LimitsSettings = Field(default_factory=LimitsSettings)

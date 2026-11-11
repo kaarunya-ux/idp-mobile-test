@@ -28,6 +28,9 @@ from ai_gateway.ai.domain.ports import ImageStorePort, PromptsPort
 from ai_gateway.ai.domain.prompt_text import data_block
 
 PROMPT = "field-read"
+# The standard card types are read with a one-line system prompt: the card's own prompt carries every rule. With the
+# long field-read prompt as well, the model returned nulls for cards that said "return null" (live test, ADR 0007).
+CARD_PROMPT = "card-read"
 
 
 class ReadFieldsService:
@@ -45,10 +48,10 @@ class ReadFieldsService:
         self._profiles = profiles
 
     async def read(self, caller: Caller, query: FieldReadQuery) -> Answer[list[FieldValue]]:
-        prompt = self._prompts.get(PROMPT)
+        profile = self._profiles.get(query.document_type or "")
+        prompt = self._prompts.get(CARD_PROMPT if profile is not None else PROMPT)
         images = await self._images.load(query.pages, stack=True, tidy=True)
         keys = [f.key for f in query.fields]
-        profile = self._profiles.get(query.document_type or "")
         hints = _readings(query.readings)
         read: Callable[[str], dict[str, str | None]]
         if profile is not None:

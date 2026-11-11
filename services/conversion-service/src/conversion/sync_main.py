@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from conversion import health
 from conversion.conversion.api import routes
 from conversion.conversion.application.services.convert_now import ConvertNowRunner
+from conversion.core.build_info import build_stamp
 from conversion.core.clock import Clock, SystemClock
 from conversion.core.config import Settings, get_settings
 from conversion.core.logging import CorrelationIdMiddleware, configure_logging
@@ -34,7 +35,7 @@ def create_sync_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        configure_logging(settings.logging)
+        configure_logging(settings.logging, build_stamp(settings))
         if pool is not None:
             await pool.warm_up()
         log.info("sync_api_started", service=settings.service_name, environment=settings.environment)

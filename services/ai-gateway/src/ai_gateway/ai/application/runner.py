@@ -62,7 +62,7 @@ class ModelCallRunner:
                 self._metrics.waited(priority=caller.priority, seconds=started - queued)
                 reply = await self._model.complete(request, timeout_s=self._timeouts[task])
                 answered = True
-                value, tokens, model = await self._read_or_repair(task, request, reply, read)
+                value, tokens, model, repaired = await self._read_or_repair(task, request, reply, read)
         except DomainError as error:
             if not answered:
                 await self._caps.refund(str(caller.account_id), day)
@@ -76,21 +76,38 @@ class ModelCallRunner:
             model=model, prompt_version=prompt.label, latency_ms=round(latency_s * 1000), tokens=tokens
         )
         self._metrics.call_finished(task=task, model=model, outcome="OK", latency_s=latency_s, tokens=tokens)
-        self._finished(caller, task, prompt, outcome="OK", latency_ms=provenance.latency_ms, tokens=tokens)
+        self._finished(
+            caller,
+            task,
+            prompt,
+            outcome="OK",
+            latency_ms=provenance.latency_ms,
+            tokens_in=tokens.input,  # numbers, not a repr: a log-based watcher reads these
+            tokens_out=tokens.output,
+            # what the answer was made with (prompt drift strategy 2): the same on every call of one setup, so a change
+            # between environments or after a deploy shows up in the logs without any document text
+            model=model,
+            prompt_hash=prompt.fingerprint,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            thinking=request.thinking,
+            server_fingerprint=reply.fingerprint,
+            repaired=repaired,
+        )
         return Answer(value=value, provenance=provenance)
 
     async def _read_or_repair[T](
         self, task: Task, request: ModelRequest, reply: ModelReply, read: Callable[[str], T]
-    ) -> tuple[T, Tokens, str]:
+    ) -> tuple[T, Tokens, str, bool]:
         try:
-            return read(reply.content), reply.tokens, reply.model
+            return read(reply.content), reply.tokens, reply.model, False
         except AnswerShapeError as first:
             problem = str(first)[:_PROBLEM_LENGTH]
         repair = self._prompts.get(REPAIR_PROMPT).system.replace("{problem}", problem)
         retry = replace(request, follow_up=(*request.follow_up, ("assistant", reply.content), ("user", repair)))
         second = await self._model.complete(retry, timeout_s=self._timeouts[task])
         try:
-            return read(second.content), reply.tokens + second.tokens, second.model
+            return read(second.content), reply.tokens + second.tokens, second.model, True
         except AnswerShapeError as exc:
             raise OutputInvalidError from exc
 

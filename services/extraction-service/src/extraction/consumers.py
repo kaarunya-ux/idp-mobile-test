@@ -14,6 +14,7 @@ from faststream import FastStream
 
 from extraction.api_wiring import s3_client
 from extraction.bootstrap import build_accept_service, build_rabbit_broker, build_session_factory
+from extraction.core.build_info import build_stamp
 from extraction.core.clock import SystemClock
 from extraction.core.config import Settings, get_settings
 from extraction.core.db import create_async_db_engine, create_async_session_factory
@@ -47,7 +48,7 @@ def _account_deleted(settings: Settings) -> Callable[[UUID], Awaitable[None]]:
 
 def create_app(settings: Settings | None = None) -> FastStream:
     settings = settings or get_settings()
-    configure_logging(settings.logging)
+    configure_logging(settings.logging, build_stamp(settings))
     broker = build_rabbit_broker(settings)
     service = build_accept_service(
         settings, build_session_factory(settings), create_celery_app(settings.require_celery())

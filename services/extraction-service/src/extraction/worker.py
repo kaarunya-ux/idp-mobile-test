@@ -13,12 +13,13 @@ from celery.signals import worker_init, worker_process_init
 from prometheus_client import CollectorRegistry, multiprocess, start_http_server
 
 from extraction.bootstrap import build_session_factory, build_worker_services
+from extraction.core.build_info import build_stamp
 from extraction.core.config import get_settings
 from extraction.core.logging import configure_logging
 from extraction.pipeline.infrastructure import tasks
 
 settings = get_settings()
-configure_logging(settings.logging)
+configure_logging(settings.logging, build_stamp(settings))
 celery_app = tasks.create_celery_app(settings.require_celery())
 
 

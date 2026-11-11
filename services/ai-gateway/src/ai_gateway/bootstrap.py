@@ -80,7 +80,7 @@ def build(settings: Settings, clock: Clock) -> Container:
     model = settings.model
     model_port, http, page_http = _model_servers(settings)
     redis = create_redis(settings.redis)
-    prompts = PromptFiles.load()
+    prompts = PromptFiles.load(pins=settings.prompts.pins)
     runner = ModelCallRunner(
         model=model_port,
         slots=RedisSlots(
@@ -119,7 +119,11 @@ def build(settings: Settings, clock: Clock) -> Container:
         analyse=AnalysePageService(runner=runner, images=images, prompts=prompts),
         suggest=SuggestTemplateService(runner=runner, images=images, prompts=prompts),
         read_page=ReadPageService(
-            runner=runner, images=images, prompts=prompts, max_side_px=model.page_read_max_side_px
+            runner=runner,
+            images=images,
+            prompts=prompts,
+            max_side_px=model.page_read_max_side_px,
+            min_block_share=model.page_read_min_block_share,
         ),
         read_document=ReadDocumentService(runner=runner, images=images, prompts=prompts),
         read_layout=ReadLayoutService(
