@@ -22,6 +22,7 @@ from conversion.conversion.application.services.convert_now import (
     MergeNowCommand,
 )
 from conversion.conversion.domain.exceptions import UnexpectedFailureError
+from conversion.core.build_info import build_stamp
 from conversion.core.config import get_settings
 from conversion.core.errors import DomainError
 from conversion.core.logging import CORRELATION_ID_KEY, configure_logging, get_correlation_id
@@ -37,7 +38,8 @@ def _service() -> ConvertNowService:
 
 
 def _start_worker() -> None:
-    configure_logging(get_settings().logging)
+    settings = get_settings()
+    configure_logging(settings.logging, build_stamp(settings))
 
 
 def _warm_up() -> None:

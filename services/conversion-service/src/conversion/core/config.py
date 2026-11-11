@@ -190,6 +190,12 @@ class ServiceAuthSettings(BaseModel):
     timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(seconds=1), le=timedelta(minutes=1))
 
 
+class BuildSettings(BaseModel):
+    """Which build is running, for the stamp on every log line. ``BUILD__COMMIT`` is set at deploy."""
+
+    commit: str = Field("unknown", min_length=1, max_length=64)
+
+
 class MissingSettingsError(RuntimeError):
     """A process started without settings it needs, for example a worker without ``DB__URL``."""
 
@@ -202,6 +208,7 @@ class Settings(BaseSettings):
     service_name: str = Field("conversion-service", min_length=1, max_length=64)
     environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    build: BuildSettings = Field(default_factory=BuildSettings)
     limits: LimitsSettings = Field(default_factory=LimitsSettings)
     office: OfficeSettings = Field(default_factory=OfficeSettings)
     preview: PreviewSettings = Field(default_factory=PreviewSettings)

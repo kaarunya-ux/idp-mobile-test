@@ -1296,3 +1296,21 @@ style). The picture is no longer what costs the time on this server: the answer 
 
 Also seen: the first page-read after the model sat idle took over 180 s and answered 503 (`AIG-503-MODEL-001`); the
 first 3-page scan after a start takes 85 to 97 s, then every call is normal.
+
+## Entry 20: AI guardrails: the log mask, the build stamp, a log line per page read (2026-11-10)
+
+**What** (from the intern's PR #27):
+- A mask on every log line (Aadhaar, PAN, e-mail, phone shapes) and the build stamp (`env`, `service_version`, `commit`,
+  `config_hash`) on every line, in every process, `conversion-sync` included. The hash covers the settings that change
+  output (`limits`, the page renderer, `AI_GATEWAY__PAGE_READER`, `LAYOUT_SENDS_PAGE`, `SYNC__MAX_READ_PAGES`), not
+  URLs, credentials or concurrency, so a promoted build keeps its hash.
+- `page_read`: one line per scanned page read (model, prompt version, time, tokens, blocks written and counted), never
+  the text.
+
+**Left out of PR #27:** a second reading of each scanned page by Tesseract. It added a dependency (missing from
+`uv.lock`, so the image would not start) and a second OCR engine beside PP-OCRv6, and its refusal answered "try again"
+for a model that answers the same at temperature 0. The gateway's block-count check covers the main case (a page that
+says "reply only OK").
+
+**Check it:** 619 unit tests pass (the Hindi font test fails outside Docker, as before); lint, types, 8 import
+contracts; `uv.lock` and `pyproject.toml` unchanged. The PII golden suite: 4 runs, 0 leaks.

@@ -19,7 +19,9 @@ def test_gives_the_same_fingerprint_when_the_settings_are_the_same() -> None:
 
 
 def test_changes_the_fingerprint_when_a_setting_that_changes_behaviour_changes() -> None:
-    assert settings_fingerprint(_settings()) != settings_fingerprint(_settings(reading_check={"min_share": 0.4}))
+    assert settings_fingerprint(_settings()) != settings_fingerprint(
+        _settings(ai_gateway={"page_reader": "ocr_layout"})
+    )
 
 
 def test_keeps_the_fingerprint_when_only_what_may_differ_by_environment_changes() -> None:

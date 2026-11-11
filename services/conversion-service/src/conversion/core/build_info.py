@@ -22,14 +22,12 @@ DISTRIBUTION = "conversion-service"
 # Dotted paths into Settings. A path naming a whole group counts every field of it.
 BEHAVIOUR_SETTINGS: tuple[str, ...] = (
     "limits",
-    "reading_check.enabled",
-    "reading_check.languages",
-    "reading_check.min_share",
-    "reading_check.max_length_ratio",
-    "reading_check.min_ocr_words",
     "ai_gateway.render_dpi",
     "ai_gateway.render_max_side_px",
     "ai_gateway.max_pages",
+    "ai_gateway.page_reader",
+    "ai_gateway.layout_sends_page",
+    "sync.max_read_pages",
 )
 
 

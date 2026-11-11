@@ -78,6 +78,7 @@ Read once at startup by `conversion.core.config.Settings`; an invalid value stop
 | `ENVIRONMENT` | `local` | `local`, `dev`, `test`, `staging`, `prod` | Where the process runs |
 | `LOGGING__LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | Lowest level written |
 | `LOGGING__FORMAT` | `json` | `json`, `console` | `console` for readable local logs; JSON everywhere else |
+| `BUILD__COMMIT` | `unknown` | | The git commit of the image; set it at deploy (the images do not set it yet). Every log line carries `env` (from `ENVIRONMENT`), `service_version`, `commit` and `config_hash`: a short hash of the settings that change behaviour (not URLs, credentials, concurrency or timeouts), so a promoted build has the same hash in every environment |
 | `LIMITS__MAX_PAGES` | `1000` | 1–10,000 | PDFs with more pages are refused (`CNV-422-LIMIT-001`) |
 | `LIMITS__MAX_IMAGE_PIXELS` | `180000000` | 1M–1G | Images with more pixels are refused, which stops decompression bombs |
 | `LIMITS__MAX_RENDER_SIDE_PX` | `5000` | 500–20,000 | Rendered pages are scaled down so the longest side fits |
