@@ -541,3 +541,22 @@ spaces (`COLLAPSE_SPACES`, not `STRIP_SPACES`), so the value is returned as prin
 (`#`, `:`, `.`) is part of the label. Standard cards and stored templates are unchanged. ADR 0013 amended.
 
 **Check it:** 763 unit tests pass (26 new); lint, types, 10 import contracts.
+
+## Entry 20: An AI-only address, pincode or name on an Aadhaar card goes to review (2026-11-11)
+
+**Problem:** the intern's Aadhaar accuracy set (100 made-up cards, `services/golden-tests/accuracy/aadhaar/`) found
+58 of 588 fields wrong and `ACCEPTED`, and a review rate of 0%. 47 of the 58 were values only the AI read (OCR could
+not settle the field): addresses (25), pincodes (17) and names (4), on blurred, glared and cropped cards. Their rules
+check only the shape (any text is an address, any six digits a pincode), so a wrong guess passed and was accepted.
+
+**What:** `FieldDefinition.ai_needs_review`. When it is set, a value only the AI read keeps `NEEDS_REVIEW` instead of
+`ACCEPTED`; the value and `source: AI` are unchanged. Set on the Aadhaar card's name, pincode and address, and the Aadhaar
+template goes to version 3: the service reads templates from the database, and the seed (`extraction-migrate`)
+publishes a shipped template only when its version is newer. The seed now numbers it with the shipped version, as its
+docstring said. Template JSON carries the flag as the optional `aiNeedsReview` (written only when true). No new
+response field, no extra AI call; results show `templateVersion` 3 for Aadhaar.
+
+**Not fixed here:** the 11 wrong values both OCR engines agreed on (9 addresses, 2 numbers).
+
+**Check it:** 767 unit tests pass (4 new); lint, types, import contracts. The accuracy set before and after: see the
+PR.

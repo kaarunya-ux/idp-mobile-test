@@ -110,9 +110,10 @@ _LATIN_ONLY = rf"^[^{_DEVANAGARI}]*[A-Za-z][^{_DEVANAGARI}]*$"
 _NAME_ACCEPT_ADDRESS = Accept(mode=AcceptMode.SIMILARITY)
 
 # Version 2: English only (the Hindi name and address are not extracted: the product reads English for now)
+# Version 3: a name, pincode or address only the AI read is NEEDS_REVIEW (ai_needs_review)
 AADHAAR_CARD = TemplateDefinition(
     template_id="standard-aadhaar-card",
-    version=2,
+    version=3,
     scope="STANDARD",
     document_type="AADHAAR_CARD",
     aspect_ratio=1.586,
@@ -142,6 +143,7 @@ AADHAAR_CARD = TemplateDefinition(
             rule=_NAME_RULE,
             normalize=_NAME_NORMALIZE,
             accept=_NAME_ACCEPT,
+            ai_needs_review=True,
         ),
         FieldDefinition(
             key="dob",
@@ -172,6 +174,7 @@ AADHAAR_CARD = TemplateDefinition(
             extract=r"(?<![0-9])[1-9][0-9]{5}(?![0-9])",
             rule=RuleSpec(id="pincode-format", kind=RuleKind.REGEX, pattern=r"[1-9][0-9]{5}"),
             normalize=(Normalizer.STRIP_SPACES,),
+            ai_needs_review=True,
         ),
         FieldDefinition(
             key="address",
@@ -187,6 +190,7 @@ AADHAAR_CARD = TemplateDefinition(
             rule=RuleSpec(id="address-text", kind=RuleKind.REGEX, pattern=r"[A-Z0-9][A-Z0-9 ,.:;/()'\-]{14,300}"),
             normalize=(Normalizer.UPPER, Normalizer.COLLAPSE_SPACES),
             accept=Accept(mode=AcceptMode.SIMILARITY),
+            ai_needs_review=True,
         ),
     ),
 )

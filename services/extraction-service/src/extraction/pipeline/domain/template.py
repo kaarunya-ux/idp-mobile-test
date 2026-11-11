@@ -96,6 +96,8 @@ class FieldDefinition:
     just below it, and nothing is read when the label is not on the page (no guessing from the rest of the page).
     ``clip_to_box`` says the box was drawn around the value itself (a custom key with a box): only the words inside it
     are read, a piece crossing its edge keeping only its words inside, and when it holds none, ``value_after``.
+    ``ai_needs_review`` says the rule checks only the value's shape (any text passes as an address, any six digits as
+    a pincode), so a value only the AI read is a guess nothing has checked: it is kept as NEEDS_REVIEW, not ACCEPTED.
     """
 
     key: str
@@ -118,6 +120,7 @@ class FieldDefinition:
     language: str = "en"
     accept: Accept = field(default_factory=Accept)
     mask: Mask | None = None
+    ai_needs_review: bool = False
 
     def __post_init__(self) -> None:
         for pattern in (self.labels, self.extract, self.above, self.keep, self.starts_at, self.value_after):

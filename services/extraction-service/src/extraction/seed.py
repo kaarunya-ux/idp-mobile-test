@@ -103,7 +103,7 @@ def _upgrade(stored: TemplateOrm, template: TemplateDefinition, now: datetime) -
     for version in stored.versions:
         if version.state == "PUBLISHED":
             version.state = "RETIRED"
-    number = max(v.number for v in stored.versions) + 1
+    number = max(template.version, max(v.number for v in stored.versions) + 1)  # the shipped number, as stored
     stored.versions.append(
         TemplateVersionOrm(
             id=new_id(),

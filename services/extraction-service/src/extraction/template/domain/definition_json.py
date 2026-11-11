@@ -4,7 +4,8 @@ The JSON is what the API accepts and ``template_versions.definition`` stores; th
 ``to_json(parse(x))`` keeps every value, and the standard templates survive the round trip unchanged (tested).
 
 Beyond the schema, a field may carry the reading hints the pipeline uses (``labels``, ``extract``, ``above``,
-``maxLinesAbove``, ``excludes``, ``keep``, ``startsAt``, ``language``; extraction-service ADR 0003). Parts of the
+``maxLinesAbove``, ``excludes``, ``keep``, ``startsAt``, ``language``; extraction-service ADR 0003), and
+``aiNeedsReview`` (an AI-only value is NEEDS_REVIEW; written only when true). Parts of the
 schema the pipeline can't use yet are refused, not ignored: field types other than TEXT, NAME, ID, DATE, NUMBER and
 ADDRESS; rule kinds other than REGEX, DATE and CUSTOM; regions on pages other than 0; and ``tables``.
 """
@@ -172,6 +173,7 @@ def _field(data: object, path: str, problems: _Problems) -> FieldDefinition | No
             accept=_accept(_object(raw.get("accept", {}), f"{path}.accept", problems), f"{path}.accept", problems),
             mask=_mask(raw.get("mask"), f"{path}.mask", problems),
             clip_to_box=False,  # a designed template's boxes are where to look, not drawn tight around the value
+            ai_needs_review=raw.get("aiNeedsReview") is True,
             **hints,
         )
     except (ValueError, TypeError) as exc:
@@ -271,6 +273,8 @@ def _field_json(f: FieldDefinition) -> dict[str, Any]:
             out[key] = getattr(f, attr)
     if f.excludes:
         out["excludes"] = list(f.excludes)
+    if f.ai_needs_review:
+        out["aiNeedsReview"] = True
     return out
 
 

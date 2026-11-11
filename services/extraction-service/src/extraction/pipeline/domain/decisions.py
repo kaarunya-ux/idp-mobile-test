@@ -198,7 +198,7 @@ def decide_with_ai(
     """Stage 7 (IDP-03 ch. 2.6): an unsettled field, read again by AI. The AI value is accepted only when the field's
     rule passes, the same rule OCR readings must pass; otherwise the field keeps the status OCR gave it (NEEDS_REVIEW,
     or EMPTY for an optional field) with the AI reading kept for the reviewer. The engines' readings are kept either
-    way."""
+    way. A field with ``ai_needs_review`` gets the AI value as NEEDS_REVIEW: its rule checks only the shape."""
     readings = {**decision.readings, "ai": ai_value}
     if not ai_value:
         return dataclasses.replace(decision, readings=readings)
@@ -217,7 +217,9 @@ def decide_with_ai(
         normalized_value=normalized,
         confidence=round(confidence, 4),
         source=FieldSource.AI,
-        status=FieldStatus.ACCEPTED,
+        # a rule that checks only the shape can't catch a wrong guess (the Aadhaar accuracy set: 46 wrong addresses,
+        # pincodes and names accepted from the AI on blurred cards), so a person checks it
+        status=FieldStatus.NEEDS_REVIEW if definition.ai_needs_review else FieldStatus.ACCEPTED,
         box=None,  # the AI reads the whole page, so there is no box for the value
         readings=readings,
         rule=outcome,
