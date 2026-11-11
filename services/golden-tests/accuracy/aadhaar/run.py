@@ -1,0 +1,81 @@
+"""Sends the 30 invented Aadhaar cards to ``POST /api/v1/extract`` and scores every field (correct, wrong, empty, review).
+
+    EVAL_EXTRACTION_URL=http://host:8003 python accuracy/aadhaar/run.py [--only A01,A02]
+
+No default address: set ``EVAL_EXTRACTION_URL`` to the base URL of an ``extraction-sync``. ``EVAL_TOKEN``, when set, is sent as
+``Authorization: Bearer`` (the local stack needs none); it is never written anywhere. Pictures go to ``cards/`` and the
+scored answers to ``results/``, both git-ignored. Then run ``report.py``.
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+import httpx
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from card_set import build_cards  # noqa: E402
+from draw import card_picture  # noqa: E402
+from score import score_card  # noqa: E402
+
+TIMEOUT_SECONDS = 180.0
+
+
+def send(client: httpx.Client, path: Path) -> tuple[int, dict | None, float]:
+    started = time.monotonic()
+    with path.open("rb") as picture:
+        reply = client.post("/api/v1/extract", files={"file": (path.name, picture, "image/png")})
+    body = reply.json() if reply.headers.get("content-type", "").startswith("application/json") else None
+    return reply.status_code, body, round(time.monotonic() - started, 2)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--only", help="comma-separated card ids, for a quick try")
+    args = parser.parse_args()
+    url = os.environ.get("EVAL_EXTRACTION_URL")
+    if not url:
+        sys.stderr.write("Set EVAL_EXTRACTION_URL to the base URL of extraction-sync (no default address).\n")
+        return 2
+    token = os.environ.get("EVAL_TOKEN")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    wanted = set(args.only.split(",")) if args.only else None
+    (HERE / "cards").mkdir(exist_ok=True)
+    (HERE / "results").mkdir(exist_ok=True)
+    rows = []
+    with httpx.Client(base_url=url.rstrip("/"), headers=headers, timeout=TIMEOUT_SECONDS) as client:
+        for spec in build_cards():
+            if wanted and spec.card_id not in wanted:
+                continue
+            path = HERE / "cards" / f"{spec.card_id}.png"
+            card_picture(spec).save(path)
+            try:
+                status, body, seconds = send(client, path)
+            except httpx.HTTPError as exc:
+                status, body, seconds = 0, None, 0.0
+                sys.stderr.write(f"{spec.card_id}: {type(exc).__name__}\n")
+            fields = score_card(spec.truth(), body if status == 200 else None, spec.group)
+            rows.append(
+                {
+                    "card": spec.card_id,
+                    "group": spec.group,
+                    "font": spec.font,
+                    "effects": list(spec.effects),
+                    "http": status,
+                    "document_type": (body or {}).get("documentType"),
+                    "read_by": (body or {}).get("readBy"),
+                    "seconds": seconds,
+                    "fields": fields,
+                }
+            )
+            sys.stdout.write(f"{spec.card_id} {spec.group:14} http {status} " + " ".join(f"{k}={v['outcome']}" for k, v in fields.items()) + "\n")
+    (HERE / "results" / "aadhaar_results.json").write_text(json.dumps(rows, indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
