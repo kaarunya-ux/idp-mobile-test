@@ -560,3 +560,22 @@ response field, no extra AI call; results show `templateVersion` 3 for Aadhaar.
 
 **Check it:** 767 unit tests pass (4 new); lint, types, import contracts. The accuracy set before and after: see the
 PR.
+
+## Entry 21: One picture with a card's front and back becomes two pages (2026-11-11)
+
+**Problem:** the frontend sent one picture with a national ID card's front above its back. Before reading, the
+service cuts the largest card-shaped area out of a photo (`card_detector.detect_card`), so it kept the back and
+dropped the front. OCR then found no front labels, and the AI, given only the back, read the machine-readable lines
+(`I<JAMA...<<<<`): the ID number, names and nationality came back as MRZ text. On the whole picture OCR read every
+front field right.
+
+**What:** `card_detector.find_two_cards`: two separate card-shaped areas of about the same size
+(`PREPARE__TWO_CARDS_MIN_SIZE_RATIO`, 0.7; 0 turns it off) are cut apart, with a margin, top one first (left one
+when side by side). The page loader turns such a picture, or a scan inside a PDF, into two pages, exactly as if the
+front and back had been sent as `file` and `back`. One card, three or more cards, and rendered PDF pages are left as
+they were. The API already takes `back`; the frontend will send two files later.
+
+**Known limit:** OCR reads the first page only; the second side goes to the AI. A picture with the back on top gets
+its front fields from the AI.
+
+**Check it:** 774 unit tests pass (7 new); lint, types, import contracts.

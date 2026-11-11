@@ -85,6 +85,9 @@ class PrepareSettings(BaseModel):
 
     orientation_min_confidence: float = Field(0.6, gt=0, le=1)  # below this the page is not rotated
     min_card_area_fraction: float = Field(0.15, gt=0, lt=1)  # a card must cover at least this much of the photo
+    # one picture with two cards of about the same size (the smaller at least this share of the larger) is a card's
+    # front and back, and becomes two pages; 0 never splits
+    two_cards_min_size_ratio: float = Field(0.7, ge=0, le=1)
 
 
 class VerifySettings(BaseModel):

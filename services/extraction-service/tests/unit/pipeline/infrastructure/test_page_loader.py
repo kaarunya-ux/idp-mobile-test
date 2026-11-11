@@ -10,6 +10,7 @@ from PIL import Image
 from extraction.core.error_codes import ErrorCode
 from extraction.pipeline.domain.exceptions import FileRejectedError, TooManyPagesError
 from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
+from extraction.pipeline.infrastructure.preprocess.card_detector import TwoCards
 from extraction.pipeline.infrastructure.quality.page_loader import DocumentPageLoader
 from idp_ocr_engines.engines.arrays import to_rgb_array
 
@@ -183,3 +184,36 @@ def test_reads_no_text_layer_on_a_picture_page() -> None:
     reader = PdfiumTextReader(dpi=300, picture_min_fraction=0.3)
 
     assert reader.read_first_page(_picture_pdf(width_pt=540, height_pt=360)) is None
+
+
+def _two_cards_page() -> Image.Image:
+    """A white page with two bordered light-blue cards, one above the other: a card's front and back, made up."""
+    page = Image.new("RGB", (1000, 1300), (255, 255, 255))
+    for top in (60, 680):
+        page.paste(Image.new("RGB", (860, 540), (90, 90, 90)), (70, top))
+        page.paste(Image.new("RGB", (852, 532), (200, 225, 245)), (74, top + 4))
+    return page
+
+
+SPLITTING = DocumentPageLoader(
+    max_file_bytes=5_000_000,
+    max_pages=3,
+    max_pixels=4_000_000,
+    pdf_dpi=300,
+    two_cards=TwoCards(min_area_fraction=0.15, min_size_ratio=0.7),
+)
+
+
+def test_loads_two_pages_front_first_when_one_picture_holds_a_cards_front_and_back() -> None:
+    pages = SPLITTING.load_pages(_encoded(_two_cards_page(), "PNG"))
+
+    assert [page.page_index for page in pages] == [0, 1]
+    assert all(page.width > page.height for page in pages)  # each one card, not the tall page
+
+
+def test_loads_one_page_when_splitting_is_off() -> None:
+    assert len(LOADER.load_pages(_encoded(_two_cards_page(), "PNG"))) == 1
+
+
+def test_never_splits_a_rendered_pdf_page() -> None:
+    assert len(SPLITTING.load_pages(_pdf(1))) == 1
