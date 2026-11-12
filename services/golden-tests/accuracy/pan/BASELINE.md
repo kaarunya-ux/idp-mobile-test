@@ -8,13 +8,13 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 
 | All | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| every field | 392 | 82% | 82% | **17** | 29 | 26 | 19% |
+| every field | 392 | 86% | 86% | **0** | 29 | 26 | 19% |
 
 ## Per field
 
 | Field | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| pan_number | 98 | 77% | 77% | **17** | 1 | 5 | 5% |
+| pan_number | 98 | 94% | 94% | **0** | 1 | 5 | 5% |
 | name | 98 | 88% | 88% | **0** | 9 | 3 | 19% |
 | father_name | 98 | 79% | 79% | **0** | 18 | 3 | 30% |
 | dob | 98 | 84% | 84% | **0** | 1 | 15 | 23% |
@@ -23,38 +23,21 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 
 | Defect | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| angle (20 cards) | 80 | 75% | 75% | **3** | 5 | 12 | 19% |
-| clean (10 cards) | 40 | 92% | 92% | **2** | 1 | 0 | 2% |
-| crop (16 cards) | 64 | 89% | 89% | **3** | 2 | 2 | 14% |
-| faded (16 cards) | 64 | 80% | 80% | **4** | 7 | 2 | 20% |
-| glare (16 cards) | 64 | 81% | 81% | **2** | 7 | 3 | 22% |
-| lowres (16 cards) | 64 | 78% | 78% | **4** | 2 | 8 | 6% |
+| angle (20 cards) | 80 | 79% | 79% | **0** | 5 | 12 | 19% |
+| clean (10 cards) | 40 | 98% | 98% | **0** | 1 | 0 | 2% |
+| crop (16 cards) | 64 | 94% | 94% | **0** | 2 | 2 | 14% |
+| faded (16 cards) | 64 | 86% | 86% | **0** | 7 | 2 | 20% |
+| glare (16 cards) | 64 | 84% | 84% | **0** | 7 | 3 | 22% |
+| lowres (16 cards) | 64 | 84% | 84% | **0** | 2 | 8 | 6% |
 | strong_blur (20 cards) | 80 | 65% | 65% | **0** | 15 | 13 | 58% |
-| table (16 cards) | 64 | 88% | 88% | **3** | 3 | 2 | 12% |
+| table (16 cards) | 64 | 92% | 92% | **0** | 3 | 2 | 12% |
 
 ## Wrong and ACCEPTED
 
-17 fields, every one listed:
+0 fields, every one listed:
 
 | Card | Defects | Field | Read | Printed |
 |---|---|---|---|---|
-| P08 | none | pan_number | 0CZPD1124C | OCZPD1124C |
-| P10 | none | pan_number | BILPL83010 | BILPL8301O |
-| P13 | angle | pan_number | BMIP08886L | BMIPO8886L |
-| P29 | faded | pan_number | CSMP03050S | CSMPO3050S |
-| P30 | faded | pan_number | MBCP07519A | MBCPO7519A |
-| P33 | faded | pan_number | BOLPD50820 | BOLPD5082O |
-| P39 | glare | pan_number | 0SSP00175Z | OSSPO0175Z |
-| P44 | lowres | pan_number | BSBPM45750 | BSBPM4575O |
-| P48 | lowres | pan_number | 0QZPS51020 | OQZPS5102O |
-| P49 | lowres | pan_number | BZCPM35710 | BZCPM3571O |
-| P57 | crop | pan_number | AD0PM1797D | ADOPM1797D |
-| P61 | table | pan_number | SBLPF78200 | SBLPF7820O |
-| P62 | table | pan_number | I0SPL83210 | IOSPL8321O |
-| P69 | angle, glare | pan_number | LS0PM6065Z | LSOPM6065Z |
-| P79 | faded, lowres | pan_number | DIBPF89490 | DIBPF8949O |
-| P87 | crop, table | pan_number | LIMP04481L | LIMPO4481L |
-| P92 | angle, crop | pan_number | SLLP09728S | SLLPO9728S |
 
 ## Cards with a number of the wrong shape (2)
 
@@ -67,4 +50,4 @@ Right outcome for the number: not ACCEPTED (NEEDS_REVIEW or no value). `Correct`
 | father_name | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
 | dob | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
 
-Time per card: median 4.2 s, slowest 8.5 s.
+Time per card: median 4.1 s, slowest 8.4 s.

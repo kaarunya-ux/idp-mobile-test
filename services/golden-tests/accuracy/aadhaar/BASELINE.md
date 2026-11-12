@@ -8,13 +8,13 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 
 | All | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| every field | 588 | 89% | 84% | **12** | 46 | 9 | 15% |
+| every field | 588 | 89% | 84% | **10** | 46 | 9 | 15% |
 
 ## Per field
 
 | Field | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| aadhaar_number | 98 | 98% | 98% | **2** | 0 | 0 | 0% |
+| aadhaar_number | 98 | 100% | 100% | **0** | 0 | 0 | 0% |
 | name | 98 | 96% | 95% | **0** | 4 | 0 | 27% |
 | dob | 98 | 99% | 99% | **1** | 0 | 0 | 0% |
 | gender | 98 | 100% | 79% | **0** | 0 | 0 | 0% |
@@ -29,19 +29,18 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 | clean (10 cards) | 60 | 100% | 100% | **0** | 0 | 0 | 13% |
 | crop (16 cards) | 96 | 88% | 83% | **4** | 6 | 2 | 11% |
 | faded (16 cards) | 96 | 94% | 91% | **1** | 4 | 1 | 8% |
-| glare (16 cards) | 96 | 79% | 75% | **6** | 9 | 5 | 17% |
+| glare (16 cards) | 96 | 81% | 77% | **4** | 9 | 5 | 17% |
 | lowres (16 cards) | 96 | 93% | 90% | **3** | 4 | 0 | 6% |
-| strong_blur (20 cards) | 120 | 68% | 52% | **1** | 37 | 0 | 50% |
+| strong_blur (20 cards) | 120 | 69% | 52% | **0** | 37 | 0 | 50% |
 | table (16 cards) | 96 | 91% | 86% | **1** | 8 | 0 | 12% |
 
 ## Wrong and ACCEPTED
 
-12 fields, shown up to 30:
+10 fields, shown up to 30:
 
 | Card | Defects | Field | Read | Printed |
 |---|---|---|---|---|
 | A37 | glare | address | 0-1, Dollclark Park, Demopet, Chandigarh 549701 | O-1, Dollclark Park, Demopet, Chandigarh 549701 |
-| A38 | glare | aadhaar_number | XXXX XXXX0333 | XXXX XXXX 0333 |
 | A42 | glare | dob | 07/06/1995 | 07/06/1993 |
 | A49 | lowres | address | 1/10, Lalmor Road, Mamal, Haryana 807364 | 1/10, Lalmor Road, Marnal, Haryana 807364 |
 | A52 | crop | address | Plot 10, Lalmor Road, Clarp Karnataka 707017 | Plot 10, Lalmor Road, Clarpur, Karnataka 707017 |
@@ -51,7 +50,6 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 | A78 | faded, glare | address | Block 0, l0l, Demo Colony, Dolmahal, Chandigarh 108281 | Block O, 101, Demo Colony, Dolmahal, Chandigarh 108281 |
 | A82 | glare, lowres | address | Lane 11, Clarmor Layout, Maharashtra 224836 | Lane 11, Clarmor Layout, Mockabad, Maharashtra 224836 |
 | A85 | lowres, crop | address | Block O, 101, Old Cloth Mark Clarpur, Karnataka 586133 | Block O, 101, Old Cloth Market, Clarpur, Karnataka 586133 |
-| A95 | strong_blur, glare | aadhaar_number | XXXX XXXX5579 | XXXX XXXX 5579 |
 
 ## Cards with a wrong check digit (2)
 
@@ -66,4 +64,4 @@ Right outcome for the Aadhaar number: NEEDS_REVIEW (or no value) and still maske
 | pincode | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
 | address | 2 | 100% | 100% | **0** | 0 | 0 | 100% |
 
-Time per card: median 5.1 s, slowest 9.6 s.
+Time per card: median 5.2 s, slowest 9.2 s.

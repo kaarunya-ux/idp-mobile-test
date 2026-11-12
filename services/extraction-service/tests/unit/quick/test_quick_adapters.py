@@ -209,6 +209,53 @@ def test_maps_a_template_result_with_who_read_each_field() -> None:
     assert found.fields[2].confidence is None  # no value, no confidence
 
 
+def _one_field(raw: str, corrected: str, rule_id: str, *, passed: bool = True) -> dict[str, object]:
+    found = {
+        "key": "number",
+        "label": "Number",
+        "type": "ID_NUMBER",
+        "value": raw,
+        "normalizedValue": corrected,
+        "confidence": 0.95,
+        "status": "ACCEPTED",
+        "source": "OCR_AGREE",
+        "rule": {"id": rule_id, "passed": passed, "message": None},
+    }
+    return RESULT | {"fields": [found]}
+
+
+@pytest.mark.parametrize(
+    ("raw", "corrected", "rule_id", "sent"),
+    [
+        ("0CZPD1124C", "OCZPD1124C", "pan-format", "OCZPD1124C"),  # a zero where a letter belongs
+        ("TN32 20160419911", "TN3220160419911", "dl-number", "TN3220160419911"),
+        ("XXXX XXXX0333", "XXXXXXXX0333", "aadhaar-verhoeff", "XXXX XXXX 0333"),
+    ],
+)
+def test_sends_an_id_numbers_corrected_form_when_its_rule_passed(
+    raw: str, corrected: str, rule_id: str, sent: str
+) -> None:
+    found = quick_result(_one_field(raw, corrected, rule_id))
+
+    assert found is not None
+    assert found.fields[0].value == sent
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "passed"),
+    [
+        ("pan-format", False),  # held for review: the reviewer sees what was read
+        ("address-format", True),  # not an ID number: the text as read, not upper-cased
+        ("custom-number", True),
+    ],
+)
+def test_keeps_the_text_as_read_when_the_field_is_not_a_checked_id_number(rule_id: str, passed: bool) -> None:
+    found = quick_result(_one_field("12 Mock Road", "12 MOCK ROAD", rule_id, passed=passed))
+
+    assert found is not None
+    assert found.fields[0].value == "12 Mock Road"
+
+
 def test_says_ocr_alone_read_it_when_no_model_was_asked() -> None:
     found = quick_result(_template_result() | {"provenance": {"models": []}})
 
