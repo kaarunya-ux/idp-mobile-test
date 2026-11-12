@@ -65,3 +65,11 @@ request with at least one box is therefore read on the upload as it is, cleaned 
 front and back, straightened or turned. Requests with labels only keep those steps, which help photos. A user who
 draws boxes on a photo taken at an angle gets the photo as it is; a box drawn on a tilted scan may need a slightly
 larger box.
+
+## Amendment 2026-11-12: each key may carry the caller's id
+
+The backend gives each key an `id` of its own and maps the answer back by that id, not by the key name a user typed.
+A field in `fields` may carry `id` (optional, 1 to 128 characters, each id once per request); the response's field for
+that key carries the same `id`. Fields sent without one, and the other routes, answer `"id": null`. The id is only
+echoed: it is never read, stored or used to find the value, so the extraction is unchanged. Adding a response field
+is backwards compatible; a caller that sends the same id twice gets 400 `EXT-400-VALIDATION-001`.

@@ -148,18 +148,19 @@ async def extract_custom(
     fields: Annotated[
         str,
         Form(
-            description='JSON list of the keys to read: [{"key": "card_number", "label": "Card No", "type": "text",'
-            ' "box": {"page": 1, "x": 13.5, "y": 26.2, "w": 26, "h": 1.3}}]; type is text, date or number (default'
-            " text); box (optional) is drawn around the value, in percent of the first page; 1 to 50 keys"
+            description='JSON list of the keys to read: [{"id": "f1", "key": "card_number", "label": "Card No",'
+            ' "type": "text", "box": {"page": 1, "x": 13.5, "y": 26.2, "w": 26, "h": 1.3}}]; id (optional, unique)'
+            " is sent back on the key's field; type is text, date or number (default text); box (optional) is drawn"
+            " around the value, in percent of the first page; 1 to 50 keys"
         ),
     ],
     back: Annotated[UploadFile | None, File(description="Optional: the back picture of the same document")] = None,
 ) -> QuickExtractResponse:
-    keys = mappers.custom_fields(fields)
+    keys, ids = mappers.custom_fields(fields)
     front, rear = await _read(service, file, back)
     async with admission.enter():
         result = await asyncio.to_thread(service.extract_custom, caller, front, rear, keys)  # OCR is CPU work
-    return mappers.to_response(result)
+    return mappers.to_response(result, ids)
 
 
 async def _read(service: QuickExtractService, file: UploadFile, back: UploadFile | None) -> tuple[bytes, bytes | None]:

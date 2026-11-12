@@ -596,3 +596,19 @@ label out of the value.
 
 **Check it:** 780 unit tests pass (6 new); lint, types, import contracts. Both Jamaican cards with a box around the
 given name and the date of birth: the right values (before: `National`).
+
+## Entry 23: A custom key may carry the caller's id (2026-11-12)
+
+**Problem:** the backend maps our answer back to its own fields. Matching by key name breaks when a user types a key
+differently, so the backend now gives each key an `id` and expects it back. Our request schema forbids unknown
+properties, so a field with `id` would have been refused with 400.
+
+**What:** `CustomFieldBody.id` (optional, 1 to 128 characters, each once per request) and `ExtractedFieldBody.id`
+(null unless sent). The id is kept in the API layer (`mappers.custom_fields` returns key -> id; keys are already
+unique) and put on each field in `to_response`; nothing past the API sees it. ADR 0013 amended, README updated.
+
+**Not done:** a `box` in the response. The backend's draft response has one; whether it means the box they sent
+(they already have it by id) or where the value was found (a separate feature) is to be agreed with them.
+
+**Check it:** `make check`: 784 unit tests pass (4 new cases, 1 updated for `"id": null`), lint, types, import contracts,
+coverage 93%.
