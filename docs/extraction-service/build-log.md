@@ -612,3 +612,20 @@ unique) and put on each field in `to_response`; nothing past the API sees it. AD
 
 **Check it:** `make check`: 784 unit tests pass (4 new cases, 1 updated for `"id": null`), lint, types, import contracts,
 coverage 93%.
+
+## Entry 24: The synchronous extract sends an ID number in its corrected form (2026-11-12)
+
+**Problem:** the PAN and DL accuracy sets (PR #35) found 17 PAN numbers wrong and ACCEPTED, each with a zero where a
+letter belongs (`0CZPD1124C` for `OCZPD1124C`), DL numbers with a space the template removes, and two Aadhaar masks
+without their last space (`XXXX XXXX0333`). The pipeline already corrected each one (O and 0 by position, spaces
+removed) and its rule passed on the corrected form, but `POST /api/v1/extract` sent the raw reading; the job result
+already sends `normalizedValue`.
+
+**What:** `pipeline_runner._shown_value`: for a field whose rule passed and is an ID-number rule (`pan-format`,
+`dl-number`), the response's `value` is the corrected form; an Aadhaar number is sent as `XXXX XXXX 1234`. Names,
+addresses, dates, gender, custom keys and any field held for review keep the text as read (their corrected form is
+upper-cased or loses spaces, which is for comparing, not for showing). Same fields, same shape.
+
+**Check it:** `make check`: 790 unit tests pass (6 new). Accuracy sets, before -> after (BASELINE.md updated):
+PAN number wrong and ACCEPTED 17 -> 0, correct 77% -> 94%; DL number exact match 47% -> 81%; Aadhaar number wrong and
+ACCEPTED 2 -> 0. No other field changed.

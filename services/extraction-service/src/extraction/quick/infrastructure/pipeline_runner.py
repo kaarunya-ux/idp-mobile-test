@@ -31,9 +31,15 @@ from extraction.quick.domain.models import (
     ReadBy,
     StagedFile,
 )
+from extraction.rule import PAN_RULE_ID
+from extraction.rule.aadhaar import AADHAAR_RULE_ID
 
 _PAGES_FOR_AI = 2  # a card's front and back, or a PDF's first two pages
 _TYPES = {"DATE": "date", "NUMBER": "number"}  # every other template field type is text
+# ID numbers have one right form, the one their rule checks: the corrected reading (O and 0 by position, no spaces) is
+# sent instead of the raw one. Names, addresses, dates and custom keys keep the text as read.
+_CORRECTED_RULES = frozenset({PAN_RULE_ID, "dl-number"})
+_AADHAAR_GROUP = 4
 
 
 class _NoProgress:
@@ -147,7 +153,7 @@ def quick_result(result: Mapping[str, Any]) -> QuickResult | None:
 
 
 def _field(found: Mapping[str, Any]) -> ExtractedField:
-    value = found["value"]
+    value = _shown_value(found)
     return ExtractedField(
         key=str(found["key"]),
         label=str(found["label"]),
@@ -157,6 +163,18 @@ def _field(found: Mapping[str, Any]) -> ExtractedField:
         status=str(found["status"]),
         source=str(found["source"]) if found["source"] else None,
     )
+
+
+def _shown_value(found: Mapping[str, Any]) -> Any:
+    """The raw reading, or for an ID number whose rule passed, its corrected form (Aadhaar as ``XXXX XXXX 1234``)."""
+    rule, corrected = found.get("rule"), found.get("normalizedValue")
+    if not rule or not rule["passed"] or not corrected:
+        return found["value"]
+    if rule["id"] in _CORRECTED_RULES:
+        return corrected
+    if rule["id"] == AADHAAR_RULE_ID:
+        return " ".join(corrected[i : i + _AADHAAR_GROUP] for i in range(0, len(corrected), _AADHAAR_GROUP))
+    return found["value"]
 
 
 def _renumbered(pages: Sequence[PreparedPage]) -> tuple[PreparedPage, ...]:

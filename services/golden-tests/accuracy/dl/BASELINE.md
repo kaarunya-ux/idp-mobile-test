@@ -8,13 +8,13 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 
 | All | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| every field | 294 | 57% | 46% | **72** | 9 | 44 | 9% |
+| every field | 294 | 57% | 57% | **72** | 9 | 44 | 9% |
 
 ## Per field
 
 | Field | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| license_number | 98 | 81% | 47% | **0** | 9 | 10 | 24% |
+| license_number | 98 | 81% | 81% | **0** | 9 | 10 | 24% |
 | name | 98 | 82% | 82% | **15** | 0 | 3 | 3% |
 | address | 98 | 10% | 10% | **57** | 0 | 31 | 0% |
 
@@ -22,21 +22,21 @@ How a field is scored: **Correct** the printed value, ignoring case, spacing and
 
 | Defect | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| angle (20 cards) | 60 | 65% | 50% | **11** | 0 | 10 | 7% |
-| clean (10 cards) | 30 | 67% | 53% | **5** | 0 | 5 | 0% |
-| crop (16 cards) | 48 | 58% | 54% | **13** | 1 | 6 | 8% |
-| faded (16 cards) | 48 | 62% | 54% | **13** | 2 | 3 | 6% |
-| glare (16 cards) | 48 | 65% | 54% | **11** | 0 | 6 | 8% |
-| lowres (16 cards) | 48 | 58% | 44% | **11** | 2 | 7 | 4% |
-| strong_blur (20 cards) | 60 | 17% | 13% | **29** | 9 | 12 | 38% |
-| table (16 cards) | 48 | 60% | 46% | **7** | 0 | 12 | 6% |
+| angle (20 cards) | 60 | 65% | 65% | **11** | 0 | 10 | 7% |
+| clean (10 cards) | 30 | 67% | 67% | **5** | 0 | 5 | 0% |
+| crop (16 cards) | 48 | 58% | 58% | **13** | 1 | 6 | 8% |
+| faded (16 cards) | 48 | 62% | 62% | **13** | 2 | 3 | 6% |
+| glare (16 cards) | 48 | 65% | 65% | **11** | 0 | 6 | 8% |
+| lowres (16 cards) | 48 | 58% | 58% | **11** | 2 | 7 | 4% |
+| strong_blur (20 cards) | 60 | 17% | 17% | **29** | 9 | 12 | 38% |
+| table (16 cards) | 48 | 60% | 60% | **7** | 0 | 12 | 6% |
 
 ## Per layout
 
 | Layout | Fields | Correct | Exact | Wrong ACCEPTED | Wrong NEEDS_REVIEW | Missing | Review rate |
 |---|---|---|---|---|---|---|---|
-| side_by_side (49 cards) | 147 | 55% | 44% | **53** | 4 | 9 | 9% |
-| two_pictures (49 cards) | 147 | 60% | 49% | **19** | 5 | 35 | 10% |
+| side_by_side (49 cards) | 147 | 55% | 55% | **53** | 4 | 9 | 9% |
+| two_pictures (49 cards) | 147 | 60% | 60% | **19** | 5 | 35 | 10% |
 
 ## Wrong and ACCEPTED
 
@@ -127,4 +127,4 @@ Right outcome for the number: not ACCEPTED (NEEDS_REVIEW or no value). `Correct`
 | name | 2 | 100% | 100% | **0** | 0 | 0 | 0% |
 | address | 2 | 50% | 50% | **1** | 0 | 0 | 0% |
 
-Time per card: median 2.4 s, slowest 18.3 s.
+Time per card: median 2.4 s, slowest 12.7 s.
