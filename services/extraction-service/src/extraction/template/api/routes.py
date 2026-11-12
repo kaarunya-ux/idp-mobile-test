@@ -97,7 +97,7 @@ async def get_bundle(
 
 
 @templates.get("", summary="List templates", response_model=TemplatePageResponse, responses=_ERRORS)
-async def list_templates(  # noqa: PLR0913
+async def list_templates(  # noqa: PLR0913  # one per query parameter of the list route
     *,
     principal: Reader,
     service: Templates,

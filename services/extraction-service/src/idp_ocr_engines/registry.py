@@ -113,7 +113,7 @@ class ModelRegistry:
 
 # The parsed registry is untyped, so ``Any`` appears only at this boundary; every field is checked (PY-01).
 _KEY_VALUE = re.compile(r"(?P<key>[a-z0-9_]+):(?: (?P<value>.+))?")
-_ENTRY_INDENT, _FILES_INDENT = 4, 8  # columns of an entry's keys and of a file's keys
+_LIST_INDENT, _ENTRY_INDENT, _FILES_INDENT = 2, 4, 8  # columns of a list item, an entry's keys and a file's keys
 
 
 def parse_registry(text: str) -> dict[str, Any]:
@@ -135,7 +135,7 @@ def parse_registry(text: str) -> dict[str, Any]:
             seen_header = True
         elif not seen_header:
             raise ModelRegistryError(where)
-        elif indent == 2 and body.startswith("- "):  # noqa: PLR2004
+        elif indent == _LIST_INDENT and body.startswith("- "):
             entry, file_item = {}, None
             models.append(entry)
             _store(entry, body[2:], where)

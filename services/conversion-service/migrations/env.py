@@ -4,10 +4,10 @@ from alembic import context
 from sqlalchemy import create_engine
 
 # registers conversion_item
-from conversion.conversion.infrastructure.persistence import orm  # noqa: F401
+from conversion.conversion.infrastructure.persistence import orm  # noqa: F401  # registers the tables on the metadata
 
 # registers inbox_message and outbox_event
-from conversion.core import inbox, outbox  # noqa: F401
+from conversion.core import inbox, outbox  # noqa: F401  # registers the tables on the metadata
 from conversion.core.config import get_settings
 from conversion.core.db import Base
 

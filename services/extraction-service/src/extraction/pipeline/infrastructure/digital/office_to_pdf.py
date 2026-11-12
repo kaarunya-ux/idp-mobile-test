@@ -64,7 +64,7 @@ class LibreOfficePdfConverter:
             str(source),
         ]
         # S603: a fixed argument list and no shell (SEC-08); the only variable parts are our own temp paths.
-        process = subprocess.Popen(  # noqa: S603
+        process = subprocess.Popen(  # noqa: S603  # fixed LibreOffice command, no shell, no user text
             arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
         )
         try:

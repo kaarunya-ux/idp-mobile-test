@@ -18,17 +18,9 @@ _ITEM_PREFIX = "  - "
 
 def read_post_process(config_path: Path) -> dict[str, str | list[str]]:
     """The scalars (as text) and lists of ``PostProcess``; raises ``ModelFileError`` if the section is missing."""
-    try:
-        lines = config_path.read_text(encoding="utf-8").splitlines()
-    except OSError as error:
-        message = "A model's inference.yml could not be read."
-        raise ModelFileError(message) from error
-    if _SECTION not in lines:
-        message = "A model's inference.yml has no PostProcess section."
-        raise ModelFileError(message)
     values: dict[str, str | list[str]] = {}
     current: list[str] | None = None
-    for line in lines[lines.index(_SECTION) + 1 :]:
+    for line in _section_lines(config_path):
         if line and not line.startswith(" "):
             break  # the next top-level section
         if line.startswith(_ITEM_PREFIX) and current is not None:
@@ -38,3 +30,16 @@ def read_post_process(config_path: Path) -> dict[str, str | list[str]]:
             current = [] if not rest.strip() else None
             values[key] = current if current is not None else decode_scalar(rest.strip())
     return values
+
+
+def _section_lines(config_path: Path) -> list[str]:
+    """The lines after the ``PostProcess:`` heading. Raises ``ModelFileError`` if the file or section is missing."""
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        message = "A model's inference.yml could not be read."
+        raise ModelFileError(message) from error
+    if _SECTION not in lines:
+        message = "A model's inference.yml has no PostProcess section."
+        raise ModelFileError(message)
+    return lines[lines.index(_SECTION) + 1 :]

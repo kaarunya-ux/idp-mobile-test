@@ -162,7 +162,7 @@ def _agreement(
 
 
 # one constructor for the three shapes of outcome
-def _decision(  # noqa: PLR0913
+def _decision(  # noqa: PLR0913  # keyword-only parts of one FieldDecision
     definition: FieldDefinition,
     *,
     status: FieldStatus,

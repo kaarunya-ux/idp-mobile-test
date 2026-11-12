@@ -68,7 +68,7 @@ class Template:
     versions: list[TemplateVersion] = field(default_factory=list)
 
     @classmethod
-    def create(  # noqa: PLR0913
+    def create(  # noqa: PLR0913  # keyword-only fields of a new template
         cls,
         *,
         id: UUID,

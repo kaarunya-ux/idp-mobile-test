@@ -9,7 +9,8 @@ from uuid import UUID
 import pytest
 
 from extraction.pipeline.application.commands import ExtractDocumentCommand
-from extraction.pipeline.application.services.extract_document import AiAssist, AiCrops, ExtractDocumentService
+from extraction.pipeline.application.services.ai_assist import AiAssist, AiCrops
+from extraction.pipeline.application.services.extract_document import ExtractDocumentService
 from extraction.pipeline.domain.custom_template import CustomField, custom_template
 from extraction.pipeline.domain.decisions import Thresholds
 from extraction.pipeline.domain.exceptions import AiUnavailableError

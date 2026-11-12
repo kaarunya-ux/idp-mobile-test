@@ -1314,3 +1314,15 @@ says "reply only OK").
 
 **Check it:** 619 unit tests pass (the Hindi font test fails outside Docker, as before); lint, types, 8 import
 contracts; `uv.lock` and `pyproject.toml` unchanged. The PII golden suite: 4 runs, 0 leaks.
+
+## Entry 21: Standards and SonarQube-style cleanup before the GitLab push (2026-11-12)
+
+**What:** `noqa` comments give their reason (S603 LibreOffice call, S105 error code, F401 migration imports);
+`register_exception_handlers` under 50 lines (`_respond` at module level); `build_converter_registry` and
+`build_convert_file_service` lose the unused `storage` parameter (pages go to ai-gateway inline); the OCR registry's
+list indent is a named constant and `read_post_process` is split (`_section_lines`), same as extraction's copy. No
+behaviour change.
+
+**Check it:** `make check`: lint, types and import contracts pass; 619 tests pass, 1 fails:
+`test_converts_a_word_file_with_hindi_and_embeds_a_devanagari_font`. It fails the same way on the unchanged base
+branch, so it depends on this laptop's LibreOffice and font setup, not on this change.

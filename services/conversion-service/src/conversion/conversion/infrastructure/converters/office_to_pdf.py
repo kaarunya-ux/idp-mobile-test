@@ -155,7 +155,10 @@ class _SpareOffice:
 
 def _popen(arguments: list[str]) -> subprocess.Popen[bytes]:
     # S603: a fixed argument list and no shell (SEC-08); the only variable parts are our own temp paths.
-    return subprocess.Popen(arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)  # noqa: S603
+    # fixed LibreOffice command list, no shell, no user text (S603)
+    return subprocess.Popen(  # noqa: S603  # see the line above
+        arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+    )
 
 
 def _stop_spare_of(converter: LibreOfficePdfConverter) -> None:
