@@ -18,8 +18,9 @@ from idp_ocr_engines.model import OcrPage, PageImage
 class PageLoaderPort(Protocol):
     """Checks a file and turns it into page images: PDF pages at 300 DPI, or the image's own pages."""
 
-    def load_pages(self, content: bytes) -> tuple[PageImage, ...]:
-        """Raises ``FileRejectedError`` or ``TooManyPagesError`` when the file cannot be accepted (stage SCAN)."""
+    def load_pages(self, content: bytes, *, split_cards: bool = True) -> tuple[PageImage, ...]:
+        """Raises ``FileRejectedError`` or ``TooManyPagesError`` when the file cannot be accepted (stage SCAN).
+        ``split_cards``: a picture with a card's front and back becomes two pages."""
         ...
 
 
@@ -30,9 +31,9 @@ class QualityAssessorPort(Protocol):
 
 
 class PagePreparerPort(Protocol):
-    """Straightens and cleans a page for OCR."""
+    """Straightens and cleans a page for OCR. ``reshape`` False: only cleaned, never cut, straightened or turned."""
 
-    def prepare(self, image: PageImage) -> PreparedPage: ...
+    def prepare(self, image: PageImage, *, reshape: bool = True) -> PreparedPage: ...
 
 
 class ProgressReporterPort(Protocol):

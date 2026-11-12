@@ -66,6 +66,16 @@ def test_cuts_the_card_out_when_a_card_lies_on_a_desk(card_photo: NDArray[np.uin
     assert prepared.clean.width < card_photo.shape[1]
 
 
+def test_keeps_every_pixel_in_place_when_the_picture_is_kept_as_uploaded(card_photo: NDArray[np.uint8]) -> None:
+    """Boxes drawn on the upload must still point at the same text: no cut, no straightening, no turn."""
+    prepared = _preparer(90, 0.95).prepare(from_rgb_array(_tilted(card_photo, 3.0)), reshape=False)
+
+    assert not prepared.steps.warped
+    assert prepared.steps.deskew_degrees == 0.0
+    assert prepared.steps.rotation_degrees == 0
+    assert (prepared.clean.width, prepared.clean.height) == (card_photo.shape[1], card_photo.shape[0])
+
+
 def test_uses_the_page_as_it_is_when_no_card_can_be_found() -> None:
     noise = np.random.default_rng(9).integers(0, 255, (300, 400, 3), dtype=np.uint8)
 

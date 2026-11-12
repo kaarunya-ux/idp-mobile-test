@@ -13,9 +13,13 @@ from idp_ocr_engines.model import OcrPage
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PrepareDocumentCommand:
-    """The bytes of one uploaded file. The worker reads them from object storage before calling the service."""
+    """The bytes of one uploaded file. The worker reads them from object storage before calling the service.
+
+    ``as_uploaded``: the page is read as the user saw it, with no card cut out, no split into front and back and no
+    turning, because a custom template's boxes were drawn on the picture as uploaded (ADR 0013)."""
 
     content: bytes
+    as_uploaded: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

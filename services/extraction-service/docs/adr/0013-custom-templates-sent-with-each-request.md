@@ -57,3 +57,11 @@ calendar date; `31 FEB 2002` and `13/13/2002` still fail. The standard cards kee
 
 A label typed with closing punctuation (`USCIS#`, `No.`) now takes that punctuation as part of the label, so `#` is no
 longer returned as the value.
+
+## Amendment 2026-11-11: boxes are on the picture as uploaded
+
+A box is measured on the picture the user drew it on: the upload itself, not a page the service cut out of it. A
+request with at least one box is therefore read on the upload as it is, cleaned but never cut to the card, split into
+front and back, straightened or turned. Requests with labels only keep those steps, which help photos. A user who
+draws boxes on a photo taken at an angle gets the photo as it is; a box drawn on a tilted scan may need a slightly
+larger box.

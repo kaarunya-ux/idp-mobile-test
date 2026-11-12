@@ -69,7 +69,11 @@ class PipelineDocumentRunner:
         self._refuse_long_pdfs(contents)
         progress = _NoProgress()
         prepare = self._pipeline.prepare_service(progress)
-        prepared = [prepare.prepare(PrepareDocumentCommand(content=content)) for content in contents]
+        # boxes drawn on the picture as uploaded must point at the same text: the page is not cut, split or turned
+        as_uploaded = template is not None and any(field.clip_to_box for field in template.fields)
+        prepared = [
+            prepare.prepare(PrepareDocumentCommand(content=content, as_uploaded=as_uploaded)) for content in contents
+        ]
         pages = _renumbered([page for result in prepared for page in result.pages])
         stored = [self._store(page, folder) for page in pages[:_PAGES_FOR_AI]]
         context = AiCallContext(

@@ -231,7 +231,7 @@ class FakePages:
 class FakeLoader:
     """Three page images per file, whatever it is: the runner keeps the first two."""
 
-    def load_pages(self, content: bytes) -> tuple[PageImage, ...]:
+    def load_pages(self, content: bytes, *, split_cards: bool = True) -> tuple[PageImage, ...]:
         return tuple(PageImage(width=2, height=2, rgb=bytes(12), page_index=i) for i in range(3))
 
 

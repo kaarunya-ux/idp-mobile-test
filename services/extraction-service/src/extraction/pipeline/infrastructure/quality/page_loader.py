@@ -50,25 +50,25 @@ class DocumentPageLoader:
         self._pdf_picture_min_fraction = pdf_picture_min_fraction
         self._two_cards = two_cards
 
-    def load_pages(self, content: bytes) -> tuple[PageImage, ...]:
+    def load_pages(self, content: bytes, *, split_cards: bool = True) -> tuple[PageImage, ...]:
         if not content or len(content) > self._max_file_bytes:
             message = "The file is empty or larger than this service accepts."
             raise FileRejectedError(message)
         kind = guess_extension(content)
         if kind == "pdf":
-            return self._split(self._render_pdf(content))
+            return self._split(self._render_pdf(content), on=split_cards)
         if kind in _IMAGE_TYPES:
-            return self._split([(page, True) for page in self._decode_image(content)])
+            return self._split([(page, True) for page in self._decode_image(content)], on=split_cards)
         message = "The file is not a PDF or a supported image (JPEG, PNG, WEBP, TIFF, BMP)."
         raise FileRejectedError(message)
 
-    def _split(self, pages: Sequence[tuple[PageImage, bool]]) -> tuple[PageImage, ...]:
+    def _split(self, pages: Sequence[tuple[PageImage, bool]], *, on: bool) -> tuple[PageImage, ...]:
         """Each picture that holds a card's front and back becomes two pages, front first, as if the two sides had
         been sent as two files; a rendered PDF page (``False``: not a picture) is never split."""
         out: list[PageImage] = []
         for page, picture in pages:
             rgb = to_rgb_array(page)
-            cards = find_two_cards(rgb, self._two_cards) if picture and self._two_cards else None
+            cards = find_two_cards(rgb, self._two_cards) if on and picture and self._two_cards else None
             if cards is None:
                 out.append(page)
                 continue

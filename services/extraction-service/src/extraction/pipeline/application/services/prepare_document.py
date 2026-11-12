@@ -37,7 +37,7 @@ class PrepareDocumentService:
     def prepare(self, command: PrepareDocumentCommand) -> PrepareDocumentResult:
         """Raises ``FileRejectedError``, ``TooManyPagesError`` or a ``QualityRejectedError`` for the first bad page."""
         self._progress.report(Stage.SCAN, 0)
-        images = self._loader.load_pages(command.content)
+        images = self._loader.load_pages(command.content, split_cards=not command.as_uploaded)
         self._progress.report(Stage.SCAN, _DONE)
 
         qualities: list[QualityScores] = []
@@ -52,7 +52,7 @@ class PrepareDocumentService:
 
         prepared: list[PreparedPage] = []
         for position, image in enumerate(images):
-            prepared.append(self._preparer.prepare(image))
+            prepared.append(self._preparer.prepare(image, reshape=not command.as_uploaded))
             self._progress.report(Stage.PREPARE, _percent(position + 1, len(images)))
         return PrepareDocumentResult(pages=tuple(prepared), qualities=tuple(qualities))
 

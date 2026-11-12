@@ -217,3 +217,7 @@ def test_loads_one_page_when_splitting_is_off() -> None:
 
 def test_never_splits_a_rendered_pdf_page() -> None:
     assert len(SPLITTING.load_pages(_pdf(1))) == 1
+
+
+def test_loads_one_page_when_the_picture_is_kept_as_uploaded() -> None:
+    assert len(SPLITTING.load_pages(_encoded(_two_cards_page(), "PNG"), split_cards=False)) == 1
