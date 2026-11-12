@@ -42,7 +42,7 @@ _SENT_FIELD_KEYS = ("key", "label", "value", "status")
 
 class RunDeepAnalysisService:
     # every collaborator is a port or a number
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913  # every port is injected (DI-01)
         self,
         units: UnitOfWorkFactory,
         storage: ObjectStoragePort,

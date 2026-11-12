@@ -55,7 +55,7 @@ class _Silent:
 
 class DesignerWorkService:
     # every collaborator is a port, a factory or a name
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913  # every port is injected (DI-01)
         self,
         store: DesignerWorkStorePort,
         storage: ObjectStoragePort,

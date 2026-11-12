@@ -4,13 +4,13 @@ from alembic import context
 from sqlalchemy import create_engine
 
 # registers inbox_message and outbox_event
-from extraction.core import inbox, outbox  # noqa: F401
+from extraction.core import inbox, outbox  # noqa: F401  # registers the tables on the metadata
 from extraction.core.config import get_settings
 from extraction.core.db import Base
 
 # registers extraction_item
-from extraction.pipeline.infrastructure.persistence import orm  # noqa: F401
-from extraction.template.infrastructure import orm as template_orm  # noqa: F401
+from extraction.pipeline.infrastructure.persistence import orm  # noqa: F401  # registers the tables on the metadata
+from extraction.template.infrastructure import orm as template_orm  # noqa: F401  # registers the tables on the metadata
 
 target_metadata = Base.metadata
 

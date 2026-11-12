@@ -49,33 +49,34 @@ class ProblemDetails(BaseModel):
     errors: tuple[FieldProblem, ...] | None = None
 
 
+def _respond(
+    clock: Clock, *, code: ErrorCode, title: str, detail: str, errors: tuple[FieldProblem, ...] | None = None
+) -> JSONResponse:
+    body = ProblemDetails(
+        title=title,
+        status=code.http_status,
+        code=code.value,
+        detail=detail,
+        correlation_id=get_correlation_id() or str(new_id()),
+        timestamp=clock.now().replace(microsecond=0),
+        errors=errors,
+    )
+    return JSONResponse(
+        status_code=code.http_status,
+        content=body.model_dump(mode="json", by_alias=True, exclude_none=True),
+        media_type=PROBLEM_MEDIA_TYPE,
+    )
+
+
 def register_exception_handlers(app: FastAPI, clock: Clock) -> None:
     """Install the three handlers. Called once from ``create_app()`` (ERR-01)."""
-
-    def respond(
-        *, code: ErrorCode, title: str, detail: str, errors: tuple[FieldProblem, ...] | None = None
-    ) -> JSONResponse:
-        body = ProblemDetails(
-            title=title,
-            status=code.http_status,
-            code=code.value,
-            detail=detail,
-            correlation_id=get_correlation_id() or str(new_id()),
-            timestamp=clock.now().replace(microsecond=0),
-            errors=errors,
-        )
-        return JSONResponse(
-            status_code=code.http_status,
-            content=body.model_dump(mode="json", by_alias=True, exclude_none=True),
-            media_type=PROBLEM_MEDIA_TYPE,
-        )
 
     async def on_domain_error(_: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, DomainError):  # the framework only routes DomainError here; this narrows the type
             raise exc
         field_errors = getattr(exc, "field_errors", ())  # e.g. every invalid part of a template definition
         problems = tuple(FieldProblem(field=field, message=message) for field, message in field_errors) or None
-        return respond(code=exc.code, title=exc.title, detail=exc.detail, errors=problems)
+        return _respond(clock, code=exc.code, title=exc.title, detail=exc.detail, errors=problems)
 
     async def on_request_invalid(_: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, RequestValidationError):
@@ -84,7 +85,8 @@ def register_exception_handlers(app: FastAPI, clock: Clock) -> None:
             FieldProblem(field=_describe_location(error["loc"]), message=mask_personal_data_in(str(error["msg"])))
             for error in exc.errors()
         )
-        return respond(
+        return _respond(
+            clock,
             code=ErrorCode.REQUEST_INVALID,
             title="Request is not valid",
             detail="One or more fields did not pass validation.",
@@ -93,7 +95,8 @@ def register_exception_handlers(app: FastAPI, clock: Clock) -> None:
 
     async def on_unexpected_error(_: Request, exc: Exception) -> JSONResponse:
         log.error("unhandled_error", error_type=type(exc).__name__, exc_info=exc)  # the trace stays in the log (ERR-06)
-        return respond(
+        return _respond(
+            clock,
             code=ErrorCode.INTERNAL_ERROR,
             title="Unexpected error",
             detail="The request could not be processed. Quote the correlation id when you report it.",

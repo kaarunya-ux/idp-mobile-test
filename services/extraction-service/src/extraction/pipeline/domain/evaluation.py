@@ -36,19 +36,8 @@ def score_samples(template: TemplateDefinition, outcomes: Sequence[SampleOutcome
     }
     keep_last = {f.key: f.mask.keep_last for f in template.fields if f.mask is not None}
     for outcome in outcomes:
-        if outcome.result is None:  # unreadable (a blurred photo): listed in failedSamples, not scored
-            continue
-        found = {str(f["key"]): f for f in outcome.result.get("fields", [])}
-        for key, expected in outcome.expected.items():
-            if key not in fields:
-                continue
-            got = found.get(key, {}).get("normalizedValue") or found.get(key, {}).get("value")
-            entry = fields[key]
-            entry["total"] += 1
-            if _same(expected, got, keep_last.get(key)):
-                entry["correct"] += 1
-            elif len(entry["confusions"]) < MAX_CONFUSIONS:
-                entry["confusions"].append({"sampleId": outcome.sample_id, "expected": expected, "got": got})
+        if outcome.result is not None:  # an unreadable one (a blurred photo) is listed in failedSamples, not scored
+            _score_sample(outcome, outcome.result, fields, keep_last)
     for entry in fields.values():
         entry["accuracy"] = round(entry["correct"] / entry["total"], 4) if entry["total"] else None
     totals = [e for e in fields.values() if e["total"]]
@@ -58,6 +47,23 @@ def score_samples(template: TemplateDefinition, outcomes: Sequence[SampleOutcome
         "fields": fields,
         "accuracy": round(sum(e["correct"] for e in totals) / sum(e["total"] for e in totals), 4) if totals else None,
     }
+
+
+def _score_sample(
+    outcome: SampleOutcome, result: Mapping[str, Any], fields: dict[str, dict[str, Any]], keep_last: Mapping[str, int]
+) -> None:
+    """Count one sample's expected values into ``fields``, keeping the first confusions of each field."""
+    found = {str(f["key"]): f for f in result.get("fields", [])}
+    for key, expected in outcome.expected.items():
+        if key not in fields:
+            continue
+        got = found.get(key, {}).get("normalizedValue") or found.get(key, {}).get("value")
+        entry = fields[key]
+        entry["total"] += 1
+        if _same(expected, got, keep_last.get(key)):
+            entry["correct"] += 1
+        elif len(entry["confusions"]) < MAX_CONFUSIONS:
+            entry["confusions"].append({"sampleId": outcome.sample_id, "expected": expected, "got": got})
 
 
 def report_passes(report: Mapping[str, Any], *, min_accuracy: float) -> bool:

@@ -25,8 +25,9 @@ from extraction.core.db import SessionFactory, create_db_engine, create_session_
 from extraction.core.outbox import OutboxRelay
 from extraction.core.service_auth import ServiceTokenProvider
 from extraction.pipeline.application.services.accept_extraction import AcceptExtractionService
+from extraction.pipeline.application.services.ai_assist import AiAssist, AiCrops
 from extraction.pipeline.application.services.designer_work import DesignerWorkService
-from extraction.pipeline.application.services.extract_document import AiAssist, AiCrops, ExtractDocumentService
+from extraction.pipeline.application.services.extract_document import ExtractDocumentService
 from extraction.pipeline.application.services.prepare_document import PrepareDocumentService
 from extraction.pipeline.application.services.run_deep_analysis import RunDeepAnalysisService
 from extraction.pipeline.application.services.run_extraction import RunExtractionService
@@ -87,6 +88,36 @@ def pipeline_version() -> str:
         return "0.0.0"
 
 
+def _page_loader(settings: Settings) -> DocumentPageLoader:
+    limits, prepare = settings.limits, settings.prepare
+    return DocumentPageLoader(
+        max_file_bytes=limits.max_file_size,
+        max_pages=limits.max_pages,
+        max_pixels=limits.max_image_pixels,
+        pdf_dpi=limits.pdf_dpi,
+        pdf_max_side_px=limits.pdf_max_side_px,
+        pdf_picture_min_fraction=limits.pdf_picture_min_fraction,
+        two_cards=TwoCards(
+            min_area_fraction=prepare.min_card_area_fraction, min_size_ratio=prepare.two_cards_min_size_ratio
+        )
+        if prepare.two_cards_min_size_ratio > 0
+        else None,
+    )
+
+
+def _quality_thresholds(settings: Settings) -> QualityThresholds:
+    quality = settings.quality
+    return QualityThresholds(
+        blur_min=quality.blur_min,
+        brightness_min=quality.brightness_range[0],
+        brightness_max=quality.brightness_range[1],
+        glare_max=quality.glare_max,
+        min_short_side_px=quality.min_short_side_px,
+        require_document_edges=quality.require_document_edges,
+        rejects=quality.rejects,
+    )
+
+
 class PipelineServices:
     """``PipelineFactory``: the engines and models, loaded once; services built per run."""
 
@@ -103,20 +134,7 @@ class PipelineServices:
         limits = RuntimeLimits(threads=settings.ocr.threads)
         self._settings, self._clock = settings, clock
         self._engines = _engines(settings, registry, limits)
-        self._loader = DocumentPageLoader(
-            max_file_bytes=settings.limits.max_file_size,
-            max_pages=settings.limits.max_pages,
-            max_pixels=settings.limits.max_image_pixels,
-            pdf_dpi=settings.limits.pdf_dpi,
-            pdf_max_side_px=settings.limits.pdf_max_side_px,
-            pdf_picture_min_fraction=settings.limits.pdf_picture_min_fraction,
-            two_cards=TwoCards(
-                min_area_fraction=settings.prepare.min_card_area_fraction,
-                min_size_ratio=settings.prepare.two_cards_min_size_ratio,
-            )
-            if settings.prepare.two_cards_min_size_ratio > 0
-            else None,
-        )
+        self._loader = _page_loader(settings)
         quality = settings.quality
         self._assessor = OpenCvQualityAssessor(
             min_card_area_fraction=settings.prepare.min_card_area_fraction,
@@ -130,15 +148,7 @@ class PipelineServices:
             min_card_area_fraction=settings.prepare.min_card_area_fraction,
             orientation_min_confidence=settings.prepare.orientation_min_confidence,
         )
-        self._thresholds = QualityThresholds(
-            blur_min=quality.blur_min,
-            brightness_min=quality.brightness_range[0],
-            brightness_max=quality.brightness_range[1],
-            glare_max=quality.glare_max,
-            min_short_side_px=quality.min_short_side_px,
-            require_document_edges=quality.require_document_edges,
-            rejects=quality.rejects,
-        )
+        self._thresholds = _quality_thresholds(settings)
         self._gateway = build_gateway(settings, inline)
         self._ai = build_ai_assist(settings, self._gateway, pages)
         pdf = settings.limits

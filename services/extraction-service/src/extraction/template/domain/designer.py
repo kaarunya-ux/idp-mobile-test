@@ -21,6 +21,7 @@ MAX_SAMPLES_PER_VERSION = 20  # IDP-03 ch. 2.9: test runs of up to 20 samples ne
 MAX_FILES_PER_SAMPLE = 2  # a card's two sides
 SAMPLE_BUCKETS = frozenset({"idp-originals", "idp-templates"})
 _UNSAFE_KEY = re.compile(r"(^/)|(\.\.)|(\\)|[\x00-\x1f\x7f]")
+_MAX_KEY_LENGTH = 1024  # S3 object keys are at most 1024 bytes
 _EXPECTED_LENGTH = 400
 
 
@@ -87,7 +88,7 @@ def check_sample_files(files: list[SampleFile], *, account_id: UUID | None) -> N
     for index, found in enumerate(files):
         if found.bucket not in SAMPLE_BUCKETS:
             problems.append((f"files[{index}].bucket", f"one of {', '.join(sorted(SAMPLE_BUCKETS))}"))
-        if not 1 <= len(found.key) <= 1024 or _UNSAFE_KEY.search(found.key):  # noqa: PLR2004
+        if not 1 <= len(found.key) <= _MAX_KEY_LENGTH or _UNSAFE_KEY.search(found.key):
             problems.append((f"files[{index}].key", "a safe relative key"))
         elif account_id is not None and not found.key.startswith(f"{account_id}/"):
             problems.append((f"files[{index}].key", "a file of your own account"))

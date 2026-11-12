@@ -629,3 +629,22 @@ upper-cased or loses spaces, which is for comparing, not for showing). Same fiel
 **Check it:** `make check`: 790 unit tests pass (6 new). Accuracy sets, before -> after (BASELINE.md updated):
 PAN number wrong and ACCEPTED 17 -> 0, correct 77% -> 94%; DL number exact match 47% -> 81%; Aadhaar number wrong and
 ACCEPTED 2 -> 0. No other field changed.
+
+## Entry 25: Standards and SonarQube-style cleanup before the GitLab push (2026-11-12)
+
+**Why:** a check of the Python Standard's limits and of SonarQube's main Python rules (ruff's matching rule sets,
+cognitive complexity with complexipy) before the first GitLab push. No behaviour change.
+
+**What:** every `noqa` in `src/` and `migrations/` now gives its reason; the S3 key limit and the registry's list
+indent are named constants (`_MAX_KEY_LENGTH`, `_LIST_INDENT`) instead of `noqa: PLR2004`. Functions over 50 lines
+split: `PipelineServices.__init__` (`_page_loader`, `_quality_thresholds`), `seed` (`_seed_document_types`,
+`_new_template`), `register_exception_handlers` (`_respond` at module level). Modules over 400 lines split:
+`AiAssist`/`AiCrops` moved to `pipeline/application/services/ai_assist.py`; the sample and test-run repositories to
+`template/infrastructure/designer_repository.py`. Cognitive complexity 16 -> 15 or less: `score_samples`
+(`_score_sample`), `read_post_process` (`_section_lines`, same change in conversion's copy).
+
+**Not changed:** `ocr_test_app/` (an old prototype with `requirements.txt`, `print` and `os.environ`; out of the
+GitLab push, the owner decides whether to delete it), migrations' `upgrade()` length, test modules over 400 lines.
+
+**Check it:** `make check`: 790 unit tests pass; lint, types, import contracts. No `src/` finding left in the
+standards script; no function above cognitive complexity 15.

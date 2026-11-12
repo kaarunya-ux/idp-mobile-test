@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from extraction.core.build_info import build_stamp
 from extraction.core.config import get_settings
@@ -37,59 +38,69 @@ def standard_template_id(code_name: str) -> uuid.UUID:
     return uuid.uuid5(_NAMESPACE, code_name)
 
 
+def _seed_document_types(session: Session) -> int:
+    """The standard document types that aren't stored yet; returns how many were added."""
+    existing = set(session.scalars(select(DocumentTypeOrm.code).where(DocumentTypeOrm.account_id.is_(None))))
+    missing = [(code, name, category) for code, (name, category) in _DOCUMENT_TYPES.items() if code not in existing]
+    for code, name, category in missing:
+        session.add(
+            DocumentTypeOrm(
+                id=new_id(),
+                account_id=None,
+                code=code,
+                name=name,
+                category=category,
+                classifier_hints={},
+                default_template_id=None,
+                active=True,
+            )
+        )
+    return len(missing)
+
+
+def _new_template(template_id: uuid.UUID, template: TemplateDefinition, now: datetime) -> TemplateOrm:
+    """A standard template's row with its first published version."""
+    row = TemplateOrm(
+        id=template_id,
+        account_id=None,
+        document_type_code=template.document_type,
+        name=_DOCUMENT_TYPES.get(template.document_type, (template.template_id, ""))[0],
+        description=None,
+        current_version=template.version,
+        status="ACTIVE",
+        created_by=_SEEDER,
+        version=1,
+        created_at=now,
+        updated_at=now,
+    )
+    row.versions.append(
+        TemplateVersionOrm(
+            id=new_id(),
+            number=template.version,
+            state="PUBLISHED",
+            definition=to_json(template),
+            created_at=now,
+            published_at=now,
+            published_by=_SEEDER,
+            publish_reason="Standard template shipped with the service",
+        )
+    )
+    return row
+
+
 def seed(sessions: SessionFactory) -> int:
     """Insert what's missing; return how many rows were added."""
     added = 0
     now = datetime.now(UTC)
     with sessions.begin() as session:
-        existing_types = set(session.scalars(select(DocumentTypeOrm.code).where(DocumentTypeOrm.account_id.is_(None))))
-        for code, (name, category) in _DOCUMENT_TYPES.items():
-            if code not in existing_types:
-                session.add(
-                    DocumentTypeOrm(
-                        id=new_id(),
-                        account_id=None,
-                        code=code,
-                        name=name,
-                        category=category,
-                        classifier_hints={},
-                        default_template_id=None,
-                        active=True,
-                    )
-                )
-                added += 1
+        added += _seed_document_types(session)
         for template in STANDARD_TEMPLATES:
             template_id = standard_template_id(template.template_id)
             stored = session.get(TemplateOrm, template_id)
             if stored is not None:
                 added += _upgrade(stored, template, now)
                 continue
-            row = TemplateOrm(
-                id=template_id,
-                account_id=None,
-                document_type_code=template.document_type,
-                name=_DOCUMENT_TYPES.get(template.document_type, (template.template_id, ""))[0],
-                description=None,
-                current_version=template.version,
-                status="ACTIVE",
-                created_by=_SEEDER,
-                version=1,
-                created_at=now,
-                updated_at=now,
-            )
-            row.versions.append(
-                TemplateVersionOrm(
-                    id=new_id(),
-                    number=template.version,
-                    state="PUBLISHED",
-                    definition=to_json(template),
-                    created_at=now,
-                    published_at=now,
-                    published_by=_SEEDER,
-                    publish_reason="Standard template shipped with the service",
-                )
-            )
-            session.add(row)
+            session.add(_new_template(template_id, template, now))
             added += 1
     return added
 

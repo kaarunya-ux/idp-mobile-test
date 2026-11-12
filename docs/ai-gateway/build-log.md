@@ -246,3 +246,10 @@ log watcher, promotion gate and canary, and the prompt-quality suite.
 **Check it:** 194 unit tests pass; lint, types, 7 import contracts. Golden suites on the 35B (10.0.3.13): conversion
 pages 12 of 12, hostile cards obeyed 1 of 18 without OCR hints and 0 of 18 with them, normal cards 100%, PII 0 leaks
 (`services/golden-tests/BASELINE.md`).
+
+## Entry 12: Standards and SonarQube-style cleanup before the GitLab push (2026-11-12)
+
+**What:** `bootstrap.build` under 50 lines (`_slots`, `_timeouts`); `register_exception_handlers` under 50 lines
+(`_respond` at module level); `noqa: PLR0913` comments give their reason. No behaviour change.
+
+**Check it:** `make check`: 194 tests pass; lint, types, import contracts.

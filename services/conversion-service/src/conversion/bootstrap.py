@@ -74,9 +74,10 @@ if TYPE_CHECKING:  # boto3-stubs is a dev dependency: type hints only, not in th
     from mypy_boto3_s3 import S3Client
 
 
-def build_converter_registry(settings: Settings, storage: ObjectStoragePort | None = None) -> ConverterRegistry:
-    """Every converter this build of the service can run. The scanned routes' reader joins only when ai-gateway and
-    storage are configured; without them those routes answer ``CNV-422-ROUTE-001``, as before."""
+def build_converter_registry(settings: Settings) -> ConverterRegistry:
+    """Every converter this build of the service can run. The scanned routes' reader joins only when ai-gateway is
+    configured (pages go to it inline, so no storage is needed); without it those routes answer
+    ``CNV-422-ROUTE-001``."""
     limits, office = settings.limits, settings.office
     return ConverterRegistry(
         [
@@ -138,8 +139,8 @@ def _ocr_engine(ocr: OcrSettings) -> OcrEnginePort:
     )
 
 
-def build_convert_file_service(settings: Settings, storage: ObjectStoragePort | None = None) -> ConvertFileService:
-    return ConvertFileService(RoutePlanner(), build_converter_registry(settings, storage))
+def build_convert_file_service(settings: Settings) -> ConvertFileService:
+    return ConvertFileService(RoutePlanner(), build_converter_registry(settings))
 
 
 def build_convert_now_service(settings: Settings) -> ConvertNowService:
@@ -163,7 +164,7 @@ def _scanned_reader_configured(settings: Settings) -> bool:
 
 def build_job_runner(settings: Settings, storage: ObjectStoragePort) -> JobRunner:
     limits, preview, edit = settings.limits, settings.preview, settings.edit
-    converter = build_convert_file_service(settings, storage)
+    converter = build_convert_file_service(settings)
     private_key = settings.crypto.private_key
     return JobRunner(
         {

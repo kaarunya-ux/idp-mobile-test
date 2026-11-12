@@ -83,28 +83,12 @@ def build(settings: Settings, clock: Clock) -> Container:
     prompts = PromptFiles.load(pins=settings.prompts.pins)
     runner = ModelCallRunner(
         model=model_port,
-        slots=RedisSlots(
-            redis,
-            capacity=model.vl_max_concurrent,
-            wait_timeout_s=settings.queue.wait_timeout.total_seconds(),
-            lease_s=settings.queue.lease.total_seconds(),
-            priority_share=settings.queue.priority_share,
-            interactive_reserved=settings.queue.interactive_reserved_slots,
-            interactive_wait_timeout_s=settings.queue.interactive_wait_timeout.total_seconds(),
-        ),
+        slots=_slots(redis, settings),
         caps=RedisCaps(redis, limits=_limits(settings)),
         prompts=prompts,
         metrics=PrometheusMetrics(),
         clock=clock,
-        timeouts={
-            Task.FIELD_READ: model.timeouts.field_read.total_seconds(),
-            Task.CLASSIFY: model.timeouts.classify.total_seconds(),
-            Task.PAGE_ANALYSIS: model.timeouts.page_analysis.total_seconds(),
-            Task.TEMPLATE_SUGGEST: model.timeouts.template_suggest.total_seconds(),
-            Task.PAGE_READ: model.timeouts.page_read.total_seconds(),
-            Task.PAGE_LAYOUT: model.timeouts.page_layout.total_seconds(),
-            Task.GENERIC_READ: model.timeouts.generic_read.total_seconds(),
-        },
+        timeouts=_timeouts(settings),
     )
     images = S3ImageStore(
         _s3(settings.storage),
@@ -131,6 +115,34 @@ def build(settings: Settings, clock: Clock) -> Container:
         ),
     )
     return Container(ai=services, http=http, redis=redis, page_http=page_http)
+
+
+def _slots(redis: Redis, settings: Settings) -> RedisSlots:
+    """The model's concurrency slots, shared by every gateway replica through Redis."""
+    queue = settings.queue
+    return RedisSlots(
+        redis,
+        capacity=settings.model.vl_max_concurrent,
+        wait_timeout_s=queue.wait_timeout.total_seconds(),
+        lease_s=queue.lease.total_seconds(),
+        priority_share=queue.priority_share,
+        interactive_reserved=queue.interactive_reserved_slots,
+        interactive_wait_timeout_s=queue.interactive_wait_timeout.total_seconds(),
+    )
+
+
+def _timeouts(settings: Settings) -> dict[Task, float]:
+    """Each task's model timeout in seconds (IDP-03 ch. 4.5)."""
+    t = settings.model.timeouts
+    return {
+        Task.FIELD_READ: t.field_read.total_seconds(),
+        Task.CLASSIFY: t.classify.total_seconds(),
+        Task.PAGE_ANALYSIS: t.page_analysis.total_seconds(),
+        Task.TEMPLATE_SUGGEST: t.template_suggest.total_seconds(),
+        Task.PAGE_READ: t.page_read.total_seconds(),
+        Task.PAGE_LAYOUT: t.page_layout.total_seconds(),
+        Task.GENERIC_READ: t.generic_read.total_seconds(),
+    }
 
 
 def _model_servers(settings: Settings) -> tuple[ModelPort, httpx.AsyncClient, httpx.AsyncClient | None]:

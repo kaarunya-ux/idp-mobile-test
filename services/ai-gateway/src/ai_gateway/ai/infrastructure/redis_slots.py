@@ -91,7 +91,7 @@ return 1
 
 class RedisSlots:
     # every collaborator is a client or a number
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913  # each limit is its own setting
         self,
         redis: Redis,
         *,
