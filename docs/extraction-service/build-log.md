@@ -579,3 +579,20 @@ they were. The API already takes `back`; the frontend will send two files later.
 its front fields from the AI.
 
 **Check it:** 774 unit tests pass (7 new); lint, types, import contracts.
+
+## Entry 22: A custom key's box is read on the picture as uploaded (2026-11-11)
+
+**Problem:** the backend's custom template (one key, `given_name`, with a box drawn around the value) returned
+`National`. The box is in percent of the picture the user drew on, the upload as it is. Since entry 21 a two-card
+picture is split and page 1 is the front card alone, so the same percentages pointed at the "National Identification
+Number" line. Before entry 21 page 1 was the back card cut out of the picture, wrong as well; any photo whose card is
+cut out of a background had the same mismatch.
+
+**What:** a custom request with at least one box is prepared `as_uploaded`: no card cut out, no split, no
+straightening or turning (`PrepareDocumentCommand.as_uploaded`, `load_pages(split_cards=)`,
+`prepare(reshape=)`); cleaning and contrast stay. Requests without boxes, standard cards and jobs are unchanged.
+ADR 0013 amended. A box drawn loosely that catches the key's own label ("Given Name" over "EDWARDS") leaves the
+label out of the value.
+
+**Check it:** 780 unit tests pass (6 new); lint, types, import contracts. Both Jamaican cards with a box around the
+given name and the date of birth: the right values (before: `National`).

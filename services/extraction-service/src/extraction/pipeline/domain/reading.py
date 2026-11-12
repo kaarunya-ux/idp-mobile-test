@@ -121,11 +121,28 @@ def _in_drawn_box(
         for word in words
         if not any(_inside(word.box, hidden) for hidden in skip) and (clipped := _clipped(word, box)) is not None
     ]
-    lines = _visual_lines(kept)
+    lines = [rest for line in _visual_lines(kept) if (rest := _without_label(definition.value_after, line))]
     if not lines:
         return None
     every = [word for line in lines for word in line]
     return _best(definition, [every, *lines] if len(lines) > 1 else lines, today=today)
+
+
+def _without_label(label: str | None, line: list[OcrWord]) -> list[OcrWord]:
+    """``line`` without the key's own label at its start: a box drawn loosely catches the label above or before the
+    value ("Given Name" over "EDWARDS"), which is not part of the value. A piece holding the label and the value keeps
+    the value."""
+    found = re.match(label, " ".join(word.text for word in line)) if label else None
+    if found is None:
+        return line
+    start = 0
+    for index, word in enumerate(line):
+        end = start + len(word.text)
+        if end >= found.end():
+            rest = word.text[found.end() - start :].lstrip(" :;-=")
+            return ([replace(word, text=rest)] if rest else []) + line[index + 1 :]
+        start = end + 1
+    return []
 
 
 def _clipped(word: OcrWord, box: Box) -> OcrWord | None:

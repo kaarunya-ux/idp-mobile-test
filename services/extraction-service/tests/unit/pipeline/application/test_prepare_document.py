@@ -35,7 +35,8 @@ class FakeLoader:
     def __init__(self, pages: int = 2, error: Exception | None = None) -> None:
         self._pages, self._error = pages, error
 
-    def load_pages(self, content: bytes) -> tuple[PageImage, ...]:
+    def load_pages(self, content: bytes, *, split_cards: bool = True) -> tuple[PageImage, ...]:
+        self.split_cards = split_cards
         if self._error:
             raise self._error
         return tuple(_page(index) for index in range(self._pages))
@@ -54,8 +55,9 @@ class FakePreparer:
     def __init__(self) -> None:
         self.prepared: list[int] = []
 
-    def prepare(self, image: PageImage) -> PreparedPage:
+    def prepare(self, image: PageImage, *, reshape: bool = True) -> PreparedPage:
         self.prepared.append(image.page_index)
+        self.reshaped = reshape
         steps = PreparationSteps(warped=False, deskew_degrees=0.0, rotation_degrees=0, orientation_confidence=None)
         return PreparedPage(page_index=image.page_index, clean=image, binarised=image, steps=steps)
 
@@ -163,3 +165,16 @@ def test_prepares_a_blurred_page_and_keeps_its_scores_when_the_gate_only_measure
 
     assert preparer.prepared == [0]
     assert result.qualities[0].blur == BLURRED.blur
+
+
+@pytest.mark.parametrize("as_uploaded", [False, True])
+def test_keeps_the_picture_as_uploaded_only_when_the_command_says_so(as_uploaded: bool) -> None:
+    """A custom template's boxes were drawn on the picture as uploaded: no split, no cut, no turn (ADR 0013)."""
+    loader, preparer = FakeLoader(1), FakePreparer()
+
+    _service(loader, FakeAssessor([GOOD]), preparer, RecordingProgress()).prepare(
+        PrepareDocumentCommand(content=b"x", as_uploaded=as_uploaded)
+    )
+
+    assert loader.split_cards is not as_uploaded
+    assert preparer.reshaped is not as_uploaded

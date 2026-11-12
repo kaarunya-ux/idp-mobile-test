@@ -204,3 +204,19 @@ def test_widens_a_drawn_box_a_little_and_keeps_it_inside_the_page() -> None:
     assert (definition.box.x, definition.box.y) == (0.0, 0.49)
     assert definition.box.width == pytest.approx(0.305)
     assert definition.box.height == pytest.approx(0.04)
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        [word("Given Name", 0.37, 0.30), word("DEMO", 0.37, 0.33)],  # the label line above the value, caught
+        [word("Given Name DEMO", 0.37, 0.31, width=0.2)],  # one piece: label and value on one line
+    ],
+)
+def test_leaves_out_the_keys_own_label_when_a_loose_box_catches_it(words: list[OcrWord]) -> None:
+    definition = _drawn("Given Name", Box(x=0.36, y=0.29, width=0.25, height=0.07))
+
+    reading = read_field(definition, words, definition.box, today=TODAY)
+
+    assert reading is not None
+    assert reading.text == "DEMO"

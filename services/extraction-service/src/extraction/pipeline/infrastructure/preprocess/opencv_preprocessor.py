@@ -45,15 +45,17 @@ class OpenCvPagePreparer:
         self._min_card_area_fraction = min_card_area_fraction
         self._orientation_min_confidence = orientation_min_confidence
 
-    def prepare(self, image: PageImage) -> PreparedPage:
+    def prepare(self, image: PageImage, *, reshape: bool = True) -> PreparedPage:
+        """``reshape`` False keeps every pixel where it was (no cut, straightening or turn), so boxes drawn on the
+        picture as uploaded still point at the same text."""
         rgb = to_rgb_array(image)
-        detection = detect_card(rgb, min_area_fraction=self._min_card_area_fraction)
-        warped = detection.corners is not None
-        page = warp_to_card(rgb, detection.corners) if detection.corners is not None else np.array(rgb)
+        detection = detect_card(rgb, min_area_fraction=self._min_card_area_fraction) if reshape else None
+        corners = detection.corners if detection is not None else None
+        page = warp_to_card(rgb, corners) if corners is not None else np.array(rgb)
 
-        skew = estimate_skew_degrees(page)
+        skew = estimate_skew_degrees(page) if reshape else 0.0
         page = rotate_by(page, skew) if abs(skew) >= _SKEW_MIN_DEGREES else page
-        degrees, confidence = self._orientation.classify(page)
+        degrees, confidence = self._orientation.classify(page) if reshape else (0, 0.0)
         turned = degrees if confidence >= self._orientation_min_confidence else 0
         page = np.ascontiguousarray(np.rot90(page, turned // _QUARTER_TURN))
 
@@ -63,7 +65,7 @@ class OpenCvPagePreparer:
             clean=from_rgb_array(clean, page_index=image.page_index),
             binarised=from_rgb_array(binarise(clean), page_index=image.page_index),
             steps=PreparationSteps(
-                warped=warped,
+                warped=corners is not None,
                 deskew_degrees=round(skew, 2) if abs(skew) >= _SKEW_MIN_DEGREES else 0.0,
                 rotation_degrees=turned,
                 orientation_confidence=round(confidence, 3),
