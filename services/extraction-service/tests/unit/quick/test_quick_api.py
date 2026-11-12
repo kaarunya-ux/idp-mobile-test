@@ -136,6 +136,7 @@ def test_returns_the_type_and_every_field_in_camel_case_when_a_front_and_back_ar
     body = response.json()
     assert (body["documentType"], body["readBy"], body["promptVersion"]) == ("aadhaar", "AI", "generic-read.v1")
     assert body["fields"][0] == {
+        "id": None,
         "key": "name",
         "label": "Name",
         "type": "string",
@@ -275,6 +276,23 @@ def test_reads_only_the_keys_sent_on_the_custom_route() -> None:
     ]
 
 
+def test_sends_each_key_back_with_its_own_id_when_the_caller_gave_one() -> None:
+    fields = '[{"id": "f-items", "key": "items", "label": "Items"}, {"id": "f-name", "key": "name", "label": "Name"}]'
+
+    response = _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields})
+
+    assert response.status_code == 200
+    assert [(f["id"], f["key"]) for f in response.json()["fields"]] == [("f-name", "name"), ("f-items", "items")]
+
+
+def test_sends_a_null_id_back_when_the_caller_gave_none() -> None:
+    fields = '[{"id": "f-name", "key": "name", "label": "Name"}, {"key": "items", "label": "Items"}]'
+
+    response = _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}, data={"fields": fields})
+
+    assert [f["id"] for f in response.json()["fields"]] == ["f-name", None]
+
+
 def test_passes_a_drawn_box_on_as_fractions_of_the_page() -> None:
     pipeline = _Pipeline()
     fields = '[{"key": "gstin", "label": "GSTIN", "box": {"page": 1, "x": 13.5, "y": 26.2, "w": 26, "h": 1.3}}]'
@@ -315,6 +333,8 @@ def test_answers_400_on_the_custom_route_when_a_box_is_not_valid(fields: str) ->
         '[{"key": "Card Number", "label": "Card No"}]',  # not lower snake_case
         '[{"key": "a", "label": "A", "type": "money"}]',
         '[{"key": "a", "label": ""}]',
+        '[{"id": "x", "key": "a", "label": "A"}, {"id": "x", "key": "b", "label": "B"}]',  # an id used twice
+        '[{"id": "", "key": "a", "label": "A"}]',
     ],
 )
 def test_answers_400_on_the_custom_route_when_the_fields_are_not_valid(fields: str) -> None:

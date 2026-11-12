@@ -19,6 +19,7 @@ class TableBody(_Body):
 
 
 class ExtractedFieldBody(_Body):
+    id: str | None = Field(None, description="the custom route: the id the caller sent with this key; null otherwise")
     key: str = Field(description="lower snake_case, e.g. 'date_of_birth'; each key once")
     label: str = Field(description="as a person reads it, e.g. 'Date of Birth'")
     type: str = Field(description="string, number, date or table")
@@ -62,6 +63,9 @@ class CustomFieldBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    id: str | None = Field(
+        None, min_length=1, max_length=128, description="optional, the caller's own id; sent back on this key's field"
+    )
     key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$", description="lower snake_case, e.g. 'card_number'")
     label: str = Field(min_length=1, max_length=120, description="as printed on the document, e.g. 'Card No'")
     type: Literal["text", "date", "number"] = "text"
