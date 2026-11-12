@@ -9,7 +9,7 @@ GATEWAY ?= uv run --project $(SERVICES)/ai-gateway python
 EXTRACTION ?= uv run --project $(SERVICES)/extraction-service python
 CONVERSION ?= uv run --project $(SERVICES)/conversion-service python
 
-.PHONY: help all injection injection-conversion injection-extraction pii drift drift-baseline full-check clean accuracy-aadhaar test-accuracy
+.PHONY: help all injection injection-conversion injection-extraction pii drift drift-baseline full-check clean accuracy-aadhaar accuracy-pan accuracy-dl test-accuracy
 
 help:  ## what can run
 	@grep -E '^[a-z-]+:.*##' Makefile | sed 's/:.*##/\t/'
@@ -50,5 +50,13 @@ accuracy-aadhaar:  ## 100 invented Aadhaar cards sent to POST /api/v1/extract, s
 	$(EXTRACTION) accuracy/aadhaar/run.py
 	$(EXTRACTION) accuracy/aadhaar/report.py
 
-test-accuracy:  ## the accuracy set's own tests (no service needed)
-	$(EXTRACTION) -m pytest -q tests/test_accuracy_aadhaar.py
+accuracy-pan:  ## 100 invented PAN cards sent to POST /api/v1/extract, scored per field; needs EVAL_EXTRACTION_URL (about 10 minutes)
+	$(EXTRACTION) accuracy/pan/run.py
+	$(EXTRACTION) accuracy/pan/report.py
+
+accuracy-dl:  ## 100 invented driving licences (one side-by-side picture or front + back), same scoring; needs EVAL_EXTRACTION_URL (about 12 minutes)
+	$(EXTRACTION) accuracy/dl/run.py
+	$(EXTRACTION) accuracy/dl/report.py
+
+test-accuracy:  ## the accuracy sets' own tests (no service needed)
+	$(EXTRACTION) -m pytest -q tests/test_accuracy_aadhaar.py tests/test_accuracy_pan.py tests/test_accuracy_dl.py
