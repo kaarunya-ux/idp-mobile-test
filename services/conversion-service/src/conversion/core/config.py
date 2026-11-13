@@ -143,6 +143,10 @@ class OcrSettings(BaseModel):
     # pages are read four at a time (AI_GATEWAY__PAGE_CONCURRENCY), so more threads per page only fight over the
     # cores; 2 is extraction's measured setting
     threads: int = Field(2, ge=1, le=64)
+    # target TXT (ADR 0003): a PDF page with fewer characters in its text layer is read with OCR too (a scan, or a scan
+    # with a browser's header line), drawn at this DPI; the reading with more text is kept
+    text_ocr_below_chars: int = Field(200, ge=0, le=100_000)
+    text_render_dpi: int = Field(200, ge=72, le=400)
 
 
 class SyncSettings(BaseModel):

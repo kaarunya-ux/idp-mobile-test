@@ -1326,3 +1326,16 @@ behaviour change.
 **Check it:** `make check`: lint, types and import contracts pass; 619 tests pass, 1 fails:
 `test_converts_a_word_file_with_hindi_and_embeds_a_devanagari_font`. It fails the same way on the unchanged base
 branch, so it depends on this laptop's LibreOffice and font setup, not on this change.
+
+## Entry 22: Target TXT, the plain text inside any file (2026-11-13)
+
+**Why:** users want only the text in a document, without templates or a new file format (ADR 0003).
+
+**What:** `Format.TXT` (out only, outside the matrix); `TextReaderPort` and `PlainTextReader`
+(`infrastructure/readers/plain_text.py`): python-docx, openpyxl, python-pptx, the CSV bytes, PDFium's text layer, and
+OCR engine A for pictures and for PDF pages with less than `OCR__TEXT_OCR_BELOW_CHARS` characters (rendered at
+`OCR__TEXT_RENDER_DPI`), keeping the longer reading. `ConvertNowService` answers `<name>.txt`, or a ZIP for several
+files. No new dependency; no model call.
+
+**Check it:** `make check`: 632 tests pass (12 new); the one failure is the Hindi-font test, failing the same way on
+the base branch (this laptop's LibreOffice and fonts). Lint, types, import contracts.

@@ -16,6 +16,7 @@ class Format(StrEnum):
     JPEG = "JPEG"
     JSON = "JSON"  # extraction results in, and EXPORT out; not part of the conversion matrix
     XML = "XML"  # EXPORT out only
+    TXT = "TXT"  # out only: the plain text inside any file, read by libraries or OCR (ADR 0003)
 
     @property
     def is_image(self) -> bool:
@@ -42,7 +43,7 @@ class Format(StrEnum):
 
 
 IMAGE_FORMATS: frozenset[Format] = frozenset({Format.PNG, Format.JPEG})
-MATRIX_FORMATS: frozenset[Format] = frozenset(Format) - {Format.JSON, Format.XML}  # IDP-00 ch. 5
+MATRIX_FORMATS: frozenset[Format] = frozenset(Format) - {Format.JSON, Format.XML, Format.TXT}  # IDP-00 ch. 5
 EXPORT_FORMATS: frozenset[Format] = frozenset(
     {Format.JSON, Format.CSV, Format.XLSX, Format.DOCX, Format.PDF, Format.XML}
 )  # IDP-03 ch. 3.6
@@ -58,6 +59,7 @@ _CONTENT_TYPES = {
     Format.JPEG: "image/jpeg",
     Format.JSON: "application/json",
     Format.XML: "application/xml",
+    Format.TXT: "text/plain",
 }
 _CONTENT_TYPE_ALIASES = {"image/jpg": Format.JPEG, "application/csv": Format.CSV}  # seen from older clients
 _SUFFIXES = {
@@ -70,6 +72,7 @@ _SUFFIXES = {
     Format.JPEG: ".jpg",
     Format.JSON: ".json",
     Format.XML: ".xml",
+    Format.TXT: ".txt",
 }
 
 

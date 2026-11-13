@@ -25,7 +25,7 @@ from conversion.conversion.domain.exceptions import (
     RouteNotFoundError,
 )
 from conversion.conversion.domain.formats import Format
-from conversion.conversion.domain.ports import ConverterPort, StepRequest, StepResult
+from conversion.conversion.domain.ports import ConverterPort, PlainText, StepRequest, StepResult
 from conversion.conversion.domain.route import Converter
 from conversion.conversion.domain.route_planner import RoutePlanner
 from conversion.conversion.infrastructure.registry import ConverterRegistry
@@ -330,3 +330,46 @@ def test_sends_photos_to_a_job_when_ai_gateway_is_not_configured() -> None:
     assert not service._reads
     with pytest.raises(LookupError):
         service._converter._converters.get(Converter.OCR_TO_MODEL)
+
+
+class FakeTextReader:
+    """Answers each file's text as ``text of <format>``, and keeps what it was asked."""
+
+    def __init__(self) -> None:
+        self.read: list[tuple[Path, Format]] = []
+
+    def read_text(self, path: Path, source: Format) -> PlainText:
+        self.read.append((path, source))
+        return PlainText(text=f"text of {source.value}", pages=2)
+
+
+def _text_service(inspector: FakeInspector, text: FakeTextReader | None) -> ConvertNowService:
+    planner = RoutePlanner()
+    return ConvertNowService(
+        planner, ConvertFileService(planner, ConverterRegistry([])), inspector, FakeMerger(), text=text
+    )
+
+
+def test_answers_the_text_inside_the_file_as_a_txt_named_after_it(tmp_path: Path) -> None:
+    text = FakeTextReader()
+
+    result = _text_service(FakeInspector(Format.DOCX), text).convert(_command(tmp_path, target="TXT"))
+
+    assert (result.file.name, result.content_type, result.page_count) == ("report.txt", "text/plain", 2)
+    assert result.file.read_text(encoding="utf-8") == "text of DOCX\n"
+    assert text.read == [(tmp_path / "in-1" / "input.docx", Format.DOCX)]
+
+
+def test_answers_one_zip_of_txt_files_for_several_files(tmp_path: Path) -> None:
+    result = _text_service(FakeInspector(Format.PNG), FakeTextReader()).convert(
+        _command(tmp_path, target="TXT", names=("front", "back"))
+    )
+
+    assert result.content_type == "application/zip"
+    with zipfile.ZipFile(result.file) as archive:
+        assert sorted(archive.namelist()) == ["back.txt", "front.txt"]
+
+
+def test_refuses_txt_when_this_build_has_no_text_reader(tmp_path: Path) -> None:
+    with pytest.raises(RouteNotFoundError):
+        _text_service(FakeInspector(Format.PDF), None).convert(_command(tmp_path, target="TXT"))
