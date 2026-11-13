@@ -15,6 +15,7 @@ class Task(StrEnum):
     PAGE_READ = "page-read"  # a whole page as blocks, for conversion-service's scanned routes
     PAGE_LAYOUT = "page-layout"  # a page's structure over OCR's lines, for conversion's OCR-first reading
     GENERIC_READ = "generic-read"  # any document, every field it shows: extraction's synchronous path (ADR 0003)
+    GENERIC_LINES = "generic-lines"  # the same, over OCR's numbered lines: the model answers line numbers only
 
 
 class Priority(StrEnum):

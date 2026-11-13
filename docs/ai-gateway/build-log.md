@@ -253,3 +253,13 @@ pages 12 of 12, hostile cards obeyed 1 of 18 without OCR hints and 0 of 18 with 
 (`_respond` at module level); `noqa: PLR0913` comments give their reason. No behaviour change.
 
 **Check it:** `make check`: 194 tests pass; lint, types, import contracts.
+
+## Entry 13: generic-lines: any document's fields named by OCR line number (2026-11-13)
+
+**What:** `POST /internal/v1/ai/generic-lines`: numbered OCR lines in, `documentType`, `documentConfidence` and fields
+(`key`, `label`, `type`, `lines`, `rows` for a table) out, never text. Prompt `generic-lines.v1` (text model, thinking
+off, lines inside a data block so their text is never an instruction); a line number not sent is an invalid answer
+(one repair, then 502). Task `generic-lines`, timeout `MODEL__TIMEOUTS__GENERIC_LINES` (90 s: a dense invoice took 49 s on the 4B). For extraction's ADR
+0015.
+
+**Check it:** `make check`: 201 tests pass (5 new), lint, types, import contracts.

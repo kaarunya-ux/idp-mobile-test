@@ -18,6 +18,7 @@ from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_generic_lines import ReadGenericLinesService
 from ai_gateway.ai.application.services.read_layout import ReadLayoutService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
@@ -48,6 +49,7 @@ class AiServices:
     read_page: ReadPageService
     read_document: ReadDocumentService
     read_layout: ReadLayoutService
+    read_lines: ReadGenericLinesService
 
 
 @dataclass(slots=True, kw_only=True)
@@ -110,6 +112,7 @@ def build(settings: Settings, clock: Clock) -> Container:
             min_block_share=model.page_read_min_block_share,
         ),
         read_document=ReadDocumentService(runner=runner, images=images, prompts=prompts),
+        read_lines=ReadGenericLinesService(runner=runner, prompts=prompts),
         read_layout=ReadLayoutService(
             runner=runner, images=images, prompts=prompts, max_side_px=model.page_read_max_side_px
         ),
@@ -142,6 +145,7 @@ def _timeouts(settings: Settings) -> dict[Task, float]:
         Task.PAGE_READ: t.page_read.total_seconds(),
         Task.PAGE_LAYOUT: t.page_layout.total_seconds(),
         Task.GENERIC_READ: t.generic_read.total_seconds(),
+        Task.GENERIC_LINES: t.generic_lines.total_seconds(),
     }
 
 

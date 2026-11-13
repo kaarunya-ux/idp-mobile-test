@@ -648,3 +648,28 @@ GitLab push, the owner decides whether to delete it), migrations' `upgrade()` le
 
 **Check it:** `make check`: 790 unit tests pass; lint, types, import contracts. No `src/` finding left in the
 standards script; no function above cognitive complexity 15.
+
+## Entry 26: The generic read's fields carry the box where each value is printed (2026-11-13)
+
+**Why:** the frontend's template designer turns a generic read into a custom template; a key with a box is read by
+OCR alone, in about 1 to 3 seconds instead of 15 to 25. It asked for each value's place (ADR 0014).
+
+**What:** `quick/domain/locate.py` (pure): a value is placed on the run of OCR words that spells it; printed twice, the
+one next to its label; joined to its label, that word; otherwise no box. `OcrPageWords` (`quick/infrastructure`)
+reads the uploaded pages as they are with OCR engine A, at most two, never split; the use case runs it while the model
+reads, and an OCR failure leaves the fields without boxes. `ExtractedFieldBody.box` = `{page, x, y, w, h}` in percent,
+the custom route's box form. Both generic paths: `/extract/generic`, and `/extract` when no template matches.
+
+**Check it:** `make check`: 802 unit tests pass (12 new), lint, types, import contracts.
+
+## Entry 27: The generic read over OCR's lines, behind a switch (2026-11-13)
+
+**Why:** the generic read's time is the model writing every value (measured: picture 32.8 s, OCR text only 34.4 s,
+OCR lines answered by line number 19.7 s on one card). ADR 0015.
+
+**What:** `QUICK__GENERIC_MODE` (`picture` default, `lines`). In `lines`, `quick/domain/lines.py` numbers OCR's lines
+across the uploaded pages, ai-gateway's `generic-lines` names each field's lines, and each value is filled from those
+words, without a label printed on the same line, with its box and OCR's mean confidence; a table is rows of cells. No
+OCR text: read as a picture. Local stack: `QUICK_GENERIC_MODE` in `.env`.
+
+**Check it:** `make check`: 814 unit tests pass (12 new for this entry), lint, types, import contracts.

@@ -4,6 +4,7 @@ the pipeline runner (the pipeline's result mapped, long PDFs refused, the AI on 
 import base64
 import io
 import json
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -23,9 +24,10 @@ from extraction.quick.domain.exceptions import (
 )
 from extraction.quick.domain.models import QuickCaller, ReadBy, StagedFile, Table
 from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
+from extraction.quick.infrastructure.page_words import OcrPageWords
 from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner, quick_result
 from extraction.quick.infrastructure.workspace import MemoryWorkspace
-from idp_ocr_engines.model import PageImage
+from idp_ocr_engines.model import OcrPage, PageImage
 from support.pipeline_fakes import RESULT, Pipeline
 
 CALLER = QuickCaller(account_id=UUID("0192f0aa-0000-7000-8000-000000000001"), plan="GUEST")
@@ -359,3 +361,54 @@ def test_reads_with_the_custom_template_alone_without_classifying() -> None:
 
     assert pipeline.templates == [template]
     assert pipeline.command.template_forced is True
+
+
+class _SplitRecordingLoader:
+    def __init__(self) -> None:
+        self.split: list[bool] = []
+
+    def load_pages(self, content: bytes, *, split_cards: bool = True) -> tuple[PageImage, ...]:
+        self.split.append(split_cards)
+        page = PageImage(width=4, height=4, rgb=bytes(4 * 4 * 3), page_index=0)
+        return (page, page)  # a two-page PDF
+
+
+class _CountingEngine:
+    def __init__(self) -> None:
+        self.read = 0
+
+    def read_page(self, image: PageImage, languages: Sequence[str]) -> OcrPage:
+        self.read += 1
+        return OcrPage(width=image.width, height=image.height, words=())
+
+
+def test_reads_words_on_at_most_two_pages_as_uploaded_never_split() -> None:
+    loader, engine = _SplitRecordingLoader(), _CountingEngine()
+
+    pages = OcrPageWords(loader, engine).read_words([b"front", b"back"])
+
+    assert (len(pages), engine.read, loader.split) == (2, 2, [False, False])
+
+
+def test_sends_the_numbered_ocr_lines_and_returns_the_line_numbers_of_each_field() -> None:
+    answer = {
+        "documentType": "mock_card",
+        "documentConfidence": 0.9,
+        "fields": [
+            {"key": "name", "label": "Name", "type": "string", "lines": [1], "rows": None},
+            {"key": "items", "label": "Items", "type": "table", "lines": [], "rows": [[[2], [3]]]},
+        ],
+        "model": "smart-test",
+        "promptVersion": "generic-lines.v1",
+    }
+    seen: list[httpx.Request] = []
+    reader, _ = _reader(200, answer, seen)
+
+    reading = reader.read_lines(CALLER, ["MOCK CARD", "DEMO PERSON", "Item", "Qty"])
+
+    body = json.loads(seen[0].content)
+    assert seen[0].url.path == "/internal/v1/ai/generic-lines"
+    assert body["lines"][:2] == [{"n": 0, "text": "MOCK CARD"}, {"n": 1, "text": "DEMO PERSON"}]
+    assert (body["priority"], "pages" in body) == ("INTERACTIVE", False)
+    assert [(f.key, f.lines, f.rows) for f in reading.fields] == [("name", (1,), None), ("items", (), (((2,), (3,)),))]
+    assert reading.prompt_version == "generic-lines.v1"

@@ -26,6 +26,7 @@ All `POST`, JSON, `Authorization: Bearer <service token>`. Every answer also has
 | `/internal/v1/ai/template-suggest` | `accountId, priority?, plan?, page, ocrWords[{text, box}]` | `fields[], tables[]` |
 | `/internal/v1/ai/page-read` | `accountId, priority?, plan?, page` | `analysis{nBlocks, tableColumnCounts}, blocks[]`: headings, paragraphs, lists (text, align, size, bold) and tables (hasHeader, header, rows). For conversion-service's scanned routes |
 | `/internal/v1/ai/generic-read` | `accountId, priority?, plan?, pages[1..2]`: a document's page images (a card's front and back are read as one) | `documentType` (a lower snake_case code, or null), `documentConfidence`, `fields[{key, label, type, value, confidence}]`; a `table` field's value is `{headers, rows}`. Any document, when no template matched it: extraction-service's synchronous path (ADR 0003) |
+| `/internal/v1/ai/generic-lines` | `accountId, priority?, plan?, lines[{n, text}]`: a document's OCR lines, numbered | `documentType`, `documentConfidence`, `fields[{key, label, type, lines, rows}]`: each field's line numbers (a table's rows of cells), never text. The generic read over OCR's lines (extraction's ADR 0015) |
 
 `priority` is `STANDARD` (the default), `PRIORITY` (served 3:1 over STANDARD) or `INTERACTIVE`: a person waiting on an
 open request (extraction-service's synchronous path). INTERACTIVE goes before both, may use the slots the queued lanes

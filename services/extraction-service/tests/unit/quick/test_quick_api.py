@@ -27,6 +27,7 @@ from extraction.quick.domain.models import (
     UploadLimits,
 )
 from extraction.sync_main import create_sync_app
+from idp_ocr_engines.model import Box, OcrPage, OcrWord
 from support.template_fakes import Clock
 
 ACCOUNT = UUID("0192f0aa-0000-7000-8000-000000000001")
@@ -90,6 +91,19 @@ class _Reader:
         return RESULT
 
 
+class _Words:
+    """The page words for the generic read's boxes: one word that spells the test result's name."""
+
+    def read_words(self, contents: Sequence[bytes]) -> Sequence[OcrPage]:
+        word = OcrWord(
+            text="परीक्षण", box=Box(x=0.612, y=0.368, width=0.335, height=0.041), confidence=0.9, line_id=0, block_id=0
+        )
+        word2 = OcrWord(
+            text="व्यक्ति", box=Box(x=0.612, y=0.368, width=0.335, height=0.041), confidence=0.9, line_id=0, block_id=0
+        )
+        return [OcrPage(width=1000, height=600, words=(word, word2))]
+
+
 class _Verifier:
     """Accepts ``GOOD_TOKEN`` as ``principal``; anything else is not signed in."""
 
@@ -115,6 +129,7 @@ def _client(
         workspace=_Workspace(),
         pipeline=pipeline or _Pipeline(),
         reader=reader or _Reader(),
+        words=_Words(),
         limits=UploadLimits(max_file_bytes=max_file, max_total_bytes=1500),
     )
     quick = {"max_concurrent": max_concurrent} | (
@@ -144,8 +159,10 @@ def test_returns_the_type_and_every_field_in_camel_case_when_a_front_and_back_ar
         "confidence": 0.96,
         "status": None,
         "source": None,
+        "box": {"page": 1, "x": 61.2, "y": 36.8, "w": 33.5, "h": 4.1},  # where OCR found the name, in percent
     }
     assert body["fields"][1]["value"] == {"headers": ["A"], "rows": [["1"]]}
+    assert body["fields"][1]["box"] is None  # a table has no single place
     assert pipeline.callers == [QuickCaller(account_id=ACCOUNT, plan="PERSONAL")]
 
 
