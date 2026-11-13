@@ -165,6 +165,7 @@ class PageReadAnswer(_Answer):
 # --- generic-read: any document, every field it shows (extraction's synchronous path, ADR 0003) ------------------
 
 _DOCUMENT_TYPE_LENGTH = 64
+_MAX_LINES_PER_VALUE = 50  # a long address spans a few lines; a value never spans a page
 _UNSAFE_TYPE_CHARACTERS = re.compile(r"[^a-z0-9]+")
 
 
@@ -215,6 +216,44 @@ class GenericReadAnswer(_Answer):
                 "document_type": code or None,
                 "document_confidence": self.document_confidence if code else None,
                 "fields": fields,
+            }
+        )
+
+
+# --- generic-lines: generic-read over OCR's numbered lines; the model names the lines, never copies them -----------
+
+
+class GenericLinesField(_Answer):
+    """A field and the OCR lines its value is printed on; a table is rows of cells, a cell its line numbers (the
+    first row the headers)."""
+
+    key: str = Field(pattern=_KEY)
+    label: str = Field(max_length=120)
+    type: Literal["string", "number", "date", "table"]
+    lines: list[int] = Field(default_factory=list, max_length=_MAX_LINES_PER_VALUE)
+    rows: list[list[list[int]]] | None = Field(None, max_length=_MAX_TABLE_ROWS)
+
+    def numbers(self) -> list[int]:
+        """Every line number this field uses."""
+        return self.lines + [n for row in self.rows or [] for cell in row for n in cell]
+
+
+class GenericLinesAnswer(_Answer):
+    document_type: str | None = Field(max_length=_DOCUMENT_TYPE_LENGTH)
+    document_confidence: float | None = Field(None, ge=0, le=1)
+    fields: list[GenericLinesField] = Field(max_length=_MAX_FIELDS)
+
+    def tidied(self) -> "GenericLinesAnswer":
+        """The type as a lower snake_case code, and only the first field with each key."""
+        code = _UNSAFE_TYPE_CHARACTERS.sub("_", (self.document_type or "").lower()).strip("_")
+        fields: dict[str, GenericLinesField] = {}
+        for found in self.fields:
+            fields.setdefault(found.key, found)
+        return self.model_copy(
+            update={
+                "document_type": code or None,
+                "document_confidence": self.document_confidence if code else None,
+                "fields": list(fields.values()),
             }
         )
 

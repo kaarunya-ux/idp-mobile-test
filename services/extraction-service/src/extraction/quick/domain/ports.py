@@ -7,7 +7,9 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from extraction.pipeline.domain.template import TemplateDefinition
+from extraction.quick.domain.lines import LinesReading
 from extraction.quick.domain.models import PipelineOutcome, QuickCaller, QuickResult, StagedFile
+from idp_ocr_engines.model import OcrPage
 
 
 class WorkspacePort(Protocol):
@@ -43,9 +45,22 @@ class DocumentPipelinePort(Protocol):
         ...
 
 
+class PageWordsPort(Protocol):
+    """OCR on the uploaded pages as they are (not cut, split or turned), for placing the generic read's values."""
+
+    def read_words(self, contents: Sequence[bytes]) -> Sequence[OcrPage]:
+        """The words and their boxes on the first two pages, in upload order. Raises the pipeline's file errors."""
+        ...
+
+
 class DocumentReaderPort(Protocol):
     """ai-gateway's ``generic-read`` on the INTERACTIVE lane, for a document no template matched."""
 
     def read(self, caller: QuickCaller, pages: Sequence[StagedFile]) -> QuickResult:
         """Raises ``BusyError``, ``AiLimitReachedError``, ``AiUnavailableError``, or ``FileUnreadableError``."""
+        ...
+
+    def read_lines(self, caller: QuickCaller, lines: Sequence[str]) -> LinesReading:
+        """ai-gateway's ``generic-lines``: which of the OCR lines (numbered from 0, as given) hold which field. Raises
+        the same errors as ``read``."""
         ...

@@ -214,8 +214,12 @@ class QuickExtractSettings(BaseModel):
     max_total_size: ByteSize = ByteSize(30 * 1024 * 1024)  # front and back together (the backend's limit)
     max_pages: int = Field(2, ge=1, le=20)  # a longer PDF is refused: send it as a job
     max_concurrent: int = Field(2, ge=1, le=32)  # documents read at once; one more is told busy (429) at once
-    # generic-read: ai-gateway's short wait for a slot (5 s) and its timeout (40 s), with a margin
-    timeout: timedelta = Field(timedelta(seconds=50), ge=timedelta(seconds=5), le=timedelta(minutes=5))
+    # the generic read: ai-gateway's short wait for a slot (5 s) and its longest timeout (generic-lines, 90 s), plus a
+    # margin; generic-read itself still stops at 40 s
+    timeout: timedelta = Field(timedelta(seconds=100), ge=timedelta(seconds=5), le=timedelta(minutes=5))
+    # ADR 0015: how the generic read works. "picture": the model reads the page image and writes every value.
+    # "lines": OCR reads the lines and the model only names which lines hold which field (faster, OCR's exact text)
+    generic_mode: Literal["picture", "lines"] = "picture"
     # ADR 0011: false lets a request without a token in, counted on this account and plan (integration testing, where
     # the callers have no login yet). A request that does send a token is still checked
     require_token: bool = True

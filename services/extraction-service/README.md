@@ -151,7 +151,7 @@ the AI through ai-gateway's INTERACTIVE lane. A document no template matches goe
 by its printed label or inside its box, OCR first, the AI for what OCR leaves unsure, and only those keys come back,
 each with the `id` it was sent with (ADR 0013). No storage is used: pages and crops stay in memory for the request and go inside the ai-gateway calls that need them (ADR 0012). `POST /api/v1/extract/generic` takes the same and sends the document **straight to the model** (no
 OCR, no quality gate): any document's type and every field, through `generic-read`. The answer: `documentType`, `documentConfidence`, `readBy` (`OCR`, `OCR_AND_AI` or `AI`), `model`,
-`promptVersion`, and `fields[{id, key, label, type, value, confidence, status, source}]` (`id` null except on the custom route) (a table's value is
+`promptVersion`, and `fields[{id, key, label, type, value, confidence, status, source, box}]` (`id` null except on the custom route; `box`, on the generic read, `{page, x, y, w, h}` in percent of the uploaded page, where OCR found the value, else null; ADR 0014) (a table's value is
 `{headers, rows}`). Errors: 413 `EXT-413-FILE-001`, 415 `EXT-415-FILE-001`, 422 `EXT-422-FILE-001` /
 `EXT-422-PAGES-001` / `EXT-422-QUALITY-00x`, 429 `EXT-429-BUSY-001` (send it as a job instead) or `EXT-429-AI-001`
 (the account's AI calls for today are used), 503 `EXT-503-AI-001`.

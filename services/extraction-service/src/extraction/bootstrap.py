@@ -61,8 +61,9 @@ from extraction.pipeline.infrastructure.quality.page_loader import DocumentPageL
 from extraction.pipeline.infrastructure.storage.s3_storage import S3ObjectStorage
 from extraction.pipeline.infrastructure.tasks import CeleryTaskQueue, WorkerServices
 from extraction.quick.application.quick_extract import QuickExtractService
-from extraction.quick.domain.models import UploadLimits
+from extraction.quick.domain.models import GenericMode, UploadLimits
 from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
+from extraction.quick.infrastructure.page_words import OcrPageWords
 from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner
 from extraction.quick.infrastructure.workspace import MemoryWorkspace
 from extraction.template.domain.definition_json import parse_definition
@@ -364,6 +365,8 @@ def build_quick_extract(settings: Settings, sessions: SessionFactory) -> QuickEx
             pipeline, pipeline.loader, inline, bucket=INLINE_BUCKET, max_pages=quick.max_pages
         ),
         reader=GatewayDocumentReader(client, tokens, inline),
+        words=OcrPageWords(pipeline.loader, pipeline.sample_engine),
+        generic_mode=GenericMode(quick.generic_mode),
         limits=UploadLimits(max_file_bytes=int(quick.max_file_size), max_total_bytes=int(quick.max_total_size)),
     )
 

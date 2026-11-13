@@ -9,11 +9,13 @@ from extraction.quick.api.schemas import (
     CustomBoxBody,
     CustomFieldBody,
     ExtractedFieldBody,
+    FieldBoxBody,
     QuickExtractResponse,
     TableBody,
 )
 from extraction.quick.domain.exceptions import FieldsInvalidError
 from extraction.quick.domain.models import QuickResult, Table
+from extraction.quick.domain.placed import PlacedBox
 from idp_ocr_engines.model import Box
 
 
@@ -35,6 +37,7 @@ def to_response(result: QuickResult, ids: Mapping[str, str] | None = None) -> Qu
                 confidence=f.confidence,
                 status=f.status,
                 source=f.source,
+                box=_box_body(f.box),
             )
             for f in result.fields
         ],
@@ -71,3 +74,21 @@ def _box(body: CustomBoxBody | None) -> Box | None:
         return None
     x, y = body.x / 100, body.y / 100
     return Box(x=x, y=y, width=min(body.w / 100, 1 - x), height=min(body.h / 100, 1 - y))
+
+
+_PERCENT = 100
+_DECIMALS = 2
+
+
+def _box_body(placed: PlacedBox | None) -> FieldBoxBody | None:
+    """Fractions of the page to the percent form a custom key's box uses."""
+    if placed is None:
+        return None
+    box = placed.box
+    return FieldBoxBody(
+        page=placed.page,
+        x=round(box.x * _PERCENT, _DECIMALS),
+        y=round(box.y * _PERCENT, _DECIMALS),
+        w=round(box.width * _PERCENT, _DECIMALS),
+        h=round(box.height * _PERCENT, _DECIMALS),
+    )

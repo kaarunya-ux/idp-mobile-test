@@ -6,6 +6,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from extraction.core.permissions import Plan
+from extraction.quick.domain.placed import PlacedBox
 
 
 class FileKind(StrEnum):
@@ -27,6 +28,13 @@ class QuickCaller:
 class UploadLimits:
     max_file_bytes: int
     max_total_bytes: int
+
+
+class GenericMode(StrEnum):
+    """How the generic read works (ADR 0015)."""
+
+    PICTURE = "picture"  # the model reads the page image and writes every value
+    LINES = "lines"  # OCR reads the lines; the model only names which lines hold which field
 
 
 class ReadBy(StrEnum):
@@ -58,6 +66,7 @@ class ExtractedField:
     confidence: float | None  # 0 to 1; None when there is no value
     status: str | None = None  # ACCEPTED or NEEDS_REVIEW for a template's field; None for the generic read
     source: str | None = None  # OCR_AGREE, OCR_2_OF_3, AI or DIGITAL_TEXT for a template's field
+    box: PlacedBox | None = None  # the generic read: where the value is printed on the pages as uploaded
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -11,6 +11,7 @@ from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_generic_lines import ReadGenericLinesService
 from ai_gateway.ai.application.services.read_layout import ReadLayoutService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
@@ -51,6 +52,7 @@ def _client(model: FakeModel, caps: FakeCaps | None = None, *, available: bool =
                 read_page=ReadPageService(runner=shared, images=images, prompts=prompts, max_side_px=2048),
                 read_document=ReadDocumentService(runner=shared, images=images, prompts=prompts),
                 read_layout=ReadLayoutService(runner=shared, images=images, prompts=prompts, max_side_px=2048),
+                read_lines=ReadGenericLinesService(runner=shared, prompts=prompts),
             )
         )
 
@@ -331,3 +333,24 @@ def test_answers_400_when_page_layout_lines_repeat_a_number(client: TestClient) 
     body = {"accountId": str(ACCOUNT), "page": {"data": base64.b64encode(b"jpeg").decode()}, "lines": lines}
 
     assert client.post("/internal/v1/ai/page-layout", json=body).status_code == 400
+
+
+def test_returns_generic_lines_fields_by_line_number(client: TestClient, model: FakeModel) -> None:
+    fields = [{"key": "email", "label": "Email", "type": "string", "lines": [1]}]
+    model.answers.append(json.dumps({"document_type": "card", "document_confidence": 0.8, "fields": fields}))
+    lines = [{"n": 0, "text": "MOCK TRADERS"}, {"n": 1, "text": "demo@mock.example"}]
+    body = {"accountId": str(ACCOUNT), "priority": "INTERACTIVE", "lines": lines}
+
+    found = client.post("/internal/v1/ai/generic-lines", json=body).json()
+
+    assert found["fields"] == [{"key": "email", "label": "Email", "type": "string", "lines": [1], "rows": None}]
+    assert found["promptVersion"] == "generic-lines.v1"
+
+
+def test_answers_400_when_generic_lines_repeat_a_number(client: TestClient) -> None:
+    lines = [{"n": 0, "text": "A"}, {"n": 0, "text": "B"}]
+
+    assert (
+        client.post("/internal/v1/ai/generic-lines", json={"accountId": str(ACCOUNT), "lines": lines}).status_code
+        == 400
+    )

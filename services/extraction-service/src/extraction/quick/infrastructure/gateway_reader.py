@@ -21,6 +21,7 @@ from extraction.quick.domain.exceptions import (
     BusyError,
     FileUnreadableError,
 )
+from extraction.quick.domain.lines import LinesField, LinesReading
 from extraction.quick.domain.models import ExtractedField, QuickCaller, QuickResult, ReadBy, StagedFile, Table
 
 if TYPE_CHECKING:  # the type only: the store imports Pillow, which the slim API image has not
@@ -29,6 +30,7 @@ if TYPE_CHECKING:  # the type only: the store imports Pillow, which the slim API
 log = structlog.get_logger(__name__)
 
 GENERIC_READ = "/internal/v1/ai/generic-read"
+GENERIC_LINES = "/internal/v1/ai/generic-lines"
 _BUSY = "AIG-503-BUSY-001"
 _CAP = "AIG-429-CAP-001"
 _INPUT = "AIG-422-INPUT-001"
@@ -41,23 +43,32 @@ class GatewayDocumentReader:
         self._images = images  # the request's pages, sent inside the call (ADR 0012)
 
     def read(self, caller: QuickCaller, pages: Sequence[StagedFile]) -> QuickResult:
-        body = {
-            "accountId": str(caller.account_id),
-            "priority": "INTERACTIVE",
-            "plan": caller.plan,
-            "pages": [self._image(p) for p in pages],
-        }
+        answer = self._post(GENERIC_READ, caller, {"pages": [self._image(p) for p in pages]})
+        try:
+            return _result(answer)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:  # not the documented shape
+            raise AiUnavailableError from exc
+
+    def read_lines(self, caller: QuickCaller, lines: Sequence[str]) -> LinesReading:
+        answer = self._post(GENERIC_LINES, caller, {"lines": [{"n": n, "text": t} for n, t in enumerate(lines)]})
+        try:
+            return _lines_reading(answer)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:  # not the documented shape
+            raise AiUnavailableError from exc
+
+    def _post(self, path: str, caller: QuickCaller, payload: Mapping[str, Any]) -> Any:
+        body = {"accountId": str(caller.account_id), "priority": "INTERACTIVE", "plan": caller.plan, **payload}
         try:
             headers = {"Authorization": f"Bearer {self._tokens.token()}"}
-            response = self._client.post(GENERIC_READ, json=body, headers=headers)
+            response = self._client.post(path, json=body, headers=headers)
         except (httpx.HTTPError, ServiceTokenError) as exc:
-            log.warning("ai_gateway_unreachable", path=GENERIC_READ, error=type(exc).__name__)
+            log.warning("ai_gateway_unreachable", path=path, error=type(exc).__name__)
             raise AiUnavailableError from exc
         if response.status_code != httpx.codes.OK:
-            raise self._failure(response)
+            raise self._failure(response, path)
         try:
-            return _result(response.json())
-        except (ValueError, KeyError, TypeError, AttributeError) as exc:  # not the documented shape
+            return response.json()
+        except ValueError as exc:
             raise AiUnavailableError from exc
 
     def _image(self, page: StagedFile) -> dict[str, str]:
@@ -66,9 +77,9 @@ class GatewayDocumentReader:
             return {"bucket": page.bucket, "key": page.key}
         return {"data": base64.b64encode(data).decode()}
 
-    def _failure(self, response: httpx.Response) -> DomainError:
+    def _failure(self, response: httpx.Response, path: str) -> DomainError:
         code = _code(response)
-        log.warning("ai_gateway_error", path=GENERIC_READ, status=response.status_code, code=code)
+        log.warning("ai_gateway_error", path=path, status=response.status_code, code=code)
         if response.status_code == httpx.codes.UNAUTHORIZED:
             self._tokens.invalidate()  # the next call fetches a new token
         if code == _BUSY:
@@ -106,6 +117,28 @@ def _field(found: Mapping[str, Any]) -> ExtractedField:
         type=str(found["type"]),
         value=value,
         confidence=float(confidence) if confidence is not None else None,
+    )
+
+
+def _lines_reading(answer: Mapping[str, Any]) -> LinesReading:
+    confidence = answer.get("documentConfidence")
+    return LinesReading(
+        document_type=str(answer["documentType"]) if answer.get("documentType") else None,
+        document_confidence=float(confidence) if confidence is not None else None,
+        fields=[
+            LinesField(
+                key=str(f["key"]),
+                label=str(f["label"]),
+                type=str(f["type"]),
+                lines=tuple(int(n) for n in f.get("lines") or []),
+                rows=tuple(tuple(tuple(int(n) for n in cell) for cell in row) for row in f["rows"])
+                if f.get("rows") is not None
+                else None,
+            )
+            for f in answer["fields"]
+        ],
+        model_id=str(answer["model"]),
+        prompt_version=str(answer["promptVersion"]),
     )
 
 

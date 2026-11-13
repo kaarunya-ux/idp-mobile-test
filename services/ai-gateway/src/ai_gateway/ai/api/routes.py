@@ -15,6 +15,8 @@ from ai_gateway.ai.api.schemas import (
     FieldReadBatchResponse,
     FieldReadRequest,
     FieldReadSingleResponse,
+    GenericLinesRequest,
+    GenericLinesResponse,
     GenericReadRequest,
     GenericReadResponse,
     PageAnalysisRequest,
@@ -30,6 +32,7 @@ from ai_gateway.ai.application.services.analyse_page import AnalysePageService
 from ai_gateway.ai.application.services.classify_page import ClassifyPageService
 from ai_gateway.ai.application.services.read_document import ReadDocumentService
 from ai_gateway.ai.application.services.read_fields import ReadFieldsService
+from ai_gateway.ai.application.services.read_generic_lines import ReadGenericLinesService
 from ai_gateway.ai.application.services.read_layout import ReadLayoutService
 from ai_gateway.ai.application.services.read_page import ReadPageService
 from ai_gateway.ai.application.services.suggest_template import SuggestTemplateService
@@ -59,6 +62,7 @@ type Suggester = Annotated[SuggestTemplateService, _service("suggest", SuggestTe
 type PageReader = Annotated[ReadPageService, _service("read_page", ReadPageService)]
 type DocumentReader = Annotated[ReadDocumentService, _service("read_document", ReadDocumentService)]
 type LayoutReader = Annotated[ReadLayoutService, _service("read_layout", ReadLayoutService)]
+type LinesReader = Annotated[ReadGenericLinesService, _service("read_lines", ReadGenericLinesService)]
 
 
 @router.post(
@@ -128,6 +132,17 @@ async def page_read(body: PageReadRequest, principal: Service, service: PageRead
 async def generic_read(body: GenericReadRequest, principal: Service, service: DocumentReader) -> GenericReadResponse:
     pages = [mappers.image_ref(p) for p in body.pages]
     return mappers.to_generic_read_response(await service.read(mappers.caller_of(body, principal), pages))
+
+
+@router.post(
+    "/generic-lines",
+    summary="Find any document's fields over OCR's numbered lines: the model answers line numbers, never text",
+    response_model=GenericLinesResponse,
+    responses=_ERRORS,
+)
+async def generic_lines(body: GenericLinesRequest, principal: Service, service: LinesReader) -> GenericLinesResponse:
+    lines = [(line.n, line.text) for line in body.lines]
+    return mappers.to_generic_lines_response(await service.read(mappers.caller_of(body, principal), lines))
 
 
 @router.post(

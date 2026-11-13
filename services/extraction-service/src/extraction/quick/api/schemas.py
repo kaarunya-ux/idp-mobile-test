@@ -18,6 +18,16 @@ class TableBody(_Body):
     rows: list[list[str]]
 
 
+class FieldBoxBody(_Body):
+    """Where a value is printed, in the same form a custom key's box is sent in: percent of the page as uploaded."""
+
+    page: int = Field(description="1 for the first uploaded page (the front), 2 for the second (the back)")
+    x: float = Field(description="left edge, percent of the page's width")
+    y: float = Field(description="top edge, percent of the page's height")
+    w: float = Field(description="width, percent of the page's width")
+    h: float = Field(description="height, percent of the page's height")
+
+
 class ExtractedFieldBody(_Body):
     id: str | None = Field(None, description="the custom route: the id the caller sent with this key; null otherwise")
     key: str = Field(description="lower snake_case, e.g. 'date_of_birth'; each key once")
@@ -27,6 +37,9 @@ class ExtractedFieldBody(_Body):
     confidence: float | None = Field(description="0 to 1; null when there is no value")
     status: str | None = Field(description="ACCEPTED or NEEDS_REVIEW for a known document's field; null otherwise")
     source: str | None = Field(description="OCR_AGREE, OCR_2_OF_3, AI or DIGITAL_TEXT for a known document's field")
+    box: FieldBoxBody | None = Field(
+        None, description="the generic read: where the value is printed; null when it can't be placed for sure"
+    )
 
 
 class QuickExtractResponse(_Body):

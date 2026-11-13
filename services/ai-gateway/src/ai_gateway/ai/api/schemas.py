@@ -262,6 +262,38 @@ class GenericReadResponse(_ProvenanceBody):
     fields: list[GenericFieldBody]
 
 
+class GenericLineBody(_Body):
+    """One OCR line for generic-lines: its number (unique) and its text; no position, the model doesn't need it."""
+
+    n: int = Field(ge=0, le=100_000)
+    text: str = Field(min_length=1, max_length=500)
+
+
+class GenericLinesRequest(CallerBody):
+    lines: list[GenericLineBody] = Field(min_length=1, max_length=2000)
+
+    @field_validator("lines")
+    @classmethod
+    def _unique_numbers(cls, lines: list[GenericLineBody]) -> list[GenericLineBody]:
+        if len({line.n for line in lines}) != len(lines):
+            raise ValueError("line numbers must be unique")
+        return lines
+
+
+class GenericLinesFieldBody(_Body):
+    key: str
+    label: str
+    type: str  # string, number, date or table
+    lines: list[int]  # the lines the value is printed on; [] for a table or an empty value
+    rows: list[list[list[int]]] | None  # a table: rows of cells, a cell its line numbers; the first row the headers
+
+
+class GenericLinesResponse(_ProvenanceBody):
+    document_type: str | None
+    document_confidence: float | None
+    fields: list[GenericLinesFieldBody]
+
+
 class OcrLineBody(_Body):
     """One line an OCR engine read: its number (unique on the page), its text and where it is."""
 

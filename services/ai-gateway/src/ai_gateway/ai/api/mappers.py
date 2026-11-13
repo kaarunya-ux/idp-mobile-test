@@ -12,6 +12,8 @@ from ai_gateway.ai.api.schemas import (
     FieldReadSingleResponse,
     FieldValueBody,
     GenericFieldBody,
+    GenericLinesFieldBody,
+    GenericLinesResponse,
     GenericReadResponse,
     GenericTableBody,
     ImageRefBody,
@@ -29,6 +31,7 @@ from ai_gateway.ai.api.schemas import (
 )
 from ai_gateway.ai.application.answer_models import (
     ClassifyAnswer,
+    GenericLinesAnswer,
     GenericReadAnswer,
     GenericTable,
     LayoutTableBlock,
@@ -137,6 +140,19 @@ def to_generic_read_response(answer: Answer[GenericReadAnswer]) -> GenericReadRe
         for f in found.fields
     ]
     return GenericReadResponse(
+        document_type=found.document_type,
+        document_confidence=found.document_confidence,
+        fields=fields,
+        **_provenance(answer.provenance),
+    )
+
+
+def to_generic_lines_response(answer: Answer[GenericLinesAnswer]) -> GenericLinesResponse:
+    found = answer.value
+    fields = [
+        GenericLinesFieldBody(key=f.key, label=f.label, type=f.type, lines=f.lines, rows=f.rows) for f in found.fields
+    ]
+    return GenericLinesResponse(
         document_type=found.document_type,
         document_confidence=found.document_confidence,
         fields=fields,
