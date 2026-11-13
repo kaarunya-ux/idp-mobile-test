@@ -56,6 +56,7 @@ from conversion.conversion.infrastructure.pdfedit.editor import PikepdfEditor
 from conversion.conversion.infrastructure.persistence.repository import SqlUnitOfWork
 from conversion.conversion.infrastructure.readers.model_reader import GatewayPageReader
 from conversion.conversion.infrastructure.readers.ocr_layout_reader import OcrLayoutPageReader
+from conversion.conversion.infrastructure.readers.plain_text import PlainTextReader
 from conversion.conversion.infrastructure.registry import ConverterRegistry
 from conversion.conversion.infrastructure.secrets import RsaSecrets
 from conversion.conversion.infrastructure.storage import S3ObjectStorage
@@ -154,6 +155,11 @@ def build_convert_now_service(settings: Settings) -> ConvertNowService:
         PikepdfMerger(max_pages=settings.limits.max_pages),
         reads=_scanned_reader_configured(settings),
         max_read_pages=settings.sync.max_read_pages,
+        text=PlainTextReader(
+            partial(_ocr_engine, settings.ocr),
+            ocr_below_chars=settings.ocr.text_ocr_below_chars,
+            render_dpi=settings.ocr.text_render_dpi,
+        ),
     )
 
 

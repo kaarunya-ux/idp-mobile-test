@@ -60,7 +60,7 @@ Integration tests (`tests/integration/`) start PostgreSQL, RabbitMQ and MinIO in
 | Process | Command | Image |
 |---|---|---|
 | health HTTP (probes only) | `uvicorn conversion.health:app --port 8001` | `health` |
-| `conversion-sync` (`POST /api/v1/convert` and `/merge`, ADR 0002) | `uvicorn --factory conversion.sync_main:create_sync_app --port 8004` | `worker` |
+| `conversion-sync` (`POST /api/v1/convert` and `/merge`, ADR 0002; `target=TXT` gives a file's text, ADR 0003) | `uvicorn --factory conversion.sync_main:create_sync_app --port 8004` | `worker` |
 | `intake` (FastStream consumer) | `faststream run conversion.consumers:create_app --factory` | `service` |
 | `relay` (outbox publisher) | `python -m conversion.outbox_relay` | `service` |
 | migrations (pre-deploy job) | `alembic upgrade head` | `service` |

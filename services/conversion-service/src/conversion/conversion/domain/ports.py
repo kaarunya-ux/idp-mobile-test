@@ -115,6 +115,22 @@ class FileInspectorPort(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PlainText:
+    """The text inside a file, in reading order; ``pages`` counts the pages, slides or sheets read (1 for an image)."""
+
+    text: str
+    pages: int
+
+
+class TextReaderPort(Protocol):
+    """The plain text inside any file we read, by the libraries or by OCR, never by a model (ADR 0003)."""
+
+    def read_text(self, path: Path, source: Format) -> PlainText:
+        """Raises the readers' own errors (a corrupt or protected file, an unreadable picture)."""
+        ...
+
+
 class PdfMergerPort(Protocol):
     def merge(self, pdfs: Sequence[Path], output: Path) -> int:
         """Write every page of ``pdfs``, in order, to ``output`` and return the page count.

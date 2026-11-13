@@ -133,7 +133,9 @@ async def convert(
     admission: Admitted,
     limits: Limits,
     file: Annotated[list[UploadFile], File(description=_FILES)],
-    target: Annotated[str, Form(description="PDF, DOCX, XLSX, CSV, PPTX, PNG or JPEG", max_length=32)],
+    target: Annotated[
+        str, Form(description="PDF, DOCX, XLSX, CSV, PPTX, PNG, JPEG, or TXT for the text inside", max_length=32)
+    ],
     options: Annotated[str | None, Form(description="JSON, as a job's options: pageRange, dpi, ...")] = None,
 ) -> FileResponse:
     parsed = _parsed_options(options)

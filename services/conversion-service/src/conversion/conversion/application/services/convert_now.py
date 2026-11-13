@@ -23,10 +23,11 @@ from conversion.conversion.domain.exceptions import (
     InvalidRequestError,
     NeedsReadingError,
     NoAccountError,
+    RouteNotFoundError,
 )
 from conversion.conversion.domain.formats import ZIP_CONTENT_TYPE, Format
 from conversion.conversion.domain.options import JobOptions, parse_job_options, resolve_target
-from conversion.conversion.domain.ports import FileInspectorPort, PdfMergerPort, StepContext
+from conversion.conversion.domain.ports import FileInspectorPort, PdfMergerPort, StepContext, TextReaderPort
 from conversion.conversion.domain.route_planner import RoutePlanner, RouteRequest
 from conversion.conversion.domain.values import OutputMode
 from conversion.core.errors import DomainError
@@ -83,6 +84,7 @@ class ConvertNowService:
         *,
         reads: bool = False,
         max_read_pages: int = 0,
+        text: TextReaderPort | None = None,
     ) -> None:
         self._planner = planner
         self._converter = converter
@@ -90,11 +92,14 @@ class ConvertNowService:
         self._merger = merger
         self._reads = reads  # the scanned reader is in this build (ai-gateway configured)
         self._max_read_pages = max_read_pages  # a scan with more pages to read goes as a job
+        self._text = text  # target TXT: the text inside each file (ADR 0003)
 
     def convert(self, command: ConvertNowCommand) -> ConvertNowResult:
         options = parse_job_options(command.options)
         target = resolve_target(command.target, command.options.get("imageFormat"))
         files = [(upload, *self._named_by_format(upload)) for upload in command.uploads]
+        if target is Format.TXT:
+            return self._as_text(files, options, command.folder)
         if len(files) > 1 and target in _COMBINED_TARGETS and all(found.is_image for _, _, found in files):
             return self._combined(files, target, options, command.folder)
         converted = [
@@ -106,6 +111,26 @@ class ConvertNowService:
         outputs = tuple(file for files_of_one, _ in converted for file in files_of_one)
         pages = sum(page_count for _, page_count in converted)
         return self._packaged(outputs, options.output, pages, command.folder)
+
+    def _as_text(
+        self, files: Sequence[tuple[UploadedFile, Path, Format]], options: JobOptions, folder: Path
+    ) -> ConvertNowResult:
+        """Each file's text in ``<name>.txt``: libraries for files with text in them, OCR for pictures and scans."""
+        outputs, pages = [], 0
+        for number, (upload, path, source) in enumerate(files, start=1):
+            if self._text is None:
+                raise RouteNotFoundError(source, Format.TXT)
+            try:
+                found = self._text.read_text(path, source)
+            except DomainError as exc:
+                exc.detail = f"{upload.name}: {exc.detail}"  # with several files, which one
+                raise
+            output = folder / f"text-{number}" / f"{upload.name}.txt"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(found.text + "\n", encoding="utf-8")
+            outputs.append(output)
+            pages += found.pages
+        return self._packaged(tuple(outputs), options.output, pages, folder)
 
     def merge(self, command: MergeNowCommand) -> ConvertNowResult:
         files = []
