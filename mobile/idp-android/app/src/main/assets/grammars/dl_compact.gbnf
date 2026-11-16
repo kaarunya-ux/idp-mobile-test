@@ -1,0 +1,4 @@
+root ::= "{\"license_number\": " lic ", \"name\": " nm ", \"dob\": " dt ", \"issue_date\": " dt ", \"validity_nt\": " dt "}"
+lic ::= "\"" [A-Z0-9 -]{8,18} "\"" | "null"
+nm ::= "\"" [A-Za-z] [A-Za-z .'-]{1,48} "\"" | "null"
+dt ::= "\"" [0-9] [0-9] [-/] [0-9] [0-9] [-/] [0-9] [0-9] [0-9] [0-9] "\"" | "null"

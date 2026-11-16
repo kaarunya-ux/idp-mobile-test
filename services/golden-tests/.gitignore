@@ -1,0 +1,6 @@
+# Drawn when a suite runs, and what a run writes. Never committed: the pictures are card-shaped, and the repo keeps card
+# images out of git even when every value on them is invented.
+**/pages/
+**/cards/
+**/results/
+__pycache__/

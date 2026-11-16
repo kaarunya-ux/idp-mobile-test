@@ -1,0 +1,100 @@
+# The model registry (Python Engineering Standard ML-01). Code refers to models by `name`, never by path or URL.
+#
+#   version  what the model is called upstream; recorded in every result as provenance (ML-04)
+#   source   where it was obtained, for people; nothing is downloaded at run time (ML-02)
+#   runtime  how it is run (onnxruntime) and device (cpu); there is no silent fallback (ML-10)
+#   entry    the file the runtime loads; it must also be listed under `files`
+#   files    every file of the model, relative to OCR__MODELS_DIR, with its SHA-256; a mismatch stops the worker
+#
+# To add or change a model: put the files in the models directory, run `sha256sum` on each, edit this file, and
+# attach the evaluation report (ML-12).
+
+models:
+  - name: easyocr-detector
+    version: "0.64.0"
+    source: qualcomm/EasyOCR v0.64.0, easyocr-onnx-float.zip (CRAFT text detector, English)
+    runtime: onnxruntime
+    device: cpu
+    entry: qualcomm-EasyOCR/onnx-float/easyocr-onnx-float/detector.onnx
+    files:
+      - path: qualcomm-EasyOCR/onnx-float/easyocr-onnx-float/detector.onnx
+        sha256: 293b4ac0bd4843edd73457416eb3bc453d4a3b024eca51f7a1e660658164ac2b
+      - path: qualcomm-EasyOCR/onnx-float/easyocr-onnx-float/detector.data
+        sha256: 30fd9582a64786209775811c2a24fc3f02f148693b469c4c75700ba35cff2aa0
+  - name: easyocr-recognizer
+    version: "0.64.0"
+    source: qualcomm/EasyOCR v0.64.0, easyocr-onnx-float.zip (CRNN recogniser, English alphabet)
+    runtime: onnxruntime
+    device: cpu
+    entry: qualcomm-EasyOCR/onnx-float/easyocr-onnx-float/recognizer.onnx
+    files:
+      - path: qualcomm-EasyOCR/onnx-float/easyocr-onnx-float/recognizer.onnx
+        sha256: 183bf467a4aa64aa1e322ffd8c8638e51ec20bd6c7e82d071a5a95623f033f4b
+      - path: qualcomm-EasyOCR/onnx-float/easyocr-onnx-float/recognizer.data
+        sha256: f2f8d4ab595c2f18a2a217e9af0057a476c491855d6c7e100dbe9fcd6c67c203
+  - name: ppocrv5-mobile-det
+    version: "PP-OCRv5_mobile_det"
+    source: huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-OCRv5-mobile/det/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-OCRv5-mobile/det/inference.onnx
+        sha256: a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d
+      - path: PaddlePaddle-PP-OCRv5-mobile/det/inference.yml
+        sha256: 98069072e1b6b37d727fd9d9f11725faa46d6ea0de012f2ed26caea011c37699
+  - name: ppocrv5-mobile-rec
+    version: "PP-OCRv5_mobile_rec"
+    source: huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-OCRv5-mobile/rec/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-OCRv5-mobile/rec/inference.onnx
+        sha256: da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092
+      - path: PaddlePaddle-PP-OCRv5-mobile/rec/inference.yml
+        sha256: 5dfeb2777f6d0db8177d8128a8acfcf6e6276dc4ac73ea3bf0dc06d6a5e85d8e
+  - name: ppocrv5-devanagari-rec
+    version: "devanagari_PP-OCRv5_mobile_rec"
+    source: huggingface.co/PaddlePaddle/devanagari_PP-OCRv5_mobile_rec_onnx
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-OCRv5-devanagari/rec/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-OCRv5-devanagari/rec/inference.onnx
+        sha256: cb789212ce96c69d3e74728ae4309d179281d68cb3945d0616b67cafab41c986
+      - path: PaddlePaddle-PP-OCRv5-devanagari/rec/inference.yml
+        sha256: 9bd172dd26440c8ce94d1cde5d5baea6aefdc7cf3c5c8492e0beedef656d4e54
+  - name: ppocrv6-small-det
+    version: "PP-OCRv6_small_det"
+    source: huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-OCRv6-small/det/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-OCRv6-small/det/inference.onnx
+        sha256: d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e
+      - path: PaddlePaddle-PP-OCRv6-small/det/inference.yml
+        sha256: 193f435274bf9f0b5f71a929bbfbcf148282df7e633b34e7c373e8f44741b516
+  - name: ppocrv6-small-rec
+    version: "PP-OCRv6_small_rec"
+    source: huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-OCRv6-small/rec/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-OCRv6-small/rec/inference.onnx
+        sha256: 5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634
+      - path: PaddlePaddle-PP-OCRv6-small/rec/inference.yml
+        sha256: ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1
+  - name: doc-orientation
+    version: "PP-LCNet_x1_0_doc_ori"
+    source: huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx (page rotation 0/90/180/270, Apache-2.0)
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-LCNet-doc-ori/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-LCNet-doc-ori/inference.onnx
+        sha256: af9a0a4f317ff0709ce752067807f819cb15d883f8ecad89f28df1c6ee2d9c92
+      - path: PaddlePaddle-PP-LCNet-doc-ori/inference.yml
+        sha256: 9e195eb729a8173588cd0e8a852c8b373aa606e79e77b4ac7d8346f5426caf26

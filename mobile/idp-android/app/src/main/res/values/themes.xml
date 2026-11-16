@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.VlmTester" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">#2A78D6</item>
+        <item name="colorPrimaryDark">#184F95</item>
+        <item name="colorAccent">#EB6834</item>
+    </style>
+</resources>

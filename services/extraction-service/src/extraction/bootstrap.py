@@ -1,0 +1,413 @@
+"""Composition root: builds the long-lived objects once per process (DI-01, DI-03).
+
+The only module allowed to import from every layer. Each entry point (``consumers``, ``worker``,
+``outbox_relay``) builds what it needs here. The OCR engines and models load once per worker process; the light
+pipeline services are built per run, with that run's progress reporter.
+"""
+
+import os
+import socket
+from collections.abc import Sequence
+from datetime import timedelta
+from importlib import metadata
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import boto3
+import httpx
+from botocore.config import Config
+from celery import Celery
+from faststream.rabbit import RabbitBroker
+
+from extraction.core.clock import Clock, SystemClock
+from extraction.core.config import MissingSettingsError, ServiceAuthSettings, Settings, StorageSettings
+from extraction.core.db import SessionFactory, create_db_engine, create_session_factory
+from extraction.core.outbox import OutboxRelay
+from extraction.core.service_auth import ServiceTokenProvider
+from extraction.pipeline.application.services.accept_extraction import AcceptExtractionService
+from extraction.pipeline.application.services.ai_assist import AiAssist, AiCrops
+from extraction.pipeline.application.services.designer_work import DesignerWorkService
+from extraction.pipeline.application.services.extract_document import ExtractDocumentService
+from extraction.pipeline.application.services.prepare_document import PrepareDocumentService
+from extraction.pipeline.application.services.run_deep_analysis import RunDeepAnalysisService
+from extraction.pipeline.application.services.run_extraction import RunExtractionService
+from extraction.pipeline.domain.decisions import Thresholds
+from extraction.pipeline.domain.ports import PageImageStorePort, ProgressReporterPort, UnitOfWorkFactory
+from extraction.pipeline.domain.quality import QualityThresholds
+from extraction.pipeline.domain.template import TemplateDefinition
+from extraction.pipeline.infrastructure.ai.gateway_reader import (
+    AiGatewayClient,
+    GatewayClassifier,
+    GatewayCropReader,
+    GatewayFieldReader,
+    GatewayPageAnalyser,
+)
+from extraction.pipeline.infrastructure.ai.inline_images import BUCKET as INLINE_BUCKET
+from extraction.pipeline.infrastructure.ai.inline_images import InlineImages
+from extraction.pipeline.infrastructure.ai.vision_reader import VisionModelFieldReader
+from extraction.pipeline.infrastructure.digital.office_to_pdf import LibreOfficePdfConverter
+from extraction.pipeline.infrastructure.digital.pdf_text_reader import PdfiumTextReader
+from extraction.pipeline.infrastructure.messaging.messages import PRODUCER
+from extraction.pipeline.infrastructure.messaging.publisher import RabbitEventPublisher
+from extraction.pipeline.infrastructure.metrics import PrometheusPipelineMetrics
+from extraction.pipeline.infrastructure.persistence.designer_store import SqlDesignerWorkStore
+from extraction.pipeline.infrastructure.persistence.repository import SqlUnitOfWork
+from extraction.pipeline.infrastructure.persistence.template_catalog import SqlTemplateCatalog
+from extraction.pipeline.infrastructure.preprocess.card_detector import TwoCards
+from extraction.pipeline.infrastructure.preprocess.opencv_preprocessor import OpenCvPagePreparer
+from extraction.pipeline.infrastructure.preprocess.orientation import DocumentOrientationClassifier
+from extraction.pipeline.infrastructure.quality.opencv_quality_gate import OpenCvQualityAssessor
+from extraction.pipeline.infrastructure.quality.page_loader import DocumentPageLoader
+from extraction.pipeline.infrastructure.storage.s3_storage import S3ObjectStorage
+from extraction.pipeline.infrastructure.tasks import CeleryTaskQueue, WorkerServices
+from extraction.quick.application.quick_extract import QuickExtractService
+from extraction.quick.application.template_matcher import TemplateMatcher
+from extraction.quick.domain.models import GenericMode, UploadLimits
+from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
+from extraction.quick.infrastructure.page_words import OcrPageWords
+from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner
+from extraction.quick.infrastructure.templates import CatalogTemplates, GatewayTemplateClassifier
+from extraction.quick.infrastructure.workspace import MemoryWorkspace
+from extraction.template.domain.definition_json import parse_definition
+from idp_ocr_engines import ModelRegistry, RuntimeLimits
+from idp_ocr_engines.engines.ppocr import PpOcrEngine, PpOcrModels
+from idp_ocr_engines.port import OcrEnginePort
+
+if TYPE_CHECKING:  # boto3-stubs is a dev dependency: type hints only, not in the images
+    from mypy_boto3_s3 import S3Client
+
+STALE_MARGIN = timedelta(minutes=2)  # a RUNNING item untouched this long past the task's hard limit is orphaned
+# Slot A reads English with PP-OCRv6; slot B English and Hindi with PP-OCRv5 (Sumukh's benchmark choice). The product
+# extracts English only, but B keeps its Devanagari model: Aadhaar lines mix the scripts ("जन्म तिथि/DOB: ..."), and
+# English-only B lost the date of birth and two more fields on a bilingual card (build log, entry 15). Slot C is empty
+# while Indra is parked (ADR 0002).
+_ENGINE_LANGUAGES = {"A": ("en",), "B": ("en", "hi")}
+
+
+def pipeline_version() -> str:
+    try:
+        return metadata.version("extraction-service")
+    except metadata.PackageNotFoundError:
+        return "0.0.0"
+
+
+def _page_loader(settings: Settings) -> DocumentPageLoader:
+    limits, prepare = settings.limits, settings.prepare
+    return DocumentPageLoader(
+        max_file_bytes=limits.max_file_size,
+        max_pages=limits.max_pages,
+        max_pixels=limits.max_image_pixels,
+        pdf_dpi=limits.pdf_dpi,
+        pdf_max_side_px=limits.pdf_max_side_px,
+        pdf_picture_min_fraction=limits.pdf_picture_min_fraction,
+        two_cards=TwoCards(
+            min_area_fraction=prepare.min_card_area_fraction, min_size_ratio=prepare.two_cards_min_size_ratio
+        )
+        if prepare.two_cards_min_size_ratio > 0
+        else None,
+    )
+
+
+def _quality_thresholds(settings: Settings) -> QualityThresholds:
+    quality = settings.quality
+    return QualityThresholds(
+        blur_min=quality.blur_min,
+        brightness_min=quality.brightness_range[0],
+        brightness_max=quality.brightness_range[1],
+        glare_max=quality.glare_max,
+        min_short_side_px=quality.min_short_side_px,
+        require_document_edges=quality.require_document_edges,
+        rejects=quality.rejects,
+    )
+
+
+class PipelineServices:
+    """``PipelineFactory``: the engines and models, loaded once; services built per run."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        clock: Clock,
+        catalog: SqlTemplateCatalog,
+        pages: PageImageStorePort | None = None,
+        inline: InlineImages | None = None,
+    ) -> None:
+        self._catalog = catalog
+        registry = ModelRegistry.from_file(Path(settings.ocr.models_file))
+        limits = RuntimeLimits(threads=settings.ocr.threads)
+        self._settings, self._clock = settings, clock
+        self._engines = _engines(settings, registry, limits)
+        self._loader = _page_loader(settings)
+        quality = settings.quality
+        self._assessor = OpenCvQualityAssessor(
+            min_card_area_fraction=settings.prepare.min_card_area_fraction,
+            saturation_level=quality.saturation_level,
+            glare_soft_edge_gradient=quality.glare_soft_edge_gradient,
+        )
+        self._preparer = OpenCvPagePreparer(
+            orientation=DocumentOrientationClassifier.from_registry(
+                registry=registry, models_dir=settings.ocr.models_dir, model_name="doc-orientation", limits=limits
+            ),
+            min_card_area_fraction=settings.prepare.min_card_area_fraction,
+            orientation_min_confidence=settings.prepare.orientation_min_confidence,
+        )
+        self._thresholds = _quality_thresholds(settings)
+        self._gateway = build_gateway(settings, inline)
+        self._ai = build_ai_assist(settings, self._gateway, pages)
+        pdf = settings.limits
+        self._digital = PdfiumTextReader(
+            dpi=pdf.pdf_dpi, max_side_px=pdf.pdf_max_side_px, picture_min_fraction=pdf.pdf_picture_min_fraction
+        )
+
+    @property
+    def loader(self) -> DocumentPageLoader:
+        """Files to page images (PDF pages rendered, photos upright), for the straight-to-the-model extract."""
+        return self._loader
+
+    @property
+    def sample_engine(self) -> OcrEnginePort:
+        """Engine A reads template samples for suggestions (IDP-03 ch. 2.9: "OCR A")."""
+        return self._engines["A"]
+
+    @property
+    def gateway(self) -> AiGatewayClient | None:
+        return self._gateway
+
+    @property
+    def digital_reader(self) -> PdfiumTextReader:
+        return self._digital
+
+    def prepare_service(self, progress: ProgressReporterPort) -> PrepareDocumentService:
+        return PrepareDocumentService(
+            loader=self._loader,
+            assessor=self._assessor,
+            preparer=self._preparer,
+            thresholds=self._thresholds,
+            progress=progress,
+        )
+
+    @property
+    def catalog(self) -> SqlTemplateCatalog:
+        return self._catalog
+
+    def extract_service(
+        self, progress: ProgressReporterPort, templates: Sequence[TemplateDefinition]
+    ) -> ExtractDocumentService:
+        return ExtractDocumentService(
+            engines=self._engines,
+            languages=_ENGINE_LANGUAGES,
+            templates=templates,
+            thresholds=Thresholds(
+                name_similarity=self._settings.verify.name_similarity,
+                review_confidence=self._settings.review.confidence_threshold,
+            ),
+            clock=self._clock,
+            pipeline_version=pipeline_version(),
+            progress=progress,
+            ai=self._ai,
+        )
+
+
+def _engines(settings: Settings, registry: ModelRegistry, limits: RuntimeLimits) -> dict[str, OcrEnginePort]:
+    def engine(slot: str, detector: str, recognizer: str, extra: dict[str, str] | None = None) -> PpOcrEngine:
+        return PpOcrEngine.from_registry(
+            engine_id=slot,
+            registry=registry,
+            models_dir=settings.ocr.models_dir,
+            models=PpOcrModels(detector=detector, recognizer=recognizer, extra_recognizers=extra or {}),
+            limits=limits,
+        )
+
+    return {
+        "A": engine("ocr-a", "ppocrv6-small-det", "ppocrv6-small-rec"),
+        "B": engine("ocr-b", "ppocrv5-mobile-det", "ppocrv5-mobile-rec", {"hi": "ppocrv5-devanagari-rec"}),
+    }
+
+
+def build_gateway(settings: Settings, inline: InlineImages | None = None) -> AiGatewayClient | None:
+    """The ai-gateway client, or None when ``AI_GATEWAY__URL`` is unset. With ``inline`` (the synchronous lane),
+    images held in memory go inside the request."""
+    gateway = settings.ai_gateway
+    if gateway.url is None:
+        return None
+    auth = _required_service_auth(settings)
+    tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
+    seconds = gateway.timeout.total_seconds()
+    client = httpx.Client(
+        base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=min(2.0, seconds))
+    )
+    return AiGatewayClient(client, tokens, inline)
+
+
+def build_ai_assist(
+    settings: Settings, gateway: AiGatewayClient | None, pages: PageImageStorePort | None = None
+) -> AiAssist | None:
+    """The AI fallback: ai-gateway when ``AI_GATEWAY__URL`` is set, reading the unsure fields' crops (stored with
+    ``pages``) unless ``AI_GATEWAY__READ_MODE=page``; on a laptop without it, the model host directly
+    (``AI_FALLBACK__URL``, local only, ADR 0006); otherwise None (unsettled fields then stay NEEDS_REVIEW)."""
+    ai = settings.ai_gateway
+    if gateway is not None:
+        crops = (
+            AiCrops(
+                reader=GatewayCropReader(gateway), store=pages, padding=ai.crop_padding, workers=ai.crop_concurrency
+            )
+            if ai.read_mode == "crop" and pages is not None
+            else None
+        )
+        return AiAssist(
+            reader=GatewayFieldReader(gateway),
+            confidence=ai.confidence,
+            max_fields=ai.max_fields_per_document,
+            classifier=GatewayClassifier(gateway),
+            classify_min_confidence=ai.classify_min_confidence,
+            crops=crops,
+        )
+    direct = settings.ai_fallback
+    if direct.url is None or settings.environment != "local":
+        return None
+    headers = {"Authorization": f"Bearer {direct.api_key.get_secret_value()}"} if direct.api_key else {}
+    seconds = direct.timeout.total_seconds()
+    client = httpx.Client(
+        base_url=str(direct.url).rstrip("/"), headers=headers, timeout=httpx.Timeout(seconds, connect=min(5.0, seconds))
+    )
+    return AiAssist(
+        reader=VisionModelFieldReader(client, model=direct.model, max_edge_px=direct.max_edge_px),
+        confidence=direct.confidence,
+        max_fields=ai.max_fields_per_document,
+    )
+
+
+def _required_service_auth(settings: Settings) -> ServiceAuthSettings:
+    if settings.service_auth is None:
+        raise MissingSettingsError("AI_GATEWAY__URL needs SERVICE_AUTH__TOKEN_URL and SERVICE_AUTH__CLIENT_SECRET")
+    return settings.service_auth
+
+
+def build_session_factory(settings: Settings) -> SessionFactory:
+    return create_session_factory(create_db_engine(settings.require_db(), application_name=settings.service_name))
+
+
+def build_units(sessions: SessionFactory, clock: Clock) -> UnitOfWorkFactory:
+    return lambda: SqlUnitOfWork(sessions, clock, producer=PRODUCER)
+
+
+def stale_after(settings: Settings) -> timedelta:
+    return settings.require_celery().time_limit + STALE_MARGIN
+
+
+def build_accept_service(settings: Settings, sessions: SessionFactory, celery_app: Celery) -> AcceptExtractionService:
+    clock = SystemClock()
+    return AcceptExtractionService(
+        build_units(sessions, clock), CeleryTaskQueue(celery_app), clock, stale_after=stale_after(settings)
+    )
+
+
+def build_worker_services(settings: Settings, sessions: SessionFactory) -> WorkerServices:
+    clock, storage = SystemClock(), settings.require_storage()
+    objects = S3ObjectStorage(build_s3_client(storage), max_input_size=int(storage.max_input_size))
+    units, metrics = build_units(sessions, clock), PrometheusPipelineMetrics()
+    office = LibreOfficePdfConverter(binary=settings.office.binary, timeout=settings.office.timeout)
+    pipeline = PipelineServices(settings, clock, SqlTemplateCatalog(sessions), pages=objects)
+    gateway = pipeline.gateway
+    extraction = RunExtractionService(
+        units,
+        objects,
+        objects,
+        pipeline,
+        clock,
+        derived_bucket=storage.bucket_derived,
+        stale_after=stale_after(settings),
+        review_confidence=settings.review.confidence_threshold,
+        metrics=metrics,
+        office=office,
+    )
+    deep_analysis = RunDeepAnalysisService(
+        units,
+        objects,
+        GatewayPageAnalyser(gateway) if gateway is not None else None,
+        clock,
+        derived_bucket=storage.bucket_derived,
+        stale_after=stale_after(settings),
+        metrics=metrics,
+    )
+    store = SqlDesignerWorkStore(sessions, clock)
+    designer = DesignerWorkService(
+        store,
+        objects,
+        objects,
+        prepare=pipeline.prepare_service,
+        extract=pipeline.extract_service,
+        engine=pipeline.sample_engine,
+        digital=pipeline.digital_reader,
+        parse=parse_definition,
+        templates_bucket=storage.bucket_templates,
+        clock=clock,
+        office=office,
+    )
+    return WorkerServices(extraction=extraction, deep_analysis=deep_analysis, designer=designer, designer_store=store)
+
+
+def build_quick_extract(settings: Settings, sessions: SessionFactory) -> QuickExtractService:
+    """The synchronous extract (ADR 0009), with template detection for ``/extract/auto`` (ADR 0016), for the
+    ``extraction-sync`` process: the pipeline with its OCR engines (loaded here, once), and ai-gateway for the crops,
+    the generic read and classify. No storage (ADR 0012): the request's pages and crops are held in memory and sent
+    inside the gateway calls."""
+    gateway = settings.ai_gateway
+    if gateway.url is None:
+        raise MissingSettingsError("extraction-sync needs AI_GATEWAY__URL")
+    auth = _required_service_auth(settings)
+    inline = InlineImages()
+    pipeline = PipelineServices(settings, SystemClock(), SqlTemplateCatalog(sessions), pages=inline, inline=inline)
+    tokens = ServiceTokenProvider(httpx.Client(timeout=auth.timeout.total_seconds()), auth)
+    seconds = settings.quick.timeout.total_seconds()
+    client = httpx.Client(base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=2.0))
+    quick = settings.quick
+    classifier = GatewayTemplateClassifier(GatewayClassifier(pipeline.gateway)) if pipeline.gateway else None
+    return QuickExtractService(
+        workspace=MemoryWorkspace(inline),
+        pipeline=PipelineDocumentRunner(
+            pipeline, pipeline.loader, inline, bucket=INLINE_BUCKET, max_pages=quick.max_pages
+        ),
+        reader=GatewayDocumentReader(client, tokens, inline),
+        words=OcrPageWords(pipeline.loader, pipeline.sample_engine),
+        generic_mode=GenericMode(quick.generic_mode),
+        limits=UploadLimits(max_file_bytes=int(quick.max_file_size), max_total_bytes=int(quick.max_total_size)),
+        matcher=TemplateMatcher(
+            templates=CatalogTemplates(pipeline.catalog),
+            classifier=classifier,
+            minimum=quick.detect_min_confidence,
+            min_filled=quick.detect_min_filled,
+        ),
+    )
+
+
+def build_s3_client(storage: StorageSettings) -> "S3Client":
+    timeout = storage.timeout.total_seconds()
+    return boto3.client(
+        "s3",
+        endpoint_url=str(storage.endpoint),
+        aws_access_key_id=storage.access_key.get_secret_value(),
+        aws_secret_access_key=storage.secret_key.get_secret_value(),
+        region_name=storage.region,
+        config=Config(
+            s3={"addressing_style": "path"},  # MinIO serves buckets as paths, not subdomains
+            connect_timeout=timeout,
+            read_timeout=timeout,
+            retries={"max_attempts": 3, "mode": "standard"},
+        ),
+    )
+
+
+def build_rabbit_broker(settings: Settings) -> RabbitBroker:
+    rabbit = settings.require_rabbit()
+    return RabbitBroker(rabbit.url.get_secret_value(), app_id=settings.service_name, graceful_timeout=30)
+
+
+def build_outbox_relay(settings: Settings, sessions: SessionFactory, broker: RabbitBroker) -> OutboxRelay:
+    return OutboxRelay(
+        sessions,
+        RabbitEventPublisher(broker),
+        settings.outbox,
+        SystemClock(),
+        instance_id=f"{socket.gethostname()}:{os.getpid()}",
+    )

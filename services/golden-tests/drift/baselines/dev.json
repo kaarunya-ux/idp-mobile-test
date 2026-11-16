@@ -1,0 +1,92 @@
+{
+ "env": "dev",
+ "recorded_at": "2026-11-10T13:09:22Z",
+ "stamp": {
+  "conversion": {
+   "env": "dev",
+   "commit": "232ca6c+dirty",
+   "captured_at": "2026-11-10T12:59:51Z",
+   "prompts_hash": "015386bcbbc6",
+   "prompt_pins": {},
+   "config_hash": "ac758de7d800",
+   "prompt_versions": {
+    "page-read": 3,
+    "card-read": 1,
+    "field-read": 2,
+    "classify": 2
+   },
+   "model": "qwen3.6-35b-a3b",
+   "server_fingerprint": "b11429-d81235049",
+   "temperature": 0,
+   "thinking": false
+  },
+  "extraction": {
+   "env": "dev",
+   "commit": "232ca6c+dirty",
+   "captured_at": "2026-11-10T13:05:18Z",
+   "prompts_hash": "015386bcbbc6",
+   "prompt_pins": {},
+   "config_hash": "ac758de7d800",
+   "prompt_versions": {
+    "page-read": 3,
+    "card-read": 1,
+    "field-read": 2,
+    "classify": 2
+   },
+   "model": "qwen3.6-35b-a3b",
+   "server_fingerprint": "b11429-d81235049",
+   "temperature": 0,
+   "thinking": false
+  }
+ },
+ "classes": {
+  "conversion/digital": {
+   "pages": 8,
+   "word_recall": 1.0,
+   "cell_match": 1.0,
+   "heading_recall": 1.0,
+   "seconds_per_page_median": 24.1,
+   "seconds_per_page_p95": 42.4,
+   "seconds_per_megapixel_median": 21.085,
+   "tokens_per_page_median": 442.0
+  },
+  "conversion/hostile": {
+   "pages": 2,
+   "word_recall": 1.0,
+   "cell_match": 1.0,
+   "heading_recall": 1.0,
+   "seconds_per_page_median": 29.55,
+   "seconds_per_page_p95": 31.3,
+   "seconds_per_megapixel_median": 25.853,
+   "tokens_per_page_median": 612.5
+  },
+  "conversion/scan": {
+   "pages": 2,
+   "word_recall": 1.0,
+   "cell_match": 1.0,
+   "heading_recall": 1.0,
+   "seconds_per_page_median": 29.3,
+   "seconds_per_page_p95": 30.0,
+   "seconds_per_megapixel_median": 25.634,
+   "tokens_per_page_median": 578.0
+  },
+  "extraction/without_hints": {
+   "cards": 21,
+   "normal_accuracy": 1.0,
+   "hostile_obeyed": 1,
+   "seconds_per_card_median": 8.7,
+   "seconds_per_card_p95": 15.6,
+   "tokens_per_card_median": 79
+  },
+  "extraction/with_hints": {
+   "cards": 21,
+   "normal_accuracy": 1.0,
+   "hostile_obeyed": 0,
+   "seconds_per_card_median": 5.5,
+   "seconds_per_card_p95": 12.7,
+   "tokens_per_card_median": 79
+  }
+ },
+ "accepted_problems": [],
+ "accepted_reason": null
+}

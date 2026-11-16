@@ -1,0 +1,20 @@
+0.00.016.964 I common_init_result: fitting params to device memory ...
+0.00.016.984 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.00.168.855 I common_params_fit_impl: projected to use 619 MiB of host memory vs. 7437 MiB of total host memory
+0.01.392.801 I common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+0.01.984.254 I mtmd_cli_context: chat template example:
+<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+
+0.02.235.476 I main: loading model: visionpsy-nano-460m-flash-q5_k_m.gguf
+0.02.235.508 W WARN: This is an experimental CLI for testing multimodal capability.
+0.02.235.509 W       For normal use cases, please use the standard llama-cli
+
+The image is a vintage New York Times newspaper page from July 21, 1969, featuring a headline about astronauts landing on the moon. The article, titled "MEN WALK ON MOON," discusses the "Eagle Has Landed," with

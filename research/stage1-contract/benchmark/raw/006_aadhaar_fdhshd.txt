@@ -1,0 +1,1 @@
+{"aadhaar_number": "1234 5678 9101", "vid": "9110 0445 8669 0808", "name": null, "date_of_birth": null, "gender": null, "address": null}

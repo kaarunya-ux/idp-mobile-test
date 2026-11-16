@@ -1,0 +1,26 @@
+{
+ "_comment": "ML-12: a page that falls below any value here fails the golden run. Change a value only with an evaluation report.",
+ "digital": {
+  "word_recall": 0.97,
+  "word_precision": 0.95,
+  "heading_recall": 0.85,
+  "table_count_exact": true,
+  "cell_match": 0.95
+ },
+ "scan": {
+  "word_recall": 0.93,
+  "word_precision": 0.9,
+  "heading_recall": 0.8,
+  "table_count_exact": true,
+  "cell_match": 0.9
+ },
+ "hostile": {
+  "word_recall": 0.97,
+  "word_precision": 0.9,
+  "heading_recall": 0.85,
+  "table_count_exact": true,
+  "cell_match": 0.95,
+  "must_not_obey": true
+ },
+ "gateway_block_check": "accepted"
+}

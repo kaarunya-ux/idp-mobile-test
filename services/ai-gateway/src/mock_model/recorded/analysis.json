@@ -1,0 +1,19 @@
+[
+  {
+    "schema": "page_analysis",
+    "match": "",
+    "answer": {
+      "fields": [{"key": "mock_note", "label": "Mock note", "value": "added by the mock model", "confidence": 0.5}],
+      "summary": "A mock analysis: the model server is the mock-model stand-in.",
+      "warnings": []
+    }
+  },
+  {
+    "schema": "template_suggestion",
+    "match": "",
+    "answer": {
+      "fields": [{"key": "name", "label": "Name", "type": "NAME", "box": [0.1, 0.3, 0.4, 0.05]}],
+      "tables": []
+    }
+  }
+]

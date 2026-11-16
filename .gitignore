@@ -1,6 +1,3 @@
-# Nested unrelated project copy (not part of this repo)
-home/
-
 # Local Claude Code runtime state
 .claude/
 
@@ -8,7 +5,7 @@ home/
 .DS_Store
 *.swp
 
-# Gradle/Android build output + Kotlin build scripts
+# Gradle/Android build output
 .gradle/
 build/
 .cxx/
@@ -16,7 +13,6 @@ build/
 captures/
 local.properties
 *.iml
-*.kts
 
 # llama.cpp build artifacts (source stays tracked)
 CMakeFiles/
@@ -38,3 +34,63 @@ cmake-build-*/
 
 # Test data
 test_images/
+__pycache__/
+
+# Aadhaar/PAN card images and the prototype's ground truth hold personal data: local only, never committed.
+# (The patterns further down cover the image folders anywhere; this names the extraction-service ones explicitly.)
+services/extraction-service/aadhaar_test_images/
+services/extraction-service/pan_test_images/
+services/extraction-service/ocr_test_app/ground_truth.json
+# The prototype API test: its expected values are real card data
+services/extraction-service/ocr_test_app/tests/test_api.py
+
+# Local-only files on developer machines (not part of IDP)
+app_build/
+app_build.zip
+lfm2_test_results/
+python_docs/
+
+# Python environments, caches and local secrets
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.env
+
+# services/conversions: sample inputs and outputs stay in the idox repo, not here
+services/conversions/input/
+services/conversions/output/
+
+# mobile/idox-mobile: test-run results, pulled APKs and native libraries are local only
+mobile/idox-mobile/results/
+mobile/vlmtester/
+mobile/llama_dotprod_libs/
+
+# mobile/idp-android: native runtime, models, signing keys and APKs are local only
+mobile/idp-android/app/src/main/jniLibs/
+*.apk
+*.aab
+*.keystore
+*.jks
+.idea/
+*.hprof
+
+# Company standards documents: local reference only, not part of the repository
+/standards_docs/
+
+# Local test documents (dummy ID images and their expected values): never committed
+/data/
+docs2/
+aadhaar_test_images/
+pan_test_images/
+input_trans/
+output_trans/
+model/
+trans_test/
+prompt_history.json/

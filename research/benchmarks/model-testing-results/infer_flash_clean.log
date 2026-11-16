@@ -1,0 +1,21 @@
+0.00.013.085 I common_init_result: fitting params to device memory ...
+0.00.013.096 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.00.169.574 I common_params_fit_impl: projected to use 619 MiB of host memory vs. 7437 MiB of total host memory
+0.01.473.432 I common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+0.09.999.604 I mtmd_cli_context: chat template example:
+<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+
+0.10.452.857 I main: loading model: visionpsy-nano-460m-flash-q5_k_m.gguf
+0.10.452.992 W WARN: This is an experimental CLI for testing multimodal capability.
+0.10.452.996 W       For normal use cases, please use the standard llama-cli
+
+This image captures a vintage copy of The New York Times, dated July 21, 1969, featuring a prominent headline about astronauts landing on the moon. The front page is dominated by the headline "MEN WALK ON MOON," with subheadings "A POWDERY SURFACE Is Closely Explored" and "Voice From Moon: 'Eagle Has Landed'." The article details the historic event, mentioning the Apollo 11 mission and the first steps on the lunar surface. The paper also features a "LATE CITY EDITION" notice and a "1
+

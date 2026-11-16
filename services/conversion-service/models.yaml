@@ -1,0 +1,36 @@
+# The model registry (Python Engineering Standard ML-01): conversion's OCR, for the OCR-first reading of scanned pages
+# (ADR 0001 in docs/adr). The same files and checksums as extraction-service's models.yaml; the local stack mounts one models folder
+# for both. Code refers to models by `name`, never by path or URL.
+#
+#   version  what the model is called upstream; recorded in every result as provenance (ML-04)
+#   source   where it was obtained, for people; nothing is downloaded at run time (ML-02)
+#   runtime  how it is run (onnxruntime) and device (cpu); there is no silent fallback (ML-10)
+#   entry    the file the runtime loads; it must also be listed under `files`
+#   files    every file of the model, relative to OCR__MODELS_DIR, with its SHA-256; a mismatch stops the worker
+#
+# To add or change a model: put the files in the models directory, run `sha256sum` on each, edit this file, and
+# attach the evaluation report (ML-12).
+
+models:
+  - name: ppocrv6-small-det
+    version: "PP-OCRv6_small_det"
+    source: huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-OCRv6-small/det/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-OCRv6-small/det/inference.onnx
+        sha256: d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e
+      - path: PaddlePaddle-PP-OCRv6-small/det/inference.yml
+        sha256: 193f435274bf9f0b5f71a929bbfbcf148282df7e633b34e7c373e8f44741b516
+  - name: ppocrv6-small-rec
+    version: "PP-OCRv6_small_rec"
+    source: huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx
+    runtime: onnxruntime
+    device: cpu
+    entry: PaddlePaddle-PP-OCRv6-small/rec/inference.onnx
+    files:
+      - path: PaddlePaddle-PP-OCRv6-small/rec/inference.onnx
+        sha256: 5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634
+      - path: PaddlePaddle-PP-OCRv6-small/rec/inference.yml
+        sha256: ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1

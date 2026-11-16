@@ -1,0 +1,27 @@
+{
+ "page": "G07_sparse",
+ "kind": "digital",
+ "note": "almost empty page: a heading and one line",
+ "words": [
+  "notice",
+  "of",
+  "closure",
+  "the",
+  "office",
+  "will",
+  "remain",
+  "closed",
+  "on",
+  "monday",
+  "for",
+  "the",
+  "annual",
+  "stock",
+  "audit"
+ ],
+ "allowed_extra_words": [],
+ "headings": [
+  "Notice of Closure"
+ ],
+ "tables": []
+}

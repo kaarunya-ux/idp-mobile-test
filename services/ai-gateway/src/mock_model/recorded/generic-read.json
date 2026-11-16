@@ -1,0 +1,18 @@
+[
+  {
+    "schema": "generic_read",
+    "match": "",
+    "answer": {
+      "document_type": "pan",
+      "document_confidence": 0.9,
+      "fields": [
+        {"key": "pan_number", "label": "Permanent Account Number", "type": "string", "value": "ABCPE1234F", "confidence": 0.95},
+        {"key": "name", "label": "Name", "type": "string", "value": "TEST PERSON", "confidence": 0.93},
+        {"key": "name_hindi", "label": "Name (Hindi)", "type": "string", "value": "परीक्षण व्यक्ति", "confidence": 0.8},
+        {"key": "fathers_name", "label": "Father's Name", "type": "string", "value": "TEST PARENT", "confidence": 0.9},
+        {"key": "date_of_birth", "label": "Date of Birth", "type": "date", "value": "01/01/1990", "confidence": 0.94},
+        {"key": "signature", "label": "Signature", "type": "string", "value": null, "confidence": null}
+      ]
+    }
+  }
+]

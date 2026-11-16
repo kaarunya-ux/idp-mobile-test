@@ -1,0 +1,20 @@
+0.00.011.071 I common_init_result: fitting params to device memory ...
+0.00.011.109 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.00.168.836 I common_params_fit_impl: projected to use 619 MiB of host memory vs. 7437 MiB of total host memory
+0.00.799.863 I common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+0.00.891.632 I mtmd_cli_context: chat template example:
+<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+
+0.00.984.723 I main: loading model: visionpsy-nano-460m-flash-q5_k_m.gguf
+0.00.984.756 W WARN: This is an experimental CLI for testing multimodal capability.
+0.00.984.757 W       For normal use cases, please use the standard llama-cli
+
+The image is a vintage New York Times newspaper page from July 21, 1969, featuring a headline about astronauts landing on the moon, with a subheadline "Voice From Moon: 'Eagle Has Landed'". The article details the historic event, mentioning the Apollo 11 mission and the first steps on the lunar surface. The page also includes a "LATE CITY EDITION" note, a price of 10 cents, and a "10 CENTS" section at the bottom. The

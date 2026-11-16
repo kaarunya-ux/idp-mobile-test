@@ -1,0 +1,72 @@
+{
+  "doc_type": "pan",
+  "detect": {
+    "keywords": [
+      "income\\s*tax",
+      "permanent\\s*account",
+      "govt\\.?\\s*of\\s*india",
+      "father"
+    ],
+    "pattern_hits": [
+      "[A-Z]{5}[0-9]{4}[A-Z]"
+    ],
+    "min_hits": 2
+  },
+  "fields": [
+    {
+      "name": "pan_number",
+      "strategy": "regex",
+      "pattern": "(?<![A-Z0-9])[A-Z0-9]{10}(?![A-Z0-9])",
+      "fix": "pan_positional",
+      "validator": "pan",
+      "min_conf": 0.5,
+      "required": true
+    },
+    {
+      "name": "name",
+      "strategy": "below_anchor",
+      "anchor": "^(?!.*father).*\\bname\\b",
+      "value_pattern": "^[A-Z][A-Z .'-]{2,48}$",
+      "max_lines_below": 2,
+      "min_conf": 0.6,
+      "required": true
+    },
+    {
+      "name": "father_name",
+      "strategy": "below_anchor",
+      "anchor": "father",
+      "value_pattern": "^[A-Z][A-Z .'-]{2,48}$",
+      "max_lines_below": 2,
+      "min_conf": 0.6,
+      "required": true
+    },
+    {
+      "name": "dob",
+      "strategy": "regex",
+      "pattern": "[0-3][0-9]\\s?[/.\\-]\\s?[01][0-9]\\s?[/.\\-]\\s?[12][0-9.]{3,4}",
+      "fix": "date",
+      "validator": "date",
+      "min_conf": 0.6,
+      "required": true
+    },
+    {
+      "name": "photo",
+      "strategy": "image",
+      "detector": "face",
+      "required": true
+    },
+    {
+      "name": "signature",
+      "strategy": "image",
+      "detector": "signature",
+      "label": "signature",
+      "required": true
+    },
+    {
+      "name": "qr_code",
+      "strategy": "image",
+      "detector": "qr",
+      "required": false
+    }
+  ]
+}

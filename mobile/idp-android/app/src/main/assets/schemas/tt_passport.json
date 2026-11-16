@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "tt_passport" },
+    "type": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Z]{1,2}$" },
+      { "type": "null" } ] },
+    "country_code": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Z]{3}$" },
+      { "type": "null" } ] },
+    "passport_number": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Z0-9]{6,9}$" },
+      { "type": "null" } ] },
+    "surname": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "given_names": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "nationality": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z]{1,32}$" },
+      { "type": "null" } ] },
+    "gender": { "enum": ["M", "F", "O", null] },
+    "dob": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "place_of_birth": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] },
+    "issue_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] },
+    "issuing_authority": { "anyOf": [
+      { "type": "string", "maxLength": 60 },
+      { "type": "null" } ] },
+    "expiry_date": { "anyOf": [ { "type": "string", "maxLength": 15 }, { "type": "null" } ] }
+  },
+  "required": ["document_type", "type", "country_code", "passport_number", "surname",
+               "given_names", "nationality", "gender", "dob", "place_of_birth",
+               "issue_date", "issuing_authority", "expiry_date"],
+  "additionalProperties": false
+}

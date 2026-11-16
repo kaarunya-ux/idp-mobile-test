@@ -1,0 +1,6 @@
+flask
+numpy
+onnxruntime
+opencv-python-headless
+pillow
+pyyaml

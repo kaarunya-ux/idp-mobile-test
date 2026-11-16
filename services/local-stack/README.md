@@ -1,0 +1,130 @@
+# Local integration stack: the three IDP Python services
+
+conversion-service, extraction-service and ai-gateway on one machine, for integration testing with the Java
+backend. Not for production: the passwords and secrets here are local, made-up values.
+
+## Prepare once, ahead of time
+
+```bash
+cd services/local-stack
+make prepare      # .env, the OCR models (65 MB), the infrastructure images, and our images (first time: minutes)
+```
+
+After `make prepare`, nothing is downloaded or built at start-up. Run it again after pulling new code.
+
+## Start, check, stop
+
+```bash
+make up           # start everything and wait until it is healthy (about a minute)
+make check        # the readiness check: health, tokens, the API, one extraction and one conversion end to end
+make status       # what runs, and on which ports
+make logs s=extraction-worker      # follow one service; `make logs` follows all
+make down         # stop, keep the data
+make reset        # stop and delete the data: databases, buckets, queues
+```
+
+`make check` ends with `N of N checks passed` when the stack is ready for the backend team.
+
+## What runs
+
+| Service | Port on this machine | What it is |
+|---|---|---|
+| `extraction-api` | 8000 | templates, designer, mobile bundle; `/health/ready`, `/metrics`, `/docs` |
+| `extraction-sync` | 8003 | the synchronous `POST /api/v1/extract` (OCR first, the AI for what OCR leaves unsure); `/health/ready` |
+| `extraction-intake`, `-relay`, `-worker`, `-worker-ai` | — | messages in, events out, the pipeline, deep analysis |
+| `conversion-intake`, `-relay`, `-worker`, `-worker-ocr` | — | messages in, events out, the conversions; `-ocr` runs the scanned routes through ai-gateway |
+| `conversion-sync` | 8004 | the synchronous `POST /api/v1/convert` and `/merge` (the libraries only, no OCR and no AI); `/health/ready`, `/docs` |
+| `conversion-health` | 8001 | `/health/ready` |
+| `ai-gateway` | 8002 (this machine only) | internal: only extraction calls it |
+| `mock-model` | — | stands in for the AI model server; made-up answers |
+| `postgres`, `redis` | 15432 (this machine only) | our databases (`extraction_db`, `conversion_db`); the gateway's queue and limits |
+| `rabbitmq` (mode B) | 5672, UI 15672 (guest/guest) | the message broker |
+| `minio` (mode B) | 9000, console 9001 (local-access-key / local-secret-key) | buckets `idp-originals`, `idp-derived`, `idp-outputs`, `idp-templates` |
+| `keycloak` (mode B) | 8080, admin console (admin / admin) | realm `idp`: test users and the service clients |
+| `rabbit-setup` (mode B) | — | one-time job: the exchanges, and the queue `local.events-tap` that keeps the last 1,000 events |
+
+## What runs here, and what is the backend's
+
+`COMPOSE_PROFILES` in `.env` chooses it; then `make down && make up`.
+
+| Setup | `COMPOSE_PROFILES` | Here | The backend's |
+|---|---|---|---|
+| **B** (default) | `infra` | RabbitMQ, MinIO, Keycloak | nothing |
+| **Mixed** | `rabbitmq,keycloak` | Keycloak, and a RabbitMQ for our Celery tasks only | RabbitMQ for the IDP messages, MinIO |
+| **A** | empty | nothing | RabbitMQ, MinIO, Keycloak |
+
+In every setup, our PostgreSQL, Redis and the services run here. Set `PUBLIC_HOST` in `.env` to this machine's
+address (`hostname -I`) before the backend connects: it is the issuer in every token.
+
+**Setup B.** The Java services point at this machine:
+
+| They need | Value |
+|---|---|
+| RabbitMQ | `amqp://guest:guest@<this machine>:5672/`, exchanges `idp.commands` and `idp.events` |
+| MinIO | `http://<this machine>:9000`, `local-access-key` / `local-secret-key` |
+| Keycloak (issuer) | `http://<this machine>:8080/realms/idp` |
+| extraction API (their gateway's upstream) | `http://<this machine>:8000` |
+| synchronous extract (`POST /api/v1/extract`, the person's token) | `http://<this machine>:8003` |
+| synchronous conversion (`POST /api/v1/convert`, no token while `SYNC_REQUIRE_TOKEN` is false) | `http://<this machine>:8004` |
+
+**Mixed, and A.** In `.env`, fill in the backend's RabbitMQ (`RABBIT_URL`) and MinIO (`STORAGE_*`); in A also their
+Keycloak and the `extraction-service` client secret. On their side they need:
+- the four buckets: `idp-originals`, `idp-derived`, `idp-outputs`, `idp-templates`;
+- the exchanges `idp.commands` and `idp.events` (topic);
+- **a queue bound to every event we publish** (`job.progressed`, `extraction.completed`, `conversion.completed`,
+  `work.failed`): an event nobody receives holds back that item's later events. The `local.events-tap` queue only
+  exists on our local RabbitMQ.
+- in A only: the Keycloak clients `extraction-service` and `conversion-service`, with audience `ai-gateway`.
+
+Integration readiness doc, section 4.
+
+## Test users (mode B)
+
+Realm `idp`, client `idp-test` (password grant), password `local-password` for all three:
+
+| User | Role | Can |
+|---|---|---|
+| `org-admin` | `ORG_ADMIN` | read, write and publish the test account's templates |
+| `member` | `MEMBER` | read templates |
+| `staff-admin` | `PLATFORM_ADMIN` | manage the standard templates |
+
+Every token carries the test account `account_id = 0192f0aa-0000-7000-8000-00000000a001`. A token:
+
+```bash
+curl -s -d grant_type=password -d client_id=idp-test -d username=org-admin -d password=local-password \
+  http://localhost:8080/realms/idp/protocol/openid-connect/token | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])"
+```
+
+## Sending work by hand
+
+- **Conversion jobs:** `conversion-service/scripts/send_job.py`, the "fake Java" (`uv run python scripts/send_job.py
+  report.docx --to PDF`); its defaults match this stack.
+- **Extraction jobs:** `stack_check.py` shows the message shape.
+
+Use made-up documents only, never real cards or ID numbers.
+
+## Other machines reaching this one
+
+If Ubuntu's firewall is on (`sudo ufw status`), open the ports the backend uses:
+
+```bash
+sudo ufw allow 5672,15672,9000,9001,8080,8000,8001,8003,8004/tcp
+```
+
+## Real AI answers: the Mac mini's model
+
+`make use-mac-model` points ai-gateway at the Qwen3.5-4B model on the Mac mini (`http://10.0.3.99:8082/v1`, an
+mlx_vlm.server), and conversion's page reading at the Qwen3.6-35B on the other Mac mini
+(`PAGE_MODEL_URL`, default `http://10.0.3.154:8080/v1`, a llama-server; `make use-mac-model PAGE_MODEL_URL=` sends
+pages to the 4B too), restarting only ai-gateway; `make use-mock-model` (or the next `make up`) puts the mock back. The Mac
+mini's own web app keeps running beside it, and both share that one model, so they slow each other down when both are
+busy. To keep the real model across restarts, set `MODEL_BASE_URL`, `MODEL_NAME` and `MODEL_SEND_SCHEMA` in `.env`
+(see `.env.example`).
+
+Known with that model: the AI's `classify` picks from the candidate list by position, not by the image (it names the
+card right, then chooses wrongly). OCR keywords recognise PAN, Aadhaar and DL first, so it is asked only for pages
+the keywords don't match; a fix (the type in the model's own words, matched to the list in code) is the next step.
+
+## When the real model server is ready
+
+Set `MODEL_BASE_URL=http://10.0.3.66:4000/v1` in `.env` and `make up` again; nothing else changes.

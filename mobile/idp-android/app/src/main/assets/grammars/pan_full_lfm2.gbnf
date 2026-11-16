@@ -1,0 +1,5 @@
+root ::= "{\"pan_number\": " pan ", \"name\": " nm ", \"parent_name\": " nm ", \"parent_relation\": " rel ", \"dob\": " dob "}"
+pan ::= "\"" [A-Z] [A-Z] [A-Z] [ABCFGHJLPT] [A-Z] [0-9] [0-9] [0-9] [0-9] [A-Z] "\"" | "null"
+nm ::= "\"" [A-Za-z] [A-Za-z .'-]{1,48} "\"" | "null"
+rel ::= "\"father\"" | "\"mother\"" | "null"
+dob ::= "\"" [0-3] [0-9] "/" [01] [0-9] "/" [12] [0-9] [0-9] [0-9] "\"" | "null"

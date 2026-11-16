@@ -1,0 +1,256 @@
+"""Service settings, read once from the environment and validated at startup (standard ch. 9).
+
+Every environment variable is listed in README.md (CFG-05). Nested groups use a double underscore:
+``LOGGING__LEVEL=DEBUG`` sets ``Settings.logging.level``.
+"""
+
+from datetime import timedelta
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ByteSize, Field, HttpUrl, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class LoggingSettings(BaseModel):
+    """How the service writes its logs (OBS-01): JSON in every environment except local development."""
+
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    format: Literal["json", "console"] = "json"
+
+
+class LimitsSettings(BaseModel):
+    """Caps that protect the workers from oversized input (IDP-03 ch. 3.5 and 3.7, FIL-05, ML-06)."""
+
+    max_pages: int = Field(1000, ge=1, le=10_000)
+    max_image_pixels: int = Field(180_000_000, ge=1_000_000, le=1_000_000_000)
+    max_render_side_px: int = Field(5000, ge=500, le=20_000)
+    max_document_table_rows: int = Field(20_000, ge=100, le=1_000_000)  # tables written into Word or slides
+
+
+class PreviewSettings(BaseModel):
+    """Page thumbnails made on upload (``PREVIEW``, IDP-00 F-DC-05). The specs give no size: these are ours."""
+
+    max_side_px: int = Field(400, ge=64, le=2000)  # longest side; an A4 page comes out 283 x 400
+    jpeg_quality: int = Field(75, ge=30, le=95)
+
+
+class EditSettings(BaseModel):
+    """``PDF_EDIT`` (IDP-03 ch. 3.5)."""
+
+    redaction_dpi: int = Field(200, ge=96, le=400)  # how sharp a redacted page is when drawn again
+    max_image_bytes: ByteSize = ByteSize(5 * 1024 * 1024)  # SIGNATURE and INSERT_IMAGE files
+
+
+class CryptoSettings(BaseModel):
+    """The key Java encrypts edit-plan passwords with (IDP-03 ch. 3.7). Without it, plans with passwords fail."""
+
+    private_key: SecretStr | None = None  # PEM, RSA
+
+
+class OfficeSettings(BaseModel):
+    """How LibreOffice is run for Office -> PDF (IDP-03 ch. 3.2 and 3.7)."""
+
+    binary: str = Field("soffice", min_length=1, max_length=255)
+    timeout: timedelta = Field(timedelta(seconds=60), ge=timedelta(seconds=5), le=timedelta(minutes=10))
+    # one LibreOffice kept started ahead of each document, per process: about 0.3 s a document instead of 3 s, for about
+    # 100 MB. On for the synchronous route (ADR 0002), where someone is waiting; not worth it for queued jobs
+    keep_warm: bool = False
+
+
+class DatabaseSettings(BaseModel):
+    """``conversion_db``: the inbox, the outbox and job item state (build log entry 0, decided 2026-10-22)."""
+
+    url: SecretStr  # postgresql+psycopg://user:password@host:5432/conversion_db
+    pool_size: int = Field(5, ge=1, le=50)
+    max_overflow: int = Field(2, ge=0, le=50)
+    statement_timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(milliseconds=100))  # DB-02
+    lock_timeout: timedelta = Field(timedelta(seconds=3), ge=timedelta(milliseconds=100))
+    idle_in_transaction_timeout: timedelta = Field(timedelta(seconds=10), ge=timedelta(seconds=1))
+
+
+class RabbitSettings(BaseModel):
+    """The broker Java and Python exchange messages through (IDP-00 ch. 7.6)."""
+
+    url: SecretStr  # amqp://user:password@host:5672/vhost
+    prefetch: int = Field(10, ge=1, le=200)  # MSG-05: intake only records and enqueues, so it can take a few
+    delivery_limit: int = Field(5, ge=1, le=20)  # quorum queue x-delivery-limit before the dead-letter queue
+
+
+class CelerySettings(BaseModel):
+    """The worker pools (IDP-03 ch. 3.2, standard ch. 16.2)."""
+
+    broker_url: SecretStr  # amqp://..., the same RabbitMQ on its own virtual host
+    soft_time_limit: timedelta = Field(timedelta(minutes=9), ge=timedelta(seconds=30), le=timedelta(hours=1))
+    time_limit: timedelta = Field(timedelta(minutes=10), ge=timedelta(seconds=30), le=timedelta(hours=1))
+    max_retries: int = Field(3, ge=0, le=10)  # transient failures only (CEL-04)
+
+
+class StorageSettings(BaseModel):
+    """MinIO, run by the Java team; this service reads inputs and writes outputs with its own keys (IDP-00 7.7)."""
+
+    endpoint: HttpUrl
+    access_key: SecretStr
+    secret_key: SecretStr
+    region: str = Field("us-east-1", min_length=1, max_length=32)
+    bucket_outputs: str = Field("idp-outputs", min_length=3, max_length=63)
+    bucket_derived: str = Field("idp-derived", min_length=3, max_length=63)  # previews (IDP-00 ch. 7.7)
+    max_input_size: ByteSize = ByteSize(200 * 1024 * 1024)  # FIL-05: nothing bigger is downloaded
+    timeout: timedelta = Field(timedelta(seconds=30), ge=timedelta(seconds=1), le=timedelta(minutes=5))
+
+
+class OutboxSettings(BaseModel):
+    """The relay that publishes outbox rows (OBX-01, Java standard ch. 15.2)."""
+
+    batch_size: int = Field(100, ge=1, le=1000)
+    poll_interval: timedelta = Field(timedelta(seconds=1), ge=timedelta(milliseconds=50), le=timedelta(minutes=1))
+    lease: timedelta = Field(timedelta(minutes=1), ge=timedelta(seconds=5))  # CLAIMED longer -> PENDING (OBX-03)
+    max_attempts: int = Field(10, ge=1, le=100)  # then DEAD + alert (OBX-07)
+    backoff_max: timedelta = Field(timedelta(minutes=5), ge=timedelta(seconds=1))
+
+
+class AiGatewaySettings(BaseModel):
+    """ai-gateway, for the scanned routes (scan or photo to Word, Excel or CSV). Unset: those routes answer
+    ``CNV-422-ROUTE-001`` as before, and every other route is unaffected."""
+
+    url: HttpUrl | None = None  # e.g. http://ai-gateway:8002
+    timeout: timedelta = Field(timedelta(seconds=240), ge=timedelta(seconds=5), le=timedelta(minutes=15))
+    render_dpi: int = Field(200, ge=72, le=400)  # a scanned PDF page is drawn at this DPI for the model
+    # ... and no larger than this on its long side: ai-gateway shrinks every page to 2048 px (its
+    # MODEL__PAGE_READ_MAX_SIDE_PX) before the model sees it, so a bigger picture is only work and bytes. A scan saved
+    # as a 1700 x 2200 pt page was drawn at 4723 x 6112 px
+    render_max_side_px: int = Field(2048, ge=512, le=8192)
+    max_pages: int = Field(50, ge=1, le=500)  # one model call per page: more pages go to review, not to the model
+    # pages read at the same time: the page model's parallel slots (llama-server -np 4). One at a time, a 3-page scan
+    # took 47 s on the 35B; all three at once, 26 s
+    page_concurrency: int = Field(4, ge=1, le=32)
+    # how a page is read (ADR 0001): "model", the page model writes the page's text and its layout (page-read);
+    # "ocr_layout", OCR reads the text on this machine and the page model only says how the lines are laid out
+    # (page-layout), by their numbers. "model" until the two are compared on real scans
+    page_reader: Literal["model", "ocr_layout"] = "model"
+    # ocr_layout: send the page picture with the OCR lines. false: the lines alone, a page in 12 to 18 s not 36 to 42
+    layout_sends_page: bool = True
+
+
+class OcrSettings(BaseModel):
+    """The OCR models for ``AI_GATEWAY__PAGE_READER=ocr_layout`` (ML-01, ML-06): extraction's PP-OCRv6 small, on the
+    CPU. Loaded on a worker's first scanned page, not at startup, so the other workers never hold them."""
+
+    models_dir: Path = Path("models")
+    models_file: Path = Path("models.yaml")
+    # pages are read four at a time (AI_GATEWAY__PAGE_CONCURRENCY), so more threads per page only fight over the
+    # cores; 2 is extraction's measured setting
+    threads: int = Field(2, ge=1, le=64)
+    # target TXT (ADR 0003): a PDF page with fewer characters in its text layer is read with OCR too (a scan, or a scan
+    # with a browser's header line), drawn at this DPI; the reading with more text is kept
+    text_ocr_below_chars: int = Field(200, ge=0, le=100_000)
+    text_render_dpi: int = Field(200, ge=72, le=400)
+
+
+class SyncSettings(BaseModel):
+    """``POST /api/v1/convert`` and ``/merge`` of the ``conversion-sync`` process (ADR 0002): files converted while the
+    caller waits, by the libraries, and a scan or photo to a document read through ai-gateway. The backend chooses
+    between this and the queued way and decides how much to send, so these are only the ceilings that protect the
+    machine (FIL-05); pages are limited by ``LIMITS__MAX_PAGES``, as on the queued way."""
+
+    max_file_size: ByteSize = ByteSize(200 * 1024 * 1024)  # each file, as STORAGE__MAX_INPUT_SIZE on the queued way
+    max_total_size: ByteSize = ByteSize(1024 * 1024 * 1024)  # all of one request's files together
+    max_files: int = Field(200, ge=1, le=200)  # as MAX_INPUTS on the queued way
+    max_concurrent: int = Field(4, ge=1, le=32)  # worker processes; one more request is told busy (429) at once
+    # false lets a request in without a token (integration testing, as extraction's ADR 0011). A request that does send
+    # a token is still checked
+    require_token: bool = True
+    # a scanned PDF with more pages to read goes as a job (CNV-422-SYNC-001): the model reads about 4 pages each 15 s
+    max_read_pages: int = Field(5, ge=1, le=50)
+    # the account a tokenless request's reading is counted on; without one, a scan or photo answers CNV-403-AUTH-001
+    default_account_id: UUID | None = None
+
+
+class IssuerSettings(BaseModel):
+    """One token issuer the route trusts (IDP-01 ch. 2)."""
+
+    issuer: HttpUrl  # the token's iss claim, exactly
+    jwks_url: HttpUrl
+
+
+class AuthSettings(BaseModel):
+    """Bearer token verification (SEC-01). Without issuers, every token is refused."""
+
+    issuers: list[IssuerSettings] = Field(default_factory=list, max_length=5)
+    audience: str = Field("idp-api", min_length=1, max_length=128)  # IDP-01: aud=idp-api
+    jwks_cache: timedelta = Field(timedelta(minutes=10), ge=timedelta(minutes=1), le=timedelta(hours=24))
+    leeway: timedelta = Field(timedelta(seconds=30), ge=timedelta(0), le=timedelta(minutes=5))  # clock skew
+
+
+class ServiceAuthSettings(BaseModel):
+    """This service's own client-credentials login, for calls to ai-gateway (SEC-07)."""
+
+    token_url: HttpUrl  # Keycloak: <issuer>/protocol/openid-connect/token
+    client_id: str = Field("conversion-service", min_length=1, max_length=128)
+    client_secret: SecretStr
+    audience: str | None = Field("ai-gateway", max_length=128)
+    timeout: timedelta = Field(timedelta(seconds=5), ge=timedelta(seconds=1), le=timedelta(minutes=1))
+
+
+class BuildSettings(BaseModel):
+    """Which build is running, for the stamp on every log line. ``BUILD__COMMIT`` is set at deploy."""
+
+    commit: str = Field("unknown", min_length=1, max_length=64)
+
+
+class MissingSettingsError(RuntimeError):
+    """A process started without settings it needs, for example a worker without ``DB__URL``."""
+
+
+class Settings(BaseSettings):
+    """All configuration for one process. Built once by ``get_settings()``; invalid values stop the process."""
+
+    model_config = SettingsConfigDict(env_nested_delimiter="__", env_file=".env", extra="ignore")
+
+    service_name: str = Field("conversion-service", min_length=1, max_length=64)
+    environment: Literal["local", "dev", "test", "staging", "prod"] = "local"
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    build: BuildSettings = Field(default_factory=BuildSettings)
+    limits: LimitsSettings = Field(default_factory=LimitsSettings)
+    office: OfficeSettings = Field(default_factory=OfficeSettings)
+    preview: PreviewSettings = Field(default_factory=PreviewSettings)
+    edit: EditSettings = Field(default_factory=EditSettings)
+    crypto: CryptoSettings = Field(default_factory=CryptoSettings)
+    outbox: OutboxSettings = Field(default_factory=OutboxSettings)
+    ai_gateway: AiGatewaySettings = Field(default_factory=AiGatewaySettings)
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
+    sync: SyncSettings = Field(default_factory=SyncSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
+    service_auth: ServiceAuthSettings | None = None  # needed with AI_GATEWAY__URL
+    # No defaults: credentials never live in code (CFG-03). Only the processes that use a group require it, so the
+    # health server and unit tests run without them; ``require_*`` stops a worker at startup instead.
+    db: DatabaseSettings | None = None
+    rabbit: RabbitSettings | None = None
+    celery: CelerySettings | None = None
+    storage: StorageSettings | None = None
+
+    def require_db(self) -> DatabaseSettings:
+        return _required(self.db, "DB__URL")
+
+    def require_rabbit(self) -> RabbitSettings:
+        return _required(self.rabbit, "RABBIT__URL")
+
+    def require_celery(self) -> CelerySettings:
+        return _required(self.celery, "CELERY__BROKER_URL")
+
+    def require_storage(self) -> StorageSettings:
+        return _required(self.storage, "STORAGE__ENDPOINT, STORAGE__ACCESS_KEY and STORAGE__SECRET_KEY")
+
+
+def _required[T](group: T | None, variables: str) -> T:
+    if group is None:
+        raise MissingSettingsError(f"This process needs {variables}; see README.md")
+    return group
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the process-wide settings, reading the environment on the first call only."""
+    return Settings()

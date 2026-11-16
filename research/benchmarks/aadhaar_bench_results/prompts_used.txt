@@ -1,0 +1,67 @@
+Prompts used in the Aadhaar box-vs-crop benchmark (Nano + Flash)
+==================================================================
+
+These are NOT part of the Android app's assets/prompts/ folder. They exist
+only as string literals inside the standalone test scripts used to query
+the on-device llama-server directly (bypassing the app) for this benchmark.
+Source: scratchpad/aadhaar_bench/run_bench.py, run_bench_flash.py,
+rerun_multi.py, rerun_aditiya.py (all identical), and prompt_ablation.py.
+
+------------------------------------------------------------------
+MAIN BENCHMARK PROMPTS (used for all 6 images x 4 variants x 2 models)
+------------------------------------------------------------------
+
+BOX_PROMPT (used for box_clean and box_distorted variants):
+"There is a red rectangle/box drawn on this image. Output only the exact
+text that appears inside that red box. Do not output anything else - no
+labels, no explanation, no extra text."
+
+CROP_PROMPT (used for crop_clean and crop_distorted variants):
+"Extract and output only the text visible in this image. Do not output
+anything else - no labels, no explanation, no extra text."
+
+Both sent with: temperature = 0, max_tokens = 80, identical across every
+field/image/model, via POST to http://127.0.0.1:8090/v1/chat/completions
+(OpenAI-style chat format, image passed as a base64 data URL).
+
+------------------------------------------------------------------
+PROMPT ABLATION (tested only on Meghna/Prakash/Sapna box_clean, Nano only)
+------------------------------------------------------------------
+
+PROMPT_FORCEFUL:
+"There is a red rectangle drawn on this image, marking one specific area.
+Read ONLY the text inside that red rectangle. You must NOT output a
+person's name, date of birth, gender, address, or ID number unless that
+exact text is the content physically inside the red rectangle. If you find
+yourself about to output any field that is not inside the box, stop and
+look again. Output only the text found inside the box, nothing else."
+
+PROMPT_SHORT:
+"Read only what is inside the red box. Output just that text, nothing
+else."
+
+Result: 1/6 correct, no better than baseline BOX_PROMPT. Confirms the
+box-ignoring failure is a model behavior issue, not fixable by prompt
+wording.
+
+------------------------------------------------------------------
+EARLIER GROUNDING-CAPABILITY TEST PROMPTS (different investigation,
+used the public sample image test_images/id_cards/aadhaar_sample.jpg,
+not the 6 real Aadhaar images)
+------------------------------------------------------------------
+
+Box-attention test (same wording as BOX_PROMPT above).
+
+REC/grounding test:
+"This image is 636 pixels wide and 400 pixels tall. Return the bounding
+box of [the Aadhaar number / the person's name] on this card, in the
+exact format [x1,y1,x2,y2] using pixel coordinates in that coordinate
+system. Output only the array, nothing else."
+
+bbox_2d-format grounding test:
+"Detect the Aadhaar number field on this card. Output a JSON array in
+this exact format: [{\"bbox_2d\": [x1,y1,x2,y2], \"label\":
+\"aadhaar_number\"}]. Output only the JSON array, nothing else."
+
+Result: model produced out-of-bounds/impossible coordinates or abandoned
+the task entirely. Confirmed no reliable grounding capability.

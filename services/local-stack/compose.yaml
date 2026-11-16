@@ -1,0 +1,357 @@
+# The three IDP Python services on one machine, for integration testing with the Java backend. Not for production.
+#
+#   make prepare   # once, ahead of time: models, infrastructure images, our images
+#   make up        # start (no building), wait until everything is healthy
+#   make check     # the readiness check: one extraction and one conversion end to end
+#
+# What runs here is chosen in .env with COMPOSE_PROFILES: "infra" = RabbitMQ, MinIO and Keycloak all here (mode B);
+# or any of "rabbitmq", "minio", "keycloak" one by one, with the backend's instances for the rest; see README.md.
+name: idp-python
+# Long-running services restart by themselves (restart: unless-stopped): intake and relay exit when the backend's
+# RabbitMQ drops the connection, and nothing brought them back. The one-time jobs keep restart: "no".
+
+x-extraction-build: &extraction-build
+  context: ../extraction-service
+x-gateway-build: &gateway-build
+  context: ../ai-gateway
+x-conversion-build: &conversion-build
+  context: ../conversion-service
+
+x-infra-dependencies: &infra-dependencies
+  rabbitmq: {condition: service_healthy, required: false}
+  minio: {condition: service_healthy, required: false}
+  keycloak: {condition: service_healthy, required: false}
+
+x-common-env: &common-env
+  ENVIRONMENT: local
+  LOGGING__FORMAT: console
+  LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
+  RABBIT__URL: ${RABBIT_URL:-amqp://guest:guest@rabbitmq:5672/}
+  CELERY__BROKER_URL: ${CELERY_BROKER_URL:-amqp://guest:guest@rabbitmq:5672/}
+  STORAGE__ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
+  STORAGE__ACCESS_KEY: ${STORAGE_ACCESS_KEY:-local-access-key}
+  STORAGE__SECRET_KEY: ${STORAGE_SECRET_KEY:-local-secret-key}
+
+x-extraction-env: &extraction-env
+  <<: *common-env
+  DB__URL: postgresql+psycopg://extraction:extraction@postgres:5432/extraction_db
+  AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
+  AI_GATEWAY__URL: http://ai-gateway:8002
+  SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
+  SERVICE_AUTH__CLIENT_ID: extraction-service
+  SERVICE_AUTH__CLIENT_SECRET: ${EXTRACTION_CLIENT_SECRET:-local-extraction-secret}
+  # Integration testing (ADR 0011): POST /api/v1/extract without a token is counted on the test account
+  QUICK__REQUIRE_TOKEN: ${QUICK_REQUIRE_TOKEN:-false}
+  QUICK__DEFAULT_ACCOUNT_ID: 0192f0aa-0000-7000-8000-00000000a001
+  QUICK__GENERIC_MODE: ${QUICK_GENERIC_MODE:-picture}  # ADR 0015: picture (the model reads the page) or lines (OCR reads, the model names the lines)
+  # One AI call per document for the fields OCR leaves unsure (on one model server, a call per field's crop is far
+  # slower: 4 crops took 28 s, as the calls share the model); "crop" when a faster model server is in
+  AI_GATEWAY__READ_MODE: ${AI_READ_MODE:-page}
+
+x-conversion-env: &conversion-env
+  <<: *common-env
+  DB__URL: postgresql+psycopg://conversion:conversion@postgres:5432/conversion_db
+  # The scanned routes (scan or photo to Word, Excel or CSV) read pages through ai-gateway's page-read
+  AI_GATEWAY__URL: http://ai-gateway:8002
+  SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
+  SERVICE_AUTH__CLIENT_ID: conversion-service
+  SERVICE_AUTH__CLIENT_SECRET: ${CONVERSION_CLIENT_SECRET:-local-conversion-secret}
+
+services:
+  # --- Our own infrastructure (always) ------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: idp
+      POSTGRES_PASSWORD: idp-local
+    volumes:
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    ports: ["127.0.0.1:15432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U idp && psql -U idp -lqt | grep -q extraction_db"]
+      interval: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  # --- Shared infrastructure: here, or the backend's (profiles "infra", or "rabbitmq" / "minio" / "keycloak") ----
+  # The local RabbitMQ also carries our Celery tasks when the IDP messages use the backend's broker.
+  rabbitmq:
+    profiles: [infra, rabbitmq]
+    restart: unless-stopped
+    image: rabbitmq:4.1-management-alpine
+    ports: ["5672:5672", "15672:15672"]  # 15672: management UI, guest/guest
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbit loopback_users []  # guest may connect from other machines
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      retries: 30
+
+  minio:
+    profiles: [infra, minio]
+    restart: unless-stopped
+    image: bitnamilegacy/minio:2025.4.22
+    environment:
+      MINIO_ROOT_USER: local-access-key
+      MINIO_ROOT_PASSWORD: local-secret-key
+      MINIO_DEFAULT_BUCKETS: idp-originals,idp-derived,idp-outputs,idp-templates
+    ports: ["9000:9000", "9001:9001"]  # 9001: console
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/9000'"]
+      interval: 3s
+      retries: 30
+
+  keycloak:
+    profiles: [infra, keycloak]
+    restart: unless-stopped
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://${PUBLIC_HOST:-localhost}:8080  # the issuer in every token
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"  # services inside Docker reach it as keycloak:8080
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      retries: 40
+
+  # On the local RabbitMQ: the exchanges, plus a capped queue that keeps the last 1,000 events, so nothing waits
+  # unrouted before Java binds its own queues (an unrouted event holds back that item's later events).
+  rabbit-setup:
+    profiles: [infra, rabbitmq]
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    command: ["python", "/stack/rabbit_setup.py"]
+    environment:
+      RABBIT__URL: amqp://guest:guest@rabbitmq:5672/  # always the local broker: never touch the backend's
+    volumes: ["./rabbit_setup.py:/stack/rabbit_setup.py:ro"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+    restart: "no"
+
+  # --- ai-gateway -------------------------------------------------------------------------------------------
+  mock-model:
+    image: idp-local/ai-gateway:mock-model
+    restart: unless-stopped
+    build: {<<: *gateway-build, target: mock-model}
+    environment:
+      MOCK_MODEL__LATENCY_MS: ${MOCK_MODEL_LATENCY_MS:-300}
+
+  ai-gateway:
+    image: idp-local/ai-gateway:api
+    restart: unless-stopped
+    build: {<<: *gateway-build, target: api}
+    environment:
+      <<: *common-env
+      MODEL__BASE_URL: ${MODEL_BASE_URL:-http://mock-model:4000/v1}
+      # One model serves every task on a single-model host (the Mac mini); the mock answers to any name
+      MODEL__VL_MODEL: ${MODEL_NAME:-vl}
+      MODEL__SMART_MODEL: ${MODEL_NAME:-smart}
+      MODEL__AUTO_MODEL: ${MODEL_NAME:-auto}
+      MODEL__SEND_SCHEMA: ${MODEL_SEND_SCHEMA:-true}
+      # How long the generic read may take (ISO 8601: PT40S); a slower or shared model (one 35B for every task) needs more
+      MODEL__TIMEOUTS__GENERIC_READ: ${GENERIC_READ_TIMEOUT:-PT40S}
+      # Conversion's page reading on its own (larger) model server; empty: the main model (ai-gateway ADR 0005)
+      MODEL__PAGE__BASE_URL: ${PAGE_MODEL_URL:-}
+      MODEL__PAGE__MODEL: ${PAGE_MODEL_NAME:-page}
+      MODEL__PAGE__SEND_SCHEMA: ${PAGE_MODEL_SEND_SCHEMA:-true}
+      # Integration testing runs every call on one test account: the real daily limits (10, 30, 5000) run out in hours
+      CAPS__GUEST: ${CAPS_GUEST:-100000}
+      CAPS__PERSONAL: ${CAPS_PERSONAL:-100000}
+      CAPS__CORPORATE: ${CAPS_CORPORATE:-100000}
+      REDIS__URL: redis://redis:6379/0
+      AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
+    ports: ["127.0.0.1:8002:8002"]  # internal service: only this machine, for debugging
+    depends_on:
+      <<: *infra-dependencies
+      redis: {condition: service_healthy}
+      mock-model: {condition: service_started}
+    healthcheck: &python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/ready')"]
+      interval: 5s
+      retries: 30
+
+  # --- extraction-service ------------------------------------------------------------------------------------
+  extraction-migrate:
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    command: ["sh", "-c", "alembic upgrade head && python -m extraction.seed"]
+    environment: *extraction-env
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  extraction-api:
+    image: idp-local/extraction-service:api
+    restart: unless-stopped
+    build: {<<: *extraction-build, target: api}
+    environment: *extraction-env
+    ports: ["8000:8000"]
+    depends_on:
+      <<: *infra-dependencies
+      extraction-migrate: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+
+  extraction-intake:
+    image: idp-local/extraction-service:service
+    restart: unless-stopped
+    build: {<<: *extraction-build, target: service}
+    environment: *extraction-env
+    depends_on: &extraction-ready
+      <<: *infra-dependencies
+      extraction-migrate: {condition: service_completed_successfully}
+
+  extraction-relay:
+    image: idp-local/extraction-service:service
+    restart: unless-stopped
+    build: {<<: *extraction-build, target: service}
+    command: ["python", "-m", "extraction.outbox_relay"]
+    environment: *extraction-env
+    depends_on: *extraction-ready
+
+  extraction-worker:
+    image: idp-local/extraction-service:worker
+    restart: unless-stopped
+    build: {<<: *extraction-build, target: worker}
+    command: ["celery", "-A", "extraction.worker", "worker", "-Q", "pipeline", "-c", "2", "--prefetch-multiplier", "1", "-n", "pipeline@%h"]
+    environment: *extraction-env
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]
+    depends_on: *extraction-ready
+
+  extraction-worker-ai:
+    image: idp-local/extraction-service:worker
+    restart: unless-stopped
+    build: {<<: *extraction-build, target: worker}
+    command: ["celery", "-A", "extraction.worker", "worker", "-Q", "ai", "-c", "4", "--prefetch-multiplier", "1", "-n", "ai@%h"]
+    environment: *extraction-env
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]
+    depends_on: *extraction-ready
+
+  # The synchronous extract (ADR 0009): POST /api/v1/extract, OCR first, the AI for the unsure fields' crops
+  extraction-sync:
+    image: idp-local/extraction-service:worker
+    restart: unless-stopped
+    build: {<<: *extraction-build, target: worker}
+    command: ["uvicorn", "--factory", "extraction.sync_main:create_sync_app", "--host", "0.0.0.0", "--port", "8003"]
+    environment: *extraction-env
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]
+    ports: ["8003:8003"]
+    depends_on: *extraction-ready
+    healthcheck:
+      <<: *python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health/ready')"]
+
+  # --- conversion-service ------------------------------------------------------------------------------------
+  conversion-migrate:
+    image: idp-local/conversion-service:service
+    build: {<<: *conversion-build, target: service}
+    command: ["alembic", "upgrade", "head"]
+    environment: *conversion-env
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  conversion-intake:
+    image: idp-local/conversion-service:service
+    restart: unless-stopped
+    build: {<<: *conversion-build, target: service}
+    environment: *conversion-env
+    depends_on: &conversion-ready
+      <<: *infra-dependencies
+      conversion-migrate: {condition: service_completed_successfully}
+
+  conversion-relay:
+    image: idp-local/conversion-service:service
+    restart: unless-stopped
+    build: {<<: *conversion-build, target: service}
+    command: ["python", "-m", "conversion.outbox_relay"]
+    environment: *conversion-env
+    depends_on: *conversion-ready
+
+  conversion-worker:
+    image: idp-local/conversion-service:worker
+    restart: unless-stopped
+    build: {<<: *conversion-build, target: worker}
+    environment: *conversion-env
+    depends_on: *conversion-ready
+
+  # The "ocr" pool: the scanned routes, which wait on ai-gateway (IDP-03 ch. 3.2: its own pool)
+  conversion-worker-ocr:
+    image: idp-local/conversion-service:worker
+    restart: unless-stopped
+    build: {<<: *conversion-build, target: worker}
+    command: ["celery", "-A", "conversion.worker", "worker", "-Q", "ocr", "-c", "4", "--prefetch-multiplier", "1", "-n", "ocr@%h"]
+    environment:
+      <<: *conversion-env
+      # How a scanned page is read (conversion ADR 0001): "model" (page-read) or "ocr_layout" (OCR here, page-layout)
+      AI_GATEWAY__PAGE_READER: ${CONVERSION_PAGE_READER:-model}
+      OCR__MODELS_DIR: /models
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]  # extraction's PP-OCRv6 small, for ocr_layout
+    depends_on:
+      <<: *conversion-ready
+      ai-gateway: {condition: service_healthy}
+
+  # POST /api/v1/convert and /merge: files now, by the libraries; a scan or photo to Word, Excel or CSV read through
+  # ai-gateway, a scan of more than SYNC__MAX_READ_PAGES pages goes as a job (conversion ADR 0002)
+  conversion-sync:
+    image: idp-local/conversion-service:worker
+    restart: unless-stopped
+    build: {<<: *conversion-build, target: worker}
+    command: ["uvicorn", "--factory", "conversion.sync_main:create_sync_app", "--host", "0.0.0.0", "--port", "8004", "--timeout-graceful-shutdown", "30"]
+    environment:
+      LOGGING__FORMAT: console
+      LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: local
+      AUTH__ISSUERS: '[{"issuer": "${TOKEN_ISSUER:-http://${PUBLIC_HOST:-localhost}:8080/realms/idp}", "jwks_url": "${TOKEN_JWKS_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/certs}"}]'
+      SYNC__REQUIRE_TOKEN: ${SYNC_REQUIRE_TOKEN:-false}  # integration testing: a request without a token is let in
+      # ... and its photo reading is counted on the test account (the same one extraction's quick-extract uses)
+      SYNC__DEFAULT_ACCOUNT_ID: 0192f0aa-0000-7000-8000-00000000a001
+      SYNC__MAX_READ_PAGES: ${SYNC_MAX_READ_PAGES:-5}
+      AI_GATEWAY__URL: http://ai-gateway:8002
+      AI_GATEWAY__PAGE_READER: ${CONVERSION_PAGE_READER:-model}
+      SERVICE_AUTH__TOKEN_URL: ${SERVICE_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
+      SERVICE_AUTH__CLIENT_ID: conversion-service
+      SERVICE_AUTH__CLIENT_SECRET: ${CONVERSION_CLIENT_SECRET:-local-conversion-secret}
+      OCR__MODELS_DIR: /models
+    volumes: ["${OCR_MODELS_DIR:-./models}:/models:ro"]  # extraction's PP-OCRv6 small, for ocr_layout
+    ports: ["8004:8004"]
+    healthcheck:
+      <<: *python-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health/ready')"]
+
+  conversion-health:
+    image: idp-local/conversion-service:health
+    restart: unless-stopped
+    build: {<<: *conversion-build, target: health}
+    environment: *conversion-env
+    ports: ["8001:8001"]
+
+  # --- The readiness check (make check): not started by `up` -------------------------------------------------
+  stack-check:
+    profiles: [check]
+    image: idp-local/extraction-service:service
+    build: {<<: *extraction-build, target: service}
+    command: ["python", "/stack/stack_check.py"]
+    environment:
+      <<: *extraction-env
+      CHECK_TOKEN_URL: ${CHECK_TOKEN_URL:-http://keycloak:8080/realms/idp/protocol/openid-connect/token}
+    volumes: ["./stack_check.py:/stack/stack_check.py:ro"]
+
+volumes:
+  postgres-data:

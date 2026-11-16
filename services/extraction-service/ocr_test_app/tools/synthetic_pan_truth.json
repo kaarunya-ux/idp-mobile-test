@@ -1,0 +1,44 @@
+{
+  "synthetic_pan_01_clean.webp": {
+    "pan_number": "ABCPK1234E",
+    "name": "ARAVIND KUMAR",
+    "father_name": "SURESH KUMAR",
+    "dob": "14/03/1992"
+  },
+  "synthetic_pan_02_long_names.webp": {
+    "pan_number": "BQRPM5821L",
+    "name": "PRIYADARSHINI VENKATESWARAN",
+    "father_name": "RAMAKRISHNAN IYER",
+    "dob": "29/11/1987"
+  },
+  "synthetic_pan_03_rotated.webp": {
+    "pan_number": "CDEPT4096G",
+    "name": "MOHAMMED FAISAL KHAN",
+    "father_name": "ABDUL RAHIM KHAN",
+    "dob": "07/08/1999"
+  },
+  "synthetic_pan_04_blur.webp": {
+    "pan_number": "DFGPS7310H",
+    "name": "NEHA SHARMA",
+    "father_name": "RAJESH SHARMA",
+    "dob": "21/01/2001"
+  },
+  "synthetic_pan_05_dark_noise.webp": {
+    "pan_number": "EHJPV2649A",
+    "name": "TARUN PATEL",
+    "father_name": "HASMUKH PATEL",
+    "dob": "30/06/1985"
+  },
+  "synthetic_pan_06_perspective.webp": {
+    "pan_number": "FKLPD8153C",
+    "name": "ANJALI MENON",
+    "father_name": "GOPALAN MENON",
+    "dob": "11/12/1995"
+  },
+  "synthetic_pan_07_low_res.webp": {
+    "pan_number": "GMNPR3972J",
+    "name": "VIKRAM SINGH RATHORE",
+    "father_name": "BHANWAR SINGH RATHORE",
+    "dob": "03/04/1990"
+  }
+}

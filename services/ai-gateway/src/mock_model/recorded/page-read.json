@@ -1,0 +1,14 @@
+[
+  {
+    "schema": "page_read",
+    "match": "",
+    "answer": {
+      "analysis": {"n_blocks": 3, "table_column_counts": [3]},
+      "blocks": [
+        {"kind": "heading", "text": "MOCK SCANNED DOCUMENT", "align": "center", "size": "large", "bold": true},
+        {"kind": "paragraph", "text": "This page was read by the mock model: every value here is made up.", "align": "left", "size": "normal", "bold": false},
+        {"kind": "table", "has_header": true, "n_data_rows": 2, "n_cols": 3, "header": ["Item", "Quantity", "Amount"], "rows": [["Test item A", "2", "45.00"], ["Test item B", "1", "12.50"]]}
+      ]
+    }
+  }
+]

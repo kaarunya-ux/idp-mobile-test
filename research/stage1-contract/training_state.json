@@ -1,0 +1,25 @@
+{
+  "epoch": 3,
+  "index": 0,
+  "global_step": 91,
+  "best_val": 0.06487724684877322,
+  "bad_evals": 0,
+  "args": {
+    "model": "/Users/impactoinfra/fine_tune/models/VisionPsy-Nano-460M",
+    "data": "/Users/impactoinfra/fine_tune/training_data",
+    "outdir": "/Users/impactoinfra/fine_tune/runs/stage1_contract",
+    "epochs": "3",
+    "lr": "0.0002",
+    "accum": "8",
+    "rank": "32",
+    "eval_every": "25",
+    "eval_examples": "50",
+    "patience": "2",
+    "max_memory_gb": "11.0",
+    "threads": "6",
+    "seed": "20260916",
+    "limit": "0",
+    "no_checkpoint": "False",
+    "resume": "False"
+  }
+}

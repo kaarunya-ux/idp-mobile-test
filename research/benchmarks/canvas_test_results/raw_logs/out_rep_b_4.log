@@ -1,0 +1,30 @@
+warning: no usable GPU found, --gpu-layers option will be ignored
+warning: one possible reason is that llama.cpp was compiled without GPU support
+warning: consult docs/build.md for compilation instructions
+0.00.015.375 I common_init_result: fitting params to device memory ...
+0.00.015.408 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.01.176.314 I common_params_fit_impl: projected to use 1051 MiB of host memory vs. 5425 MiB of total host memory
+0.02.254.493 W llama_context: n_ctx_seq (4096) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+0.02.306.848 I mtmd_cli_context: chat template example:
+<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+
+0.03.558.917 I main: loading model: /sdcard/Android/data/com.modeltesting.vlmtester/files/models/minicpm-v-4.6-q4_k_m.gguf
+0.03.558.948 W WARN: This is an experimental CLI for testing multimodal capability.
+0.03.558.949 W       For normal use cases, please use the standard llama-cli
+
+0.13.162.031 W find_slot: non-consecutive token position 11 after 10 for sequence 0 with 64 new tokens
+0.13.162.182 W find_slot: non-consecutive token position 11 after 10 for sequence 0 with 64 new tokens
+0.14.802.493 W find_slot: non-consecutive token position 188 after 11 for sequence 0 with 114 new tokens
+0.14.802.794 W find_slot: non-consecutive token position 188 after 11 for sequence 0 with 114 new tokens
+
+{"document_type": "pan", "pan_number": "QFVPS0764H", "name": "SAMAD", "parent_name": "MOHD SAJID", "parent_relation": "father", "dob": "03/02/2004"}
+
+

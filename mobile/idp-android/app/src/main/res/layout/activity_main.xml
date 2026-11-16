@@ -1,0 +1,404 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F7F6F2">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_vlm_tester"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="#17160F" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="16dp"
+            android:text="@string/ui_visionpsy_nano_on_device_extraction"
+            android:textSize="13sp"
+            android:textColor="#54524A" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:background="#FFFFFF"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/ui_device_right_now"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#8A887D" />
+
+            <TextView
+                android:id="@+id/tvStorage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F"
+                android:text="@string/ui_storage" />
+
+            <TextView
+                android:id="@+id/tvModelsSize"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F"
+                android:text="@string/ui_models_folder" />
+
+            <TextView
+                android:id="@+id/tvRamIdle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F"
+                android:text="@string/ui_ram_device" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_model"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#8A887D" />
+        <Spinner
+            android:id="@+id/spinnerModel"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_vision_projector_mmproj"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#8A887D" />
+        <Spinner
+            android:id="@+id/spinnerMmproj"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_document_type"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#8A887D" />
+        <Spinner
+            android:id="@+id/spinnerDocType"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginBottom="16dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:background="#FFFFFF"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switchGpu"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="@string/ui_use_gpu_vulkan_for_language" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/ui_vision_encoder_mmproj_always_stays"
+                android:textSize="11sp"
+                android:textColor="#8A887D" />
+
+            <TextView
+                android:id="@+id/tvThreads"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="@string/ui_cpu_threads_4"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F" />
+
+            <SeekBar
+                android:id="@+id/seekThreads"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="7"
+                android:progress="3" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/ui_applies_to_both_t_and"
+                android:textSize="11sp"
+                android:textColor="#8A887D" />
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switchServerMode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:checked="false"
+                android:text="@string/ui_persistent_server_mode_experimental" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/ui_off_current_behaviour_reloads_the"
+                android:textSize="11sp"
+                android:textColor="#8A887D" />
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switchPanFullHighCap"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:checked="true"
+                android:text="@string/ui_pan_full_256_image_tokens" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/ui_on_default_10_15s_slower"
+                android:textSize="11sp"
+                android:textColor="#8A887D" />
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switchFieldCanvas"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:checked="false"
+                android:text="@string/ui_pan_full_minicpm_v_field" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/ui_cuts_the_pan_number_name"
+                android:textSize="11sp"
+                android:textColor="#8A887D" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnPick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_pick_image_or_pdf" />
+
+        <ImageView
+            android:id="@+id/imgPreview"
+            android:contentDescription="@string/preview_image"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_marginTop="12dp"
+            android:background="#FFFFFF"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvFileName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="12sp"
+            android:textColor="#54524A" />
+
+        <!-- Only shown for two-sided document types (e.g. tt_id), toggled in code. -->
+        <Button
+            android:id="@+id/btnPickBack"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:visibility="gone"
+            android:text="@string/ui_pick_back_side_image" />
+
+        <ImageView
+            android:id="@+id/imgPreviewBack"
+            android:contentDescription="@string/preview_back_image"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_marginTop="12dp"
+            android:background="#FFFFFF"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvFileNameBack"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="12sp"
+            android:textColor="#54524A" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnRun"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:enabled="false"
+                android:text="@string/ui_run_extraction" />
+
+            <Button
+                android:id="@+id/btnStop"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:backgroundTint="#C1392B"
+                android:textColor="#FFFFFF"
+                android:text="@string/ui_stop" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:indeterminate="true"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/statsCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="#FFFFFF"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/ui_live_on_device_stats"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#8A887D" />
+
+            <TextView
+                android:id="@+id/tvElapsed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F"
+                android:text="@string/ui_elapsed_0_0s" />
+
+            <TextView
+                android:id="@+id/tvRam"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F"
+                android:text="@string/ui_ram_mb" />
+
+            <TextView
+                android:id="@+id/tvCpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F"
+                android:text="@string/ui_cpu" />
+
+            <TextView
+                android:id="@+id/tvGpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:textColor="#17160F"
+                android:text="@string/ui_gpu" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/runInfoCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="#FFFFFF"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/ui_run_details"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#8A887D" />
+
+            <TextView
+                android:id="@+id/tvRunInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textSize="13sp"
+                android:fontFamily="monospace"
+                android:textIsSelectable="true"
+                android:textColor="#17160F" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/ui_output"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#8A887D" />
+
+        <TextView
+            android:id="@+id/tvOutput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="140dp"
+            android:layout_marginTop="6dp"
+            android:background="#FFFFFF"
+            android:padding="14dp"
+            android:textSize="14sp"
+            android:textIsSelectable="true"
+            android:textColor="#17160F"
+            android:text="@string/ui_nothing_run_yet" />
+
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,44 @@
+[
+  {
+    "name": "meghna_box_clean",
+    "prompt": "forceful",
+    "ground_truth": "6606 2751 1012",
+    "output": "Meghna Kumar reddy, 23/10/1997",
+    "latency_s": 51.5
+  },
+  {
+    "name": "meghna_box_clean",
+    "prompt": "short",
+    "ground_truth": "6606 2751 1012",
+    "output": "Meghna Kumar reddy, 23/10/1997, female",
+    "latency_s": 52.8
+  },
+  {
+    "name": "prakash_box_clean",
+    "prompt": "forceful",
+    "ground_truth": "Male",
+    "output": "The answer is 8538 7535 4900.",
+    "latency_s": 82.8
+  },
+  {
+    "name": "prakash_box_clean",
+    "prompt": "short",
+    "ground_truth": "Male",
+    "output": "This image displays a passport-style document from the Government of India, specifically detailing the personal information of Prakash Gopichand Rathod. The document includes his photograph, name, and contact details, along with a unique identification authority statement in Hindi.",
+    "latency_s": 81.8
+  },
+  {
+    "name": "sapna_box_clean",
+    "prompt": "forceful",
+    "ground_truth": "W/O: Ajit Kumar Bajaj, Ward No 01, ... Assam - 786001",
+    "output": "Sapna Bajaj",
+    "latency_s": 59.0
+  },
+  {
+    "name": "sapna_box_clean",
+    "prompt": "short",
+    "ground_truth": "W/O: Ajit Kumar Bajaj, Ward No 01, ... Assam - 786001",
+    "output": "W/O: Ajit Kumar Bajaj, Ward No 01, Seujpur, Gabhrupathar, OPP Tirupati Balaji Mandir, Dibrugahar West, Dibrughar, Assam - 786001",
+    "latency_s": 62.5
+  }
+]

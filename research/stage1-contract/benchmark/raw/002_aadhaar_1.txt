@@ -1,0 +1,1 @@
+{"aadhaar_number": "3824 8475 7759", "vid": "9127 9119 9150 8916", "name": null, "date_of_birth": "27/02/1997", "gender": null, "address": "Vachanambika D'O' Mallikarjee Hirethma Gaili, Bilateral Kamatakata, 5835282"}}

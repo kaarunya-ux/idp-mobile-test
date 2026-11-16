@@ -1,0 +1,20 @@
+0.00.010.167 I common_init_result: fitting params to device memory ...
+0.00.010.215 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.00.183.913 I common_params_fit_impl: projected to use 1200 MiB of host memory vs. 7437 MiB of total host memory
+0.01.980.245 I common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+0.05.773.548 I mtmd_cli_context: chat template example:
+<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+
+0.05.864.972 I main: loading model: visionpsy-nano-460m-flash-f16.gguf
+0.05.864.992 W WARN: This is an experimental CLI for testing multimodal capability.
+0.05.864.993 W       For normal use cases, please use the standard llama-cli
+
+The image is

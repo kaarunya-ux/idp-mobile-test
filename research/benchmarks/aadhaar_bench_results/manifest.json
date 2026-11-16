@@ -1,0 +1,140 @@
+[
+  {
+    "name": "meghna",
+    "field": "aadhaar_number",
+    "ground_truth": "6606 2751 1012",
+    "original_box": [
+      48,
+      210,
+      282,
+      240
+    ],
+    "distorted_box": [
+      122.5,
+      282.6,
+      358.9,
+      332.9
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/meghna_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/meghna_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/meghna_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/meghna_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "rameez",
+    "field": "date_of_birth",
+    "ground_truth": "12/07/2002",
+    "original_box": [
+      285,
+      1547,
+      580,
+      1578
+    ],
+    "distorted_box": [
+      439.2,
+      1591.7,
+      736.1,
+      1648.3
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/rameez_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/rameez_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/rameez_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/rameez_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "prakash",
+    "field": "gender",
+    "ground_truth": "Male",
+    "original_box": [
+      215,
+      230,
+      335,
+      262
+    ],
+    "distorted_box": [
+      222.9,
+      294.1,
+      346.7,
+      336.5
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/prakash_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/prakash_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/prakash_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/prakash_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "jasjot",
+    "field": "name",
+    "ground_truth": "Jasjot Singh",
+    "original_box": [
+      212,
+      229,
+      348,
+      271
+    ],
+    "distorted_box": [
+      219.7,
+      292.0,
+      361.0,
+      345.7
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/jasjot_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/jasjot_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/jasjot_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/jasjot_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "aditiya",
+    "field": "aadhaar_number",
+    "ground_truth": "3597 8269 8331",
+    "original_box": [
+      115,
+      202,
+      289,
+      230
+    ],
+    "distorted_box": [
+      186.2,
+      254.6,
+      362.9,
+      297.7
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/aditiya_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/aditiya_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/aditiya_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/aditiya_crop_distorted.jpg"
+    }
+  },
+  {
+    "name": "sapna",
+    "field": "address",
+    "ground_truth": "W/O: Ajit Kumar Bajaj, Ward No 01, Seujpur, Gabhrupathar, OPP Tirupati Balaji Mandir, Dibrugarh West, Dibrugarh, Assam - 786001",
+    "original_box": [
+      435,
+      90,
+      800,
+      150
+    ],
+    "distorted_box": [
+      484.6,
+      118.0,
+      855.4,
+      209.6
+    ],
+    "files": {
+      "box_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/sapna_box_clean.jpg",
+      "box_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/sapna_box_distorted.jpg",
+      "crop_clean": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/sapna_crop_clean.jpg",
+      "crop_distorted": "/tmp/claude-1000/-home-kaarunya-Downloads-model-testing/a3fe4a3c-8729-4801-a767-888ee316600c/scratchpad/aadhaar_bench/final/sapna_crop_distorted.jpg"
+    }
+  }
+]

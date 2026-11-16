@@ -1,0 +1,22 @@
+[
+  {
+    "schema": "fields",
+    "match": "Indian PAN card",
+    "answer": ["ABCPE1234F", "TEST PERSON", "TEST PARENT", "father", "01/01/1990"]
+  },
+  {
+    "schema": "fields",
+    "match": "Indian Aadhaar card",
+    "answer": ["XXXX XXXX 1234", "TEST PERSON", "01/01/1990", "F", "1 Test Street, Test Town, Test State 560001", "560001"]
+  },
+  {
+    "schema": "fields",
+    "match": "Indian driving licence",
+    "answer": ["KA01 20200000001", "TEST PERSON", "01/01/1990", "1 Test Street, Test Town 560001", "01/01/2020", "01/01/2040", null, "O+", "N", "MCWG, LMV"]
+  },
+  {
+    "schema": "field",
+    "match": "",
+    "answer": {"value": "TEST VALUE", "confidence": 0.8, "reason": "mock answer"}
+  }
+]

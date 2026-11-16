@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "document_type": { "const": "tt_id_front" },
+    "name": { "anyOf": [
+      { "type": "string", "pattern": "^[A-Za-z][A-Za-z .'-]{1,48}$" },
+      { "type": "null" } ] }
+  },
+  "required": ["document_type", "name"],
+  "additionalProperties": false
+}
