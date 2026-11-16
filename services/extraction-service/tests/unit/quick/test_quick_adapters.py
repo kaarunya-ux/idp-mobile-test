@@ -15,6 +15,8 @@ from PIL import Image
 from extraction.pipeline.domain.custom_template import CustomField, custom_template
 from extraction.pipeline.domain.exceptions import TooManyPagesError
 from extraction.pipeline.domain.jobs import ObjectRef
+from extraction.pipeline.domain.ports import AiCallContext, AiClassification
+from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.pipeline.infrastructure.ai.inline_images import BUCKET, InlineImages
 from extraction.quick.domain.exceptions import (
     AiLimitReachedError,
@@ -26,6 +28,7 @@ from extraction.quick.domain.models import QuickCaller, ReadBy, StagedFile, Tabl
 from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
 from extraction.quick.infrastructure.page_words import OcrPageWords
 from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner, quick_result
+from extraction.quick.infrastructure.templates import CatalogTemplates, GatewayTemplateClassifier
 from extraction.quick.infrastructure.workspace import MemoryWorkspace
 from idp_ocr_engines.model import OcrPage, PageImage
 from support.pipeline_fakes import RESULT, Pipeline
@@ -412,3 +415,45 @@ def test_sends_the_numbered_ocr_lines_and_returns_the_line_numbers_of_each_field
     assert (body["priority"], "pages" in body) == ("INTERACTIVE", False)
     assert [(f.key, f.lines, f.rows) for f in reading.fields] == [("name", (1,), None), ("items", (), (((2,), (3,)),))]
     assert reading.prompt_version == "generic-lines.v1"
+
+
+class _Catalog:
+    def __init__(self) -> None:
+        self.asked: list[tuple[UUID | None, str | None]] = []
+
+    def templates_for(self, account_id: UUID | None, template_id: str | None) -> Sequence[TemplateDefinition]:
+        self.asked.append((account_id, template_id))
+        return [custom_template([CustomField(key="a", label="A")])]
+
+
+class _Classifier:
+    def __init__(self) -> None:
+        self.calls: list[tuple[ObjectRef, Sequence[str], AiCallContext]] = []
+
+    def classify(self, page: ObjectRef, candidates: Sequence[str], context: AiCallContext) -> AiClassification:
+        self.calls.append((page, candidates, context))
+        return AiClassification(document_type="PAN_CARD", confidence=0.91, model_id="vl", prompt_version="v1")
+
+
+def test_lists_every_published_template_of_the_callers_account() -> None:
+    catalog = _Catalog()
+
+    found = CatalogTemplates(catalog).templates_for(CALLER)
+
+    assert (len(found), catalog.asked) == (1, [(CALLER.account_id, None)])
+
+
+def test_asks_the_ai_which_template_on_the_interactive_lane_for_the_callers_account() -> None:
+    classifier = _Classifier()
+
+    answer = GatewayTemplateClassifier(classifier).classify(CALLER, PAGES[0], ["PAN_CARD", "AADHAAR_CARD"])
+
+    assert answer == ("PAN_CARD", 0.91)
+    page, codes, context = classifier.calls[0]
+    assert (page.bucket, page.key, list(codes)) == (PAGES[0].bucket, PAGES[0].key, ["PAN_CARD", "AADHAAR_CARD"])
+    assert (context.interactive, context.priority, context.account_id, context.plan) == (
+        True,
+        True,
+        CALLER.account_id,
+        CALLER.plan,
+    )

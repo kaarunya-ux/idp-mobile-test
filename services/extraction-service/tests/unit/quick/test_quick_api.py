@@ -1,6 +1,7 @@
 """POST /api/v1/extract on the extraction-sync process over HTTP: multipart in, camelCase out, problem details for
 each failure, and "busy" at once when every synchronous slot is taken."""
 
+import json
 import threading
 from collections.abc import Sequence
 from uuid import UUID
@@ -423,12 +424,25 @@ def test_answers_the_generic_read_with_no_template_when_none_matches() -> None:
     assert (body["template"], body["readBy"]) == (None, "AI")
 
 
+def test_reads_a_blank_templates_field_as_none_sent() -> None:
+    response = _client(USER).post("/api/v1/extract/auto", files={"file": ("f.jpg", JPEG)}, data={"templates": ""})
+
+    assert (response.status_code, response.json()["template"]) == (200, None)
+
+
 @pytest.mark.parametrize(
     "templates",
     [
         "not json",
         '[{"id": "x", "name": "X", "fields": []}]',  # a template with no fields
         '[{"id": "x", "name": "X", "fields": [{"key": "a", "label": "A"}, {"key": "a", "label": "B"}]}]',
+        '{"id": "x"}',  # an object, not a list
+        '[{"id": "x", "name": "X", "fields": [{"key": "a", "label": "A"}], "owner": "y"}]',  # unknown part
+        '[{"id": "", "name": "X", "fields": [{"key": "a", "label": "A"}]}]',  # empty id
+        '[{"id": "x", "name": "' + "N" * 121 + '", "fields": [{"key": "a", "label": "A"}]}]',  # name too long
+        '[{"id": "x", "name": "X", "fields": [{"id": "f1", "key": "a", "label": "A"}, {"id": "f1", "key": "b", '
+        '"label": "B"}]}]',  # one id twice
+        json.dumps([{"id": f"t{n}", "name": "T", "fields": [{"key": "a", "label": "A"}]} for n in range(501)]),
     ],
 )
 def test_answers_400_when_the_templates_are_not_valid(templates: str) -> None:

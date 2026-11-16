@@ -24,18 +24,20 @@ class ServiceTokenError(RuntimeError):
 
 class ServiceTokenProvider:
     def __init__(
-        self, client: httpx.Client, settings: ServiceAuthSettings, monotonic: Callable[[], float] = time.monotonic
+        self, client: httpx.Client, settings: ServiceAuthSettings, clock: Callable[[], float] = time.time
     ) -> None:
         self._client = client
         self._settings = settings
-        self._monotonic = monotonic
+        # the wall clock, not time.monotonic: that one stops while the machine sleeps, so after a night asleep a
+        # token Keycloak expired hours ago still looked fresh and every first call got a 401
+        self._clock = clock
         self._lock = threading.Lock()
         self._token: str | None = None
         self._expires_at = 0.0
 
     def token(self) -> str:
         with self._lock:
-            if self._token is None or self._monotonic() >= self._expires_at:
+            if self._token is None or self._clock() >= self._expires_at:
                 self._token, self._expires_at = self._fetch()
             return self._token
 
@@ -59,4 +61,4 @@ class ServiceTokenProvider:
         except (httpx.HTTPError, ValueError, KeyError) as exc:
             log.warning("service_token_failed", error=type(exc).__name__)
             raise ServiceTokenError("no service token") from exc
-        return token, self._monotonic() + max(lifetime - _EARLY_S, 1.0)
+        return token, self._clock() + max(lifetime - _EARLY_S, 1.0)

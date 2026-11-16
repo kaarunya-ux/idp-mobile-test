@@ -178,3 +178,12 @@ def _read(*values: str | None) -> QuickResult:
 )
 def test_keeps_the_template_only_when_it_read_enough_of_its_fields(result: QuickResult, kept: bool) -> None:
     assert read_enough(result, 0.5) is kept
+
+
+def test_finds_a_users_template_by_labels_in_hindi() -> None:
+    hindi = users(UserTemplate(id="h1", name="परीक्षण पत्र", fields=(CustomField(key="name", label="नाम"),)))
+
+    found = by_keywords(scored([hindi], [_page("नाम परीक्षण व्यक्ति")]), MINIMUM)
+
+    assert found is not None
+    assert (found.candidate.id, type_code(hindi.name)) == ("h1", "custom")  # a code is ASCII: "custom" stands in

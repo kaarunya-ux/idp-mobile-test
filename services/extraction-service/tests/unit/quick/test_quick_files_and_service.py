@@ -436,3 +436,12 @@ def test_reads_the_generic_way_when_the_template_found_reads_next_to_nothing() -
 
     assert [t.document_type for t in pipeline.templates if t] == ["AADHAAR_CARD"]  # tried, then given up
     assert (found.match, found.result) == (None, BY_AI)
+
+
+def test_reads_the_generic_way_when_the_ai_asked_to_choose_cannot_answer() -> None:
+    pipeline, classifier = FakePipeline(BY_OCR), FakeClassifier(error=AiUnavailableError())
+
+    found = _auto(pipeline, AADHAAR_HINT, classifier).extract_auto(CALLER, JPEG, None, [])
+
+    assert len(classifier.asked) == 1  # there was evidence, so the AI was asked
+    assert (found.match, found.result, pipeline.templates) == (None, BY_AI, [])
