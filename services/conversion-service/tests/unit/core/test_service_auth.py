@@ -1,5 +1,8 @@
 """The service token for calls to ai-gateway (SEC-07): fetched with client credentials, cached, renewed."""
 
+import inspect
+import time
+
 import httpx
 import pytest
 from pydantic import SecretStr
@@ -53,3 +56,9 @@ def test_renews_the_token_shortly_before_it_expires_or_after_it_is_dropped() -> 
 def test_raises_a_token_error_when_keycloak_refuses() -> None:
     with pytest.raises(ServiceTokenError):
         _provider([], status=401).token()
+
+
+def test_counts_time_asleep_toward_the_tokens_expiry() -> None:
+    """The default clock is the wall clock: time.monotonic stops while the machine sleeps, so after a weekend asleep
+    a token Keycloak expired long ago looked fresh and the first call got a 401."""
+    assert inspect.signature(ServiceTokenProvider).parameters["clock"].default is time.time

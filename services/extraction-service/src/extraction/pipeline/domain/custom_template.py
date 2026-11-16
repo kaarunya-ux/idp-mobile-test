@@ -10,6 +10,7 @@ left empty.
 """
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -74,10 +75,23 @@ def label_pattern(label: str) -> str:
     """The label as printed, letter case and the separators between its words aside ("Date of birth:"). It must open
     its piece of text, as printed labels do: "Name" is not found inside "Father's Name", nor "Department" at the end
     of the title "INCOME TAX DEPARTMENT"."""
-    words = re.findall(r"[^\W_]+", label)
+    words = label_words(label)
     end = _LABEL_END.search(label.strip())
     after = f"(?:{re.escape(end.group())})?" if end else ""
     return r"(?i)^\W*" + _SEPARATORS.join(re.escape(word) for word in words) + r"(?![^\W_])" + after
+
+
+def label_words(label: str) -> list[str]:
+    """The label's words: letters and digits with the marks that belong to them. A vowel sign is a mark, not a
+    letter (the "ा" in "नाम"), so a regex word would cut a Hindi word in two."""
+    words, current = [], ""
+    for char in label:
+        if char.isalnum() or unicodedata.category(char).startswith("M"):
+            current += char
+        elif current:
+            words.append(current)
+            current = ""
+    return [*words, current] if current else words
 
 
 def _definition(found: CustomField) -> FieldDefinition:

@@ -706,3 +706,31 @@ fields; else the document is read the generic way and `template` is null. Costs 
 on such pages.
 
 **Check it:** `make check`: 850 unit tests pass, lint, types, import contracts.
+
+## Entry 29: Final quality pass before GitLab (2026-11-16)
+
+**What:** the whole of the three services checked against an edge-case, coverage, Sonar, dead-code and import
+checklist: `make check`, bandit, vulture, ruff with Sonar-like rules (complexity 15, f-strings in logs, mutable
+defaults, broad except, print, secrets), line and branch coverage, function and module length.
+
+**Found and fixed:**
+- **Hindi labels never matched** (`/extract/custom` and a user's template in `/extract/auto`): a label's words were
+  cut with a regex word (`[^\W_]+`), and a Devanagari vowel sign is a mark, not a word character, so "नाम" became
+  "न" + "म" with a separator required between them. Now `label_words` (in `custom_template`, shared by both) keeps the
+  marks with their letters. Proven against the old code: "नाम" and "जन्म तिथि" not found before, found after.
+- **A 401 after the laptop slept:** the service token's expiry was measured with `time.monotonic`, which stops while
+  the machine sleeps; a token Keycloak expired days ago looked fresh. Now the wall clock (`time.time`), in extraction
+  and conversion.
+- **`bootstrap.py` at 413 lines** (limit 400): the sync process's wiring moved to `quick_wiring.py`, as `api_wiring.py`
+  is for the API.
+- Missing tests: the template adapters (61% to 100%), the AI-unavailable branch of auto detection, and the
+  `templates` field's edge cases (not a list, unknown part, empty id, name too long, an id twice, over 500; blank
+  means none sent).
+
+**Reviewed, kept:** bandit's subprocess, `/tmp` pipe, XML and "password" findings (fixed LibreOffice command without a
+shell; LibreOffice's own pipe; XML only written; an error code); vulture's unused names (type-only imports,
+`__exit__` and Celery signatures, test fakes matching their interface); five `except Exception` at message
+boundaries, each retrying or recording the failure.
+
+**Check it:** `make check`: extraction 868 passed, ai-gateway 201, conversion 633 (the one failure is the Hindi font
+test: the laptop has no Devanagari font, the image has 72).

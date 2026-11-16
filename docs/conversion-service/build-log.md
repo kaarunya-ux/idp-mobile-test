@@ -1339,3 +1339,12 @@ files. No new dependency; no model call.
 
 **Check it:** `make check`: 632 tests pass (12 new); the one failure is the Hindi-font test, failing the same way on
 the base branch (this laptop's LibreOffice and fonts). Lint, types, import contracts.
+
+## Entry 23: Service token expiry counts time asleep (2026-11-16)
+
+**What:** `ServiceTokenProvider` measures the token's expiry with the wall clock (`time.time`), not `time.monotonic`,
+which stops while the machine sleeps: after a weekend asleep, a token Keycloak had expired still looked fresh and the
+first call to ai-gateway got a 401. A test pins the default clock. Found in the final quality pass (extraction build
+log, entry 29), where bandit, vulture and the Sonar-like rules found nothing else to change here.
+
+**Check it:** `make check`: 633 passed; the one failure is the Hindi font test (no Devanagari font on the laptop).

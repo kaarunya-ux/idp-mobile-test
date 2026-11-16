@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from extraction.pipeline.domain.classify import classify_page
-from extraction.pipeline.domain.custom_template import CustomField, custom_template
+from extraction.pipeline.domain.custom_template import CustomField, custom_template, label_words
 from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.domain.models import QuickResult
 from idp_ocr_engines.model import OcrPage
@@ -80,8 +80,7 @@ def users(found: UserTemplate) -> Candidate:
 
 def label_keyword(label: str) -> str:
     """A label as a keyword: its words in order, case and the separators between them aside, as whole words."""
-    words = re.findall(r"[^\W_]+", label)
-    return r"(?<![^\W_])" + _SEPARATORS.join(re.escape(word) for word in words) + r"(?![^\W_])"
+    return r"(?<![^\W_])" + _SEPARATORS.join(re.escape(word) for word in label_words(label)) + r"(?![^\W_])"
 
 
 def scored(candidates: Sequence[Candidate], pages: Sequence[OcrPage]) -> list[tuple[float, Candidate]]:

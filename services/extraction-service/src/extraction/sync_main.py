@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from prometheus_client import make_asgi_app
 
 from extraction import health
-from extraction.bootstrap import build_quick_extract, build_session_factory
+from extraction.bootstrap import build_session_factory
 from extraction.core.build_info import build_stamp
 from extraction.core.clock import Clock, SystemClock
 from extraction.core.config import Settings, get_settings
@@ -23,6 +23,7 @@ from extraction.core.problem_details import register_exception_handlers
 from extraction.core.security import TokenVerifier
 from extraction.quick.api import routes as quick_routes
 from extraction.quick.application.quick_extract import QuickExtractService
+from extraction.quick_wiring import build_quick_extract
 
 log = structlog.get_logger(__name__)
 

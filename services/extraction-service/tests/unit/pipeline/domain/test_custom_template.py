@@ -34,6 +34,9 @@ def word(text: str, x: float, y: float, width: float = 0.2) -> OcrWord:
         ("Card No", "Card No.: 123", True),
         ("Card No", "Card Number", False),
         ("USCIS#", "USCIS#", True),
+        ("नाम", "नाम: परीक्षण", True),  # Hindi: the vowel sign belongs to its word
+        ("जन्म तिथि", "जन्म तिथि / DOB", True),
+        ("नाम", "पिता का नाम", False),
     ],
 )
 def test_finds_a_label_only_where_it_opens_a_piece_of_text(label: str, text: str, found: bool) -> None:
