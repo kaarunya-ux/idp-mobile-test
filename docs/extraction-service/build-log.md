@@ -673,3 +673,36 @@ words, without a label printed on the same line, with its box and OCR's mean con
 OCR text: read as a picture. Local stack: `QUICK_GENERIC_MODE` in `.env`.
 
 **Check it:** `make check`: 814 unit tests pass (12 new for this entry), lint, types, import contracts.
+
+## Entry 28: Auto extraction finds the document's template, ours or the user's (2026-11-13)
+
+**Why:** in the generic section, a document we or the user have a template for should be read with it. The user's
+templates live with the backend, which alone decides which a user may use (ADR 0016).
+
+**What:** `POST /api/v1/extract/auto` (`file`, `back`, `templates`). `TemplateMatcher` (quick/application) builds the
+candidates (ours from the catalog, now with each template's name; the user's built as custom templates whose keywords
+are their labels, `quick/domain/detection.py`), scores them on engine A's reading of the uploaded pages, and asks
+ai-gateway's `classify` only when no score reaches `QUICK__DETECT_MIN_CONFIDENCE` (0.85), offering the 50 best-scoring
+candidates as unique document type codes (classify accepts only codes, at most 50: names were refused with 400 in the
+first live run).
+`QuickExtractService.extract_auto` reads the document with the winner (the user's field ids sent back), or the generic
+way. A detect-only route and a `templateId` on `/extract`, built first, were dropped for this one call.
+
+Aadhaar template version 4: its keywords are what every card prints in English, the issuer's spellings in one
+keyword (`aadhaar|uidai|unique identification authority`): the test card, which prints the authority in full and no
+"Aadhaar", scored 3 of 5 keywords (60%) and now scores 4 of 4.
+
+Second live run: with no user template, the Jamaican ID went to classify, and the 4B named it an Aadhaar card, 90%
+sure. The AI is now offered only candidates with evidence on the page (their minimum of keywords found); with none, it
+is not asked and the document is read the generic way. 150 user templates sent with a card added no measurable time
+(PAN 1.9 s, Aadhaar 1.9 s, DL 2.6 s, each found among them).
+
+**Check it:** `make check`: 845 unit tests pass, lint, types, import contracts.
+
+**Fix: a wrong template no longer swallows the document.** The frontend sent an image no template fits: the AI named
+our PAN card for it (its only sign was "GOVT", one of PAN's keywords), the PAN read found nothing, and that empty read
+went back instead of the generic one. Now the template found must read at least `QUICK__DETECT_MIN_FILLED` (0.5) of its
+fields; else the document is read the generic way and `template` is null. Costs a wasted template read (seconds) only
+on such pages.
+
+**Check it:** `make check`: 850 unit tests pass, lint, types, import contracts.

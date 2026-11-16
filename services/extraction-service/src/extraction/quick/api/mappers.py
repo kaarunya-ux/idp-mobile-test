@@ -6,13 +6,17 @@ from pydantic import TypeAdapter, ValidationError
 
 from extraction.pipeline.domain.custom_template import CustomField, CustomType
 from extraction.quick.api.schemas import (
+    AutoExtractResponse,
+    AutoTemplateBody,
     CustomBoxBody,
     CustomFieldBody,
     ExtractedFieldBody,
     FieldBoxBody,
     QuickExtractResponse,
     TableBody,
+    UserTemplateBody,
 )
+from extraction.quick.domain.detection import AutoResult, UserTemplate
 from extraction.quick.domain.exceptions import FieldsInvalidError
 from extraction.quick.domain.models import QuickResult, Table
 from extraction.quick.domain.placed import PlacedBox
@@ -47,6 +51,23 @@ def to_response(result: QuickResult, ids: Mapping[str, str] | None = None) -> Qu
     )
 
 
+def to_auto_response(auto: AutoResult) -> AutoExtractResponse:
+    """The extract's answer with the template it was read with; the user's template's field ids go back as sent."""
+    found = auto.match
+    body = to_response(auto.result, found.candidate.field_ids if found else None)
+    template = (
+        AutoTemplateBody(
+            id=found.candidate.id,
+            name=found.candidate.name,
+            confidence=found.confidence,
+            detected_by=found.detected_by.value,
+        )
+        if found
+        else None
+    )
+    return AutoExtractResponse(**body.model_dump(), template=template)
+
+
 _FIELDS = TypeAdapter(list[CustomFieldBody])
 
 
@@ -61,6 +82,36 @@ def custom_fields(raw: str) -> tuple[list[CustomField], dict[str, str]]:
             "date or number, box {page: 1, x, y, w, h} in percent of the page."
         )
         raise FieldsInvalidError(message) from exc
+    return _keys(bodies)
+
+
+_TEMPLATES = TypeAdapter(list[UserTemplateBody])
+_MAX_TEMPLATES = 500
+
+
+def user_templates(raw: str) -> list[UserTemplate]:
+    """The ``templates`` part of /extract/auto: a JSON list of ``{id, name, fields}``, fields as on /extract/custom.
+    Raises ``FieldsInvalidError`` when it isn't one."""
+    try:
+        bodies = _TEMPLATES.validate_json(raw)
+    except ValidationError as exc:
+        message = (
+            "templates must be a JSON list of {id, name, fields}, each field {id, key, label, type, box} as on "
+            "/extract/custom."
+        )
+        raise FieldsInvalidError(message) from exc
+    if len(bodies) > _MAX_TEMPLATES:
+        raise FieldsInvalidError(f"Send at most {_MAX_TEMPLATES} templates.")
+    found = []
+    for body in bodies:
+        keys, ids = _keys(body.fields)
+        if len({k.key for k in keys}) != len(keys):
+            raise FieldsInvalidError(f"Template {body.id}: each key once.")
+        found.append(UserTemplate(id=body.id, name=body.name, fields=tuple(keys), field_ids=ids))
+    return found
+
+
+def _keys(bodies: list[CustomFieldBody]) -> tuple[list[CustomField], dict[str, str]]:
     ids = {b.key: b.id for b in bodies if b.id is not None}
     if len(set(ids.values())) != len(ids):
         raise FieldsInvalidError("Each id may be used only once.")

@@ -45,6 +45,21 @@ class DocumentPipelinePort(Protocol):
         ...
 
 
+class TemplateListPort(Protocol):
+    """The published templates the caller's account may use: the standard ones and its own (own first)."""
+
+    def templates_for(self, caller: QuickCaller) -> Sequence[TemplateDefinition]: ...
+
+
+class TemplateClassifierPort(Protocol):
+    """ai-gateway's ``classify``: which of the document type codes (``AADHAAR_CARD``) a page shows, and how sure."""
+
+    def classify(self, caller: QuickCaller, page: StagedFile, codes: Sequence[str]) -> tuple[str | None, float]:
+        """One of ``codes`` (50 at most), or None when it is none of them. Raises ``AiUnavailableError`` when the
+        model can't answer."""
+        ...
+
+
 class PageWordsPort(Protocol):
     """OCR on the uploaded pages as they are (not cut, split or turned), for placing the generic read's values."""
 

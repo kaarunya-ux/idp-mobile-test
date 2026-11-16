@@ -142,3 +142,4 @@ class TemplateDefinition:
     min_keyword_hits: int
     anchors: tuple[Anchor, ...]
     fields: tuple[FieldDefinition, ...]
+    name: str = ""  # as people know it ("PAN card"); from the template's row, empty for a template built in code

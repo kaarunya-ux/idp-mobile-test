@@ -51,6 +51,19 @@ class QuickExtractResponse(_Body):
     prompt_version: str | None
 
 
+class AutoTemplateBody(_Body):
+    id: str = Field(description="the template's id: the backend's for a user's template, ours for a standard one")
+    name: str = Field(description="e.g. 'Aadhaar card', or the user's name for the template")
+    confidence: float = Field(description="0 to 1, at least the detection threshold (0.85)")
+    detected_by: Literal["KEYWORDS", "AI"] = Field(description="its labels or keywords on the page, or the AI")
+
+
+class AutoExtractResponse(QuickExtractResponse):
+    """The extract's answer, and the template the document was read with; null when none matched (generic read)."""
+
+    template: AutoTemplateBody | None
+
+
 class CustomBoxBody(BaseModel):
     """Where the user drew the box around the value on the sample: percent of the page (0 to 100), its top-left
     corner and its size, as the template designer stores it."""
@@ -83,3 +96,13 @@ class CustomFieldBody(BaseModel):
     label: str = Field(min_length=1, max_length=120, description="as printed on the document, e.g. 'Card No'")
     type: Literal["text", "date", "number"] = "text"
     box: CustomBoxBody | None = Field(None, description="drawn around the value; without it, found by its label")
+
+
+class UserTemplateBody(BaseModel):
+    """One of the user's templates, as the backend sends it to /extract/auto: its fields as on /extract/custom."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=120)
+    fields: list[CustomFieldBody] = Field(min_length=1, max_length=50)

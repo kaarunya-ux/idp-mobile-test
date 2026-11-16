@@ -13,8 +13,10 @@ from extraction.core.config import Settings
 from extraction.core.errors import UnauthenticatedError
 from extraction.core.permissions import DOCUMENT_WRITE
 from extraction.core.security import Principal
+from extraction.pipeline.domain.standard_templates import STANDARD_TEMPLATES
 from extraction.pipeline.domain.template import TemplateDefinition
 from extraction.quick.application.quick_extract import QuickExtractService
+from extraction.quick.application.template_matcher import TemplateMatcher
 from extraction.quick.domain.exceptions import BusyError
 from extraction.quick.domain.models import (
     ExtractedField,
@@ -104,6 +106,23 @@ class _Words:
         return [OcrPage(width=1000, height=600, words=(word, word2))]
 
 
+class _Templates:
+    def templates_for(self, caller: QuickCaller) -> Sequence[TemplateDefinition]:
+        return STANDARD_TEMPLATES
+
+
+class _PanWords:
+    """A PAN card's printed words, for detection."""
+
+    def read_words(self, contents: Sequence[bytes]) -> Sequence[OcrPage]:
+        texts = ["INCOME", "TAX", "GOVT.", "Permanent", "Account"]
+        words = tuple(
+            OcrWord(text=t, box=Box(x=0.1 * i, y=0.1, width=0.08, height=0.05), confidence=0.9, line_id=0, block_id=0)
+            for i, t in enumerate(texts)
+        )
+        return [OcrPage(width=1000, height=630, words=words)]
+
+
 class _Verifier:
     """Accepts ``GOOD_TOKEN`` as ``principal``; anything else is not signed in."""
 
@@ -124,13 +143,15 @@ def _client(
     max_file: int = 1000,
     max_concurrent: int = 2,
     tokenless: bool = False,
+    words: "_Words | _PanWords | None" = None,
 ) -> TestClient:
     service = QuickExtractService(
         workspace=_Workspace(),
         pipeline=pipeline or _Pipeline(),
         reader=reader or _Reader(),
-        words=_Words(),
+        words=words or _Words(),
         limits=UploadLimits(max_file_bytes=max_file, max_total_bytes=1500),
+        matcher=TemplateMatcher(templates=_Templates(), classifier=None, minimum=0.85, min_filled=0.5),
     )
     quick = {"max_concurrent": max_concurrent} | (
         {"require_token": False, "default_account_id": str(TEST_ACCOUNT)} if tokenless else {}
@@ -362,3 +383,57 @@ def test_answers_400_on_the_custom_route_when_the_fields_are_not_valid(fields: s
 
 def test_answers_400_on_the_custom_route_without_fields() -> None:
     assert _client(USER).post("/api/v1/extract/custom", files={"file": ("f.jpg", JPEG)}).status_code == 400
+
+
+def test_finds_the_template_and_answers_its_fields_with_it() -> None:
+    pipeline = _Pipeline()
+
+    body = (
+        _client(USER, pipeline=pipeline, words=_PanWords())
+        .post("/api/v1/extract/auto", files={"file": ("f.jpg", JPEG)}, data={"templates": "[]"})
+        .json()
+    )
+
+    pan = next(t for t in STANDARD_TEMPLATES if t.document_type == "PAN_CARD")
+    assert body["template"] == {"id": pan.template_id, "name": "Pan card", "confidence": 1.0, "detectedBy": "KEYWORDS"}
+    assert [t.document_type for t in pipeline.templates if t] == ["PAN_CARD"]
+    assert body["fields"][0]["key"] == "name"  # the extract's answer, as on /extract
+
+
+def test_reads_with_the_users_template_and_sends_back_its_field_ids() -> None:
+    templates = (
+        '[{"id": "backend-7", "name": "Green Card", "fields": ['
+        '{"id": "f-name", "key": "name", "label": "INCOME TAX"}, {"id": "f-items", "key": "items", "label": "GOVT"}]}]'
+    )
+
+    body = (
+        _client(USER, words=_PanWords())
+        .post("/api/v1/extract/auto", files={"file": ("f.jpg", JPEG)}, data={"templates": templates})
+        .json()
+    )
+
+    assert body["template"]["id"] == "backend-7"  # a tie with our PAN card: the user's own wins
+    assert body["documentType"] == "green_card"
+    assert [(f["id"], f["key"]) for f in body["fields"]] == [("f-name", "name"), ("f-items", "items")]
+
+
+def test_answers_the_generic_read_with_no_template_when_none_matches() -> None:
+    body = _client(USER).post("/api/v1/extract/auto", files={"file": ("f.jpg", JPEG)}).json()
+
+    assert (body["template"], body["readBy"]) == (None, "AI")
+
+
+@pytest.mark.parametrize(
+    "templates",
+    [
+        "not json",
+        '[{"id": "x", "name": "X", "fields": []}]',  # a template with no fields
+        '[{"id": "x", "name": "X", "fields": [{"key": "a", "label": "A"}, {"key": "a", "label": "B"}]}]',
+    ],
+)
+def test_answers_400_when_the_templates_are_not_valid(templates: str) -> None:
+    response = _client(USER).post(
+        "/api/v1/extract/auto", files={"file": ("f.jpg", JPEG)}, data={"templates": templates}
+    )
+
+    assert (response.status_code, response.json()["code"]) == (400, "EXT-400-VALIDATION-001")

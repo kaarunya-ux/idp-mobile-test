@@ -111,14 +111,22 @@ _NAME_ACCEPT_ADDRESS = Accept(mode=AcceptMode.SIMILARITY)
 
 # Version 2: English only (the Hindi name and address are not extracted: the product reads English for now)
 # Version 3: a name, pincode or address only the AI read is NEEDS_REVIEW (ai_needs_review)
+# Version 4: each keyword is something every card prints in English; the issuer's three spellings are one keyword
+# (cards print "Unique Identification Authority of India" in full, often without "Aadhaar" or "UIDAI" in English),
+# so /extract/auto's share of keywords found reaches its threshold on a plain card (ADR 0016)
 AADHAAR_CARD = TemplateDefinition(
     template_id="standard-aadhaar-card",
-    version=3,
+    version=4,
     scope="STANDARD",
     document_type="AADHAAR_CARD",
     aspect_ratio=1.586,
     aspect_tolerance=0.45,
-    keywords=(r"government\s*of\s*india", r"aadhaar", r"uidai", r"\bdob\b", r"[0-9]{4}\s[0-9]{4}\s[0-9]{4}"),
+    keywords=(
+        r"government\s*of\s*india",
+        r"aadhaar|uidai|unique\s*identification\s*authority",
+        r"\bdob\b|date\s*of\s*birth|year\s*of\s*birth",
+        r"[0-9]{4}\s[0-9]{4}\s[0-9]{4}",
+    ),
     min_keyword_hits=2,
     anchors=(),
     fields=(

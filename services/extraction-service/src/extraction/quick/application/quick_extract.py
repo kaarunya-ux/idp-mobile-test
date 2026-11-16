@@ -14,12 +14,19 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 from extraction.pipeline.domain.custom_template import MAX_FIELDS, CustomField, custom_template
+from extraction.quick.application.template_matcher import TemplateMatcher
+from extraction.quick.domain.detection import AutoResult, Match, UserTemplate, type_code
 from extraction.quick.domain.exceptions import FieldsInvalidError
 from extraction.quick.domain.files import check_uploads
 from extraction.quick.domain.lines import number_lines, result_from_lines
 from extraction.quick.domain.locate import place_fields
 from extraction.quick.domain.models import GenericMode, QuickCaller, QuickResult, StagedFile, UploadLimits
-from extraction.quick.domain.ports import DocumentPipelinePort, DocumentReaderPort, PageWordsPort, WorkspacePort
+from extraction.quick.domain.ports import (
+    DocumentPipelinePort,
+    DocumentReaderPort,
+    PageWordsPort,
+    WorkspacePort,
+)
 from idp_ocr_engines.errors import OcrEngineError
 
 
@@ -33,12 +40,14 @@ class QuickExtractService:
         words: PageWordsPort,
         limits: UploadLimits,
         generic_mode: GenericMode = GenericMode.PICTURE,
+        matcher: TemplateMatcher | None = None,
     ) -> None:
         self._workspace = workspace
         self._pipeline = pipeline
         self._reader = reader
         self._words = words
         self._generic_mode = generic_mode
+        self._matcher = matcher  # /extract/auto (ADR 0016); None: every document is read the generic way
         self._limits = limits
 
     @property
@@ -54,11 +63,50 @@ class QuickExtractService:
             outcome = self._pipeline.run(caller, contents, folder)
             if outcome.result is not None:
                 return outcome.result
-            return self._generic(
-                caller, contents, outcome.pages[:2], folder
-            )  # a card's front and back, or a PDF's first two
+            return self._generic(caller, contents, outcome.pages[:2], folder)  # a card's two sides, a PDF's first two
         finally:
             self._workspace.discard(folder)
+
+    def extract_auto(
+        self, caller: QuickCaller, front: bytes, back: bytes | None, sent: Sequence[UserTemplate]
+    ) -> AutoResult:
+        """The template the document is, ours or one of the user's (ADR 0016), and the document read with it; the
+        generic read when none is found."""
+        check_uploads(front, back, self._limits)
+        folder = self._workspace.open(caller)
+        try:
+            contents = [front] if back is None else [front, back]
+            found = self._found(caller, contents, sent, folder)
+            if found is None:
+                return AutoResult(result=self._generic(caller, contents, self._staged(contents, folder), folder))
+            outcome = self._pipeline.run(caller, contents, folder, found.candidate.template)
+            # None doesn't happen (the template is named); a read of next to nothing: not that document after all
+            if outcome.result is None or (self._matcher is not None and not self._matcher.confirmed(outcome.result)):
+                return AutoResult(result=self._generic(caller, contents, self._generic_pages(outcome.pages), folder))
+            result = outcome.result
+            if found.candidate.own:  # a custom template's type is "custom": the user's name for it says more
+                result = replace(result, document_type=type_code(found.candidate.name))
+            return AutoResult(result=result, match=found)
+        finally:
+            self._workspace.discard(folder)
+
+    def _found(
+        self, caller: QuickCaller, contents: Sequence[bytes], sent: Sequence[UserTemplate], folder: str
+    ) -> Match | None:
+        if self._matcher is None:
+            return None
+        candidates = self._matcher.candidates(caller, sent)
+        return self._matcher.match(
+            caller, candidates, self._words.read_words(contents), lambda: self._pipeline.stage(contents, folder)[0]
+        )
+
+    def _staged(self, contents: Sequence[bytes], folder: str) -> Sequence[StagedFile]:
+        """The pages for the generic read: none in lines mode, which sends OCR's lines instead of pictures."""
+        return () if self._generic_mode is GenericMode.LINES else self._pipeline.stage(contents, folder)[:2]
+
+    def _generic_pages(self, staged: Sequence[StagedFile]) -> Sequence[StagedFile]:
+        """The pages already staged, as the generic read takes them: none in lines mode."""
+        return () if self._generic_mode is GenericMode.LINES else staged[:2]
 
     def extract_custom(
         self, caller: QuickCaller, front: bytes, back: bytes | None, fields: Sequence[CustomField]
