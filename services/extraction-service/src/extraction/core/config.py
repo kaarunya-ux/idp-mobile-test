@@ -220,6 +220,11 @@ class QuickExtractSettings(BaseModel):
     # ADR 0015: how the generic read works. "picture": the model reads the page image and writes every value.
     # "lines": OCR reads the lines and the model only names which lines hold which field (faster, OCR's exact text)
     generic_mode: Literal["picture", "lines"] = "picture"
+    # ADR 0016: /extract/detect names a template only when its keywords, or else the AI, reach this confidence
+    detect_min_confidence: float = Field(0.85, ge=0, le=1)
+    # ADR 0016: /extract/auto keeps the template it found only when that read at least this share of its fields;
+    # else the page wasn't that document after all and gets the generic read
+    detect_min_filled: float = Field(0.5, ge=0, le=1)
     # ADR 0011: false lets a request without a token in, counted on this account and plan (integration testing, where
     # the callers have no login yet). A request that does send a token is still checked
     require_token: bool = True

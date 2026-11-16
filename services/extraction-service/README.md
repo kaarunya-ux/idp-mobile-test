@@ -146,7 +146,7 @@ manages standard templates). Errors are RFC 9457 problem details.
 Multipart `file` (one PDF of at most 2 pages, or the front JPG/PNG/WebP) and optional `back`. The same pipeline as a job:
 the quality gate, both OCR engines, the template's fields; each field they leave unsure is cut out and read alone by
 the AI through ai-gateway's INTERACTIVE lane. A document no template matches goes to ai-gateway's `generic-read`.
-`POST /api/v1/extract/custom` reads **a user's own template**: the same `file` and `back`, plus `fields`, a JSON list of
+`POST /api/v1/extract/auto` takes the same `file` and `back` plus `templates`, the user's templates the backend allows (`{id, name, fields}`, fields as on `/extract/custom`): it finds the document's template among those and ours, by keywords or labels, else the AI, at 0.85 or more, reads the document with it, and answers the extract's answer plus `template{id, name, confidence, detectedBy}` (null: read the generic way; ADR 0016). `POST /api/v1/extract/custom` reads **a user's own template**: the same `file` and `back`, plus `fields`, a JSON list of
 `{id, key, label, type, box}` (`id` and `box` optional, type `text`, `date` or `number`, 1 to 50 keys); each key is read
 by its printed label or inside its box, OCR first, the AI for what OCR leaves unsure, and only those keys come back,
 each with the `id` it was sent with (ADR 0013). No storage is used: pages and crops stay in memory for the request and go inside the ai-gateway calls that need them (ADR 0012). `POST /api/v1/extract/generic` takes the same and sends the document **straight to the model** (no

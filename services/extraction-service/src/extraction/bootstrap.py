@@ -61,10 +61,12 @@ from extraction.pipeline.infrastructure.quality.page_loader import DocumentPageL
 from extraction.pipeline.infrastructure.storage.s3_storage import S3ObjectStorage
 from extraction.pipeline.infrastructure.tasks import CeleryTaskQueue, WorkerServices
 from extraction.quick.application.quick_extract import QuickExtractService
+from extraction.quick.application.template_matcher import TemplateMatcher
 from extraction.quick.domain.models import GenericMode, UploadLimits
 from extraction.quick.infrastructure.gateway_reader import GatewayDocumentReader
 from extraction.quick.infrastructure.page_words import OcrPageWords
 from extraction.quick.infrastructure.pipeline_runner import PipelineDocumentRunner
+from extraction.quick.infrastructure.templates import CatalogTemplates, GatewayTemplateClassifier
 from extraction.quick.infrastructure.workspace import MemoryWorkspace
 from extraction.template.domain.definition_json import parse_definition
 from idp_ocr_engines import ModelRegistry, RuntimeLimits
@@ -346,9 +348,10 @@ def build_worker_services(settings: Settings, sessions: SessionFactory) -> Worke
 
 
 def build_quick_extract(settings: Settings, sessions: SessionFactory) -> QuickExtractService:
-    """The synchronous extract (ADR 0009), for the ``extraction-sync`` process: the pipeline with its OCR engines
-    (loaded here, once), and ai-gateway for the crops and the generic read. No storage (ADR 0012): the request's pages
-    and crops are held in memory and sent inside the gateway calls."""
+    """The synchronous extract (ADR 0009), with template detection for ``/extract/auto`` (ADR 0016), for the
+    ``extraction-sync`` process: the pipeline with its OCR engines (loaded here, once), and ai-gateway for the crops,
+    the generic read and classify. No storage (ADR 0012): the request's pages and crops are held in memory and sent
+    inside the gateway calls."""
     gateway = settings.ai_gateway
     if gateway.url is None:
         raise MissingSettingsError("extraction-sync needs AI_GATEWAY__URL")
@@ -359,6 +362,7 @@ def build_quick_extract(settings: Settings, sessions: SessionFactory) -> QuickEx
     seconds = settings.quick.timeout.total_seconds()
     client = httpx.Client(base_url=str(gateway.url).rstrip("/"), timeout=httpx.Timeout(seconds, connect=2.0))
     quick = settings.quick
+    classifier = GatewayTemplateClassifier(GatewayClassifier(pipeline.gateway)) if pipeline.gateway else None
     return QuickExtractService(
         workspace=MemoryWorkspace(inline),
         pipeline=PipelineDocumentRunner(
@@ -368,6 +372,12 @@ def build_quick_extract(settings: Settings, sessions: SessionFactory) -> QuickEx
         words=OcrPageWords(pipeline.loader, pipeline.sample_engine),
         generic_mode=GenericMode(quick.generic_mode),
         limits=UploadLimits(max_file_bytes=int(quick.max_file_size), max_total_bytes=int(quick.max_total_size)),
+        matcher=TemplateMatcher(
+            templates=CatalogTemplates(pipeline.catalog),
+            classifier=classifier,
+            minimum=quick.detect_min_confidence,
+            min_filled=quick.detect_min_filled,
+        ),
     )
 
 

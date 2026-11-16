@@ -7,6 +7,7 @@ yet (before ``python -m extraction.seed`` has run), the standard templates in co
 
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from uuid import UUID
 
 import structlog
@@ -43,7 +44,13 @@ class SqlTemplateCatalog:
             return cached[1]
         with self._sessions() as session:
             rows = session.execute(
-                select(TemplateOrm.id, TemplateOrm.account_id, TemplateVersionOrm.number, TemplateVersionOrm.definition)
+                select(
+                    TemplateOrm.id,
+                    TemplateOrm.account_id,
+                    TemplateVersionOrm.number,
+                    TemplateVersionOrm.definition,
+                    TemplateOrm.name,
+                )
                 .join(TemplateVersionOrm, TemplateVersionOrm.template_id == TemplateOrm.id)
                 .where(
                     TemplateOrm.status == "ACTIVE",
@@ -58,15 +65,16 @@ class SqlTemplateCatalog:
 
 
 def _parse(
-    template_id: UUID, account_id: UUID | None, number: int, definition: dict[str, object]
+    template_id: UUID, account_id: UUID | None, number: int, definition: dict[str, object], name: str
 ) -> TemplateDefinition | None:
     try:
-        return parse_definition(
+        parsed = parse_definition(
             definition,
             template_id=str(template_id),
             version=number,
             scope="STANDARD" if account_id is None else "ACCOUNT",
         )
+        return replace(parsed, name=name)
     except DefinitionInvalidError:  # stored before a rule tightened: skip it rather than fail every job
         log.error("template_definition_unreadable", template_id=str(template_id), version=number)
         return None

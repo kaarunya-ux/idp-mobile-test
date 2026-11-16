@@ -163,6 +163,8 @@ services:
       MODEL__SMART_MODEL: ${MODEL_NAME:-smart}
       MODEL__AUTO_MODEL: ${MODEL_NAME:-auto}
       MODEL__SEND_SCHEMA: ${MODEL_SEND_SCHEMA:-true}
+      # How long the generic read may take (ISO 8601: PT40S); a slower or shared model (one 35B for every task) needs more
+      MODEL__TIMEOUTS__GENERIC_READ: ${GENERIC_READ_TIMEOUT:-PT40S}
       # Conversion's page reading on its own (larger) model server; empty: the main model (ai-gateway ADR 0005)
       MODEL__PAGE__BASE_URL: ${PAGE_MODEL_URL:-}
       MODEL__PAGE__MODEL: ${PAGE_MODEL_NAME:-page}

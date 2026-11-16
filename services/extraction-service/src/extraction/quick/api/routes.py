@@ -28,7 +28,7 @@ from extraction.core.errors import PermissionDeniedError, UnauthenticatedError
 from extraction.core.permissions import Plan
 from extraction.core.security import TokenVerifier, bearer, provide_token_verifier
 from extraction.quick.api import mappers
-from extraction.quick.api.schemas import QuickExtractResponse
+from extraction.quick.api.schemas import AutoExtractResponse, QuickExtractResponse
 from extraction.quick.application.quick_extract import QuickExtractService
 from extraction.quick.domain.exceptions import BusyError, NoAccountError
 from extraction.quick.domain.models import QuickCaller
@@ -113,6 +113,34 @@ async def extract(
     async with admission.enter():
         result = await asyncio.to_thread(service.extract, caller, front, rear)  # OCR is CPU work (ASY-01)
     return mappers.to_response(result)
+
+
+@router.post(
+    "/extract/auto",
+    summary="Find the document's template (ours or the user's) and extract with it; generic when none matches",
+    response_model=AutoExtractResponse,
+    responses=_ERRORS,
+)
+async def extract_auto(
+    caller: Caller,
+    service: QuickExtract,
+    admission: Admitted,
+    file: Annotated[UploadFile, File(description="One PDF, or the front picture (JPG, PNG or WebP)")],
+    back: Annotated[UploadFile | None, File(description="Optional: the back picture of the same document")] = None,
+    templates: Annotated[
+        str,
+        Form(
+            description='JSON list of the templates this user may use: [{"id": "...", "name": "Green card", "fields":'
+            ' [{"id": "f1", "key": "surname", "label": "Surname", "type": "text", "box": {...}}]}]; fields as on'
+            " /extract/custom. Our standard templates are always candidates too. [] for none"
+        ),
+    ] = "[]",
+) -> AutoExtractResponse:
+    sent = mappers.user_templates(templates)
+    front, rear = await _read(service, file, back)
+    async with admission.enter():
+        found = await asyncio.to_thread(service.extract_auto, caller, front, rear, sent)  # OCR is CPU work
+    return mappers.to_auto_response(found)
 
 
 @router.post(
